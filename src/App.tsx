@@ -1,4 +1,3 @@
-import React from "react";
 import AuthGate from "./AuthGate";
 import TodayScreen from "./TodayScreen";
 
