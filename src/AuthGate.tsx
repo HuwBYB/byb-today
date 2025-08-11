@@ -45,12 +45,4 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           />
           <input
             type="password"
-            style={{ width: "100%", padding: 8, marginBottom: 8, border: "1px solid #ccc", borderRadius: 6 }}
-            placeholder="Password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-          />
-          {err && <div style={{ color: "red", marginBottom: 8 }}>{err}</div>}
-          <button style={{ width: "100%", padding: 10, border: "1px solid #333", borderRadius: 6 }}>Sign in</button>
-          <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
-            Use the email/password you created in Supab
+            style={{ width: "100%", p
