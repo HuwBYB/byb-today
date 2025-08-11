@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-export default function AuthGate({ children }: { children: ReactNode }) {
+export default function AuthGate({ children }: { children: any }) {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<any>(null);
   const [email, setEmail] = useState("");
@@ -20,7 +19,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  async function signIn(e: React.FormEvent) {
+  async function signIn(e: any) {
     e.preventDefault();
     setErr(null);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -45,4 +44,26 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           />
           <input
             type="password"
-            style={{ width: "100%", p
+            style={{ width: "100%", padding: 8, marginBottom: 8, border: "1px solid #ccc", borderRadius: 6 }}
+            placeholder="Password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+          />
+          {err && <div style={{ color: "red", marginBottom: 8 }}>{err}</div>}
+          <button style={{ width: "100%", padding: 10, border: "1px solid #333", borderRadius: 6 }}>Sign in</button>
+          <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
+            Use the email/password you created in Supabase → Authentication → Users.
+          </div>
+        </form>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div style={{ padding: 12, textAlign: "right" }}>
+        <button onClick={signOut} style={{ fontSize: 12, textDecoration: "underline" }}>Sign out</button>
+      </div>
+      {children}
+    </div>
+  );
+}
