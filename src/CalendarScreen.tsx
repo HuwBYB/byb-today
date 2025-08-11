@@ -6,11 +6,9 @@ type ItemType = "task" | "daily_action";
 function toISO(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
-
 function firstOfMonth(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), 1);
 }
-
 function monthGridStartMonday(first: Date) {
   // JS getDay(): 0=Sun..6=Sat → convert to Mon=0..Sun=6
   const dowMon0 = (first.getDay() + 6) % 7;
@@ -33,10 +31,7 @@ export default function CalendarScreen() {
   // Who am I?
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
-      if (error) {
-        setErr(error.message);
-        return;
-      }
+      if (error) { setErr(error.message); return; }
       setUserId(data.user?.id ?? null);
     });
   }, []);
@@ -62,30 +57,32 @@ export default function CalendarScreen() {
   const gridStartISO = grid.length ? grid[0].iso : toISO(monthAnchor);
   const gridEndISO = grid.length ? grid[grid.length - 1].iso : toISO(monthAnchor);
 
-  // Fetch counts for visible grid
+  // Fetch counts for visible grid (async/await — no .finally())
   useEffect(() => {
     if (!userId || !gridStartISO || !gridEndISO) return;
-    setLoadingCounts(true);
-    setErr(null);
-    supabase
-      .from("calendar_counts_v")
-      .select("*")
-      .eq("user_id", userId)
-      .gte("item_date", gridStartISO)
-      .lte("item_date", gridEndISO)
-      .then(({ data, error }) => {
+    let cancelled = false;
+    (async () => {
+      setLoadingCounts(true);
+      setErr(null);
+      try {
+        const { data, error } = await supabase
+          .from("calendar_counts_v")
+          .select("*")
+          .eq("user_id", userId)
+          .gte("item_date", gridStartISO)
+          .lte("item_date", gridEndISO);
         if (error) {
-          setErr(error.message);
-          setCounts({});
+          if (!cancelled) { setErr(error.message); setCounts({}); }
           return;
         }
         const map: Record<string, number> = {};
-        (data || []).forEach((row: any) => {
-          map[row.item_date] = row.item_count;
-        });
-        setCounts(map);
-      })
-      .finally(() => setLoadingCounts(false));
+        (data || []).forEach((row: any) => { map[row.item_date] = row.item_count; });
+        if (!cancelled) setCounts(map);
+      } finally {
+        if (!cancelled) setLoadingCounts(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [userId, gridStartISO, gridEndISO]);
 
   // Keep selected day in current grid
@@ -108,18 +105,11 @@ export default function CalendarScreen() {
       .eq("item_date", iso)
       .order("priority", { ascending: false })
       .order("created_at", { ascending: true });
-    if (error) {
-      setErr(error.message);
-      setItems([]);
-    } else {
-      setItems(data || []);
-    }
+    if (error) { setErr(error.message); setItems([]); }
+    else { setItems(data || []); }
     setLoadingItems(false);
   }
-
-  useEffect(() => {
-    if (userId && selectedISO) loadDay(selectedISO);
-  }, [userId, selectedISO]);
+  useEffect(() => { if (userId && selectedISO) loadDay(selectedISO); }, [userId, selectedISO]);
 
   function prevMonth() {
     setMonthAnchor(new Date(monthAnchor.getFullYear(), monthAnchor.getMonth() - 1, 1));
@@ -133,7 +123,6 @@ export default function CalendarScreen() {
     const { error } = await supabase.from(table).update({ status: "done" }).eq("id", id);
     if (!error) loadDay(selectedISO);
   }
-
   async function setFocus(itemType: ItemType, id: number, isFocus: boolean) {
     const table = itemType === "task" ? "tasks" : "daily_actions";
     const { error } = await supabase.from(table).update({ priority: isFocus ? 2 : 0 }).eq("id", id);
@@ -153,9 +142,7 @@ export default function CalendarScreen() {
       {/* Week labels */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, marginBottom: 6 }}>
         {weekLabels.map((w) => (
-          <div key={w} style={{ textAlign: "center", fontSize: 12, color: "#666" }}>
-            {w}
-          </div>
+          <div key={w} style={{ textAlign: "center", fontSize: 12, color: "#666" }}>{w}</div>
         ))}
       </div>
 
@@ -179,15 +166,7 @@ export default function CalendarScreen() {
               }}
               title={`${cell.iso}${count ? ` — ${count} item(s)` : ""}`}
             >
-              <div
-                style={{
-                  position: "absolute",
-                  top: 6,
-                  left: 8,
-                  fontSize: 12,
-                  color: cell.inMonth ? "#333" : "#aaa",
-                }}
-              >
+              <div style={{ position: "absolute", top: 6, left: 8, fontSize: 12, color: cell.inMonth ? "#333" : "#aaa" }}>
                 {cell.date.getDate()}
               </div>
               {!loadingCounts && count > 0 ? (
