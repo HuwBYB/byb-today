@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 export default function AuthGate({ children }: { children: ReactNode }) {
@@ -26,6 +27,10 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     if (error) setErr(error.message);
   }
 
+  async function signOut() {
+    await supabase.auth.signOut();
+  }
+
   if (loading) return <div style={{ padding: 24 }}>Loading…</div>;
   if (!session) {
     return (
@@ -48,12 +53,4 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           {err && <div style={{ color: "red", marginBottom: 8 }}>{err}</div>}
           <button style={{ width: "100%", padding: 10, border: "1px solid #333", borderRadius: 6 }}>Sign in</button>
           <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
-            Use the email/password you created in Supabase → Authentication → Users.
-          </div>
-        </form>
-      </div>
-    );
-  }
-  return <>{children}</>;
-}
-
+            Use the email/password you created in Supab
