@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-export default function AuthGate({ children }: { children: React.ReactNode }) {
+export default function AuthGate({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<any>(null);
   const [email, setEmail] = useState("");
@@ -56,3 +56,4 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   }
   return <>{children}</>;
 }
+
