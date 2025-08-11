@@ -5,6 +5,7 @@ import CalendarScreen from "./CalendarScreen";
 
 export default function App() {
   const [tab, setTab] = useState<"today" | "calendar">("today");
+  const [selectedDateISO, setSelectedDateISO] = useState<string | null>(null);
 
   return (
     <AuthGate>
@@ -16,7 +17,17 @@ export default function App() {
           Calendar
         </button>
       </div>
-      {tab === "today" ? <TodayScreen /> : <CalendarScreen />}
+
+      {tab === "today" ? (
+        <TodayScreen externalDateISO={selectedDateISO ?? undefined} />
+      ) : (
+        <CalendarScreen
+          onSelectDate={(iso) => {
+            setSelectedDateISO(iso);
+            setTab("today");
+          }}
+        />
+      )}
     </AuthGate>
   );
 }
