@@ -3,8 +3,12 @@ import { supabase } from "./lib/supabaseClient";
 
 type ItemType = "task" | "daily_action";
 
+// local-date ISO (yyyy-mm-dd)
 function toISO(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 }
 function firstOfMonth(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -17,7 +21,11 @@ function monthGridStartMonday(first: Date) {
   return start;
 }
 
-export default function CalendarScreen() {
+export default function CalendarScreen({
+  onSelectDate,
+}: {
+  onSelectDate?: (iso: string) => void;
+}) {
   const [userId, setUserId] = useState<string | null>(null);
   const [monthAnchor, setMonthAnchor] = useState<Date>(firstOfMonth(new Date()));
   const [selectedISO, setSelectedISO] = useState<string>(toISO(new Date()));
@@ -57,7 +65,7 @@ export default function CalendarScreen() {
   const gridStartISO = grid.length ? grid[0].iso : toISO(monthAnchor);
   const gridEndISO = grid.length ? grid[grid.length - 1].iso : toISO(monthAnchor);
 
-  // Fetch counts for visible grid (async/await — no .finally())
+  // Fetch counts for visible grid (async/await — avoids .finally typing)
   useEffect(() => {
     if (!userId || !gridStartISO || !gridEndISO) return;
     let cancelled = false;
@@ -155,7 +163,10 @@ export default function CalendarScreen() {
           return (
             <button
               key={cell.iso}
-              onClick={() => setSelectedISO(cell.iso)}
+              onClick={() => {
+                setSelectedISO(cell.iso);
+                if (onSelectDate) onSelectDate(cell.iso); // NEW: tell parent
+              }}
               style={{
                 position: "relative",
                 height: 72,
