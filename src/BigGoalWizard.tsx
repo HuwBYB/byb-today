@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-// --- date helpers (all local time) ---
+// ---- date helpers (local time) ----
 function toISO(d: Date) {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -20,11 +20,9 @@ function daysBetweenInclusive(a: Date, b: Date) {
   return Math.floor(ms / 86400000) + 1;
 }
 function lastDayOfMonth(year: number, month0: number) {
-  // month0 is 0-11; day 0 of next month = last day of this month
   return new Date(year, month0 + 1, 0).getDate();
 }
-// Add N months, keeping the same day-of-month when possible.
-// If that day doesn't exist (e.g., 31st in Feb), clamp to the month's last day.
+// Add N months, keeping same day-of-month when possible (clamp to month end if needed)
 function addMonthsClamped(base: Date, months: number, anchorDay?: number) {
   const a = anchorDay ?? base.getDate();
   const y = base.getFullYear();
@@ -35,10 +33,7 @@ function addMonthsClamped(base: Date, months: number, anchorDay?: number) {
   return new Date(first.getFullYear(), first.getMonth(), day);
 }
 
-type Props = {
-  onClose: () => void;
-  onCreated: () => void;
-};
+type Props = { onClose: () => void; onCreated: () => void };
 
 export default function BigGoalWizard({ onClose, onCreated }: Props) {
   const todayISO = useMemo(() => toISO(new Date()), []);
@@ -52,7 +47,7 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // halfway = midpoint between start and target (calendar days)
+  // halfway = midpoint (calendar days)
   const computedHalfDate = useMemo(() => {
     if (!targetDate) return "";
     const a = fromISO(startDate);
@@ -62,7 +57,7 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
     return toISO(mid);
   }, [startDate, targetDate]);
 
-  // Preview counts using the same logic as seeding
+  // Live estimate of how many tasks we'll create
   const previewCounts = useMemo(() => {
     if (!targetDate) return { total: 0, daily: 0, weekly: 0, monthly: 0, milestones: 0 };
     const start = fromISO(startDate);
@@ -94,6 +89,7 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
 
     let daily = 0;
     if (dailyCommit.trim()) {
+      // from today (or start if future) to target
       const from = clampToLocalDay(new Date(Math.max(new Date().getTime(), start.getTime())));
       if (from <= end) daily = daysBetweenInclusive(from, end);
     }
@@ -140,10 +136,10 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
 
       const tasks: any[] = [];
 
-      // milestones (priority 2)
+      // Milestones (priority 2 + BIG GOAL prefix)
       tasks.push({
         user_id: userId,
-        title: goal.title,
+        title: `BIG GOAL — Target: ${goal.title}`,
         due_date: targetDate,
         source: "big_goal_target",
         priority: 2,
@@ -151,21 +147,21 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
       if (computedHalfDate && halfwayNote.trim()) {
         tasks.push({
           user_id: userId,
-          title: `Halfway: ${halfwayNote.trim()}`,
+          title: `BIG GOAL — Halfway: ${halfwayNote.trim()}`,
           due_date: computedHalfDate,
           source: "big_goal_halfway",
           priority: 2,
         });
       }
 
-      // monthly: start next month on same DOM (clamped)
+      // Monthly: start next month (clamped to DOM)
       if (monthlyCommit.trim()) {
         const anchor = start.getDate();
         let d = addMonthsClamped(start, 1, anchor);
         while (d <= end) {
           tasks.push({
             user_id: userId,
-            title: `Monthly: ${monthlyCommit.trim()}`,
+            title: `BIG GOAL — Monthly: ${monthlyCommit.trim()}`,
             due_date: toISO(d),
             source: "big_goal_monthly",
             priority: 2,
@@ -174,14 +170,14 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
         }
       }
 
-      // weekly: start next week (same weekday)
+      // Weekly: start next week (same weekday)
       if (weeklyCommit.trim()) {
         let d = new Date(start);
         d.setDate(d.getDate() + 7);
         while (d <= end) {
           tasks.push({
             user_id: userId,
-            title: `Weekly: ${weeklyCommit.trim()}`,
+            title: `BIG GOAL — Weekly: ${weeklyCommit.trim()}`,
             due_date: toISO(d),
             source: "big_goal_weekly",
             priority: 2,
@@ -190,13 +186,13 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
         }
       }
 
-      // daily: from today (or start if in the future) through target
+      // Daily: from today (or start if in the future) through target
       if (dailyCommit.trim()) {
         let d = clampToLocalDay(new Date(Math.max(new Date().getTime(), start.getTime())));
         while (d <= end) {
           tasks.push({
             user_id: userId,
-            title: `Daily: ${dailyCommit.trim()}`,
+            title: `BIG GOAL — Daily: ${dailyCommit.trim()}`,
             due_date: toISO(d),
             source: "big_goal_daily",
             priority: 2,
@@ -205,10 +201,10 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
         }
       }
 
-      // insert in safe chunks
-      const chunkSize = 500;
-      for (let i = 0; i < tasks.length; i += chunkSize) {
-        const { error: terr } = await supabase.from("tasks").insert(tasks.slice(i, i + chunkSize));
+      // Insert in safe chunks (big goals can mean many rows)
+      const chunk = 500;
+      for (let i = 0; i < tasks.length; i += chunk) {
+        const { error: terr } = await supabase.from("tasks").insert(tasks.slice(i, i + chunk));
         if (terr) throw terr;
       }
 
@@ -320,8 +316,8 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
         <div style={{ fontSize: 12, color: "#666", marginTop: 6 }}>
           {previewCounts.total > 0 && (
             <>
-              Will create approximately <b>{previewCounts.total}</b> items —
-              Daily {previewCounts.daily}, Weekly {previewCounts.weekly}, Monthly {previewCounts.monthly}, Milestones {previewCounts.milestones}.
+              Will create approximately <b>{previewCounts.total}</b> items — Daily {previewCounts.daily},
+              Weekly {previewCounts.weekly}, Monthly {previewCounts.monthly}, Milestones {previewCounts.milestones}.
             </>
           )}
         </div>
