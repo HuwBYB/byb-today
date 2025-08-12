@@ -10,6 +10,8 @@ type Goal = {
   status: "active" | "completed" | "archived";
   target_date: string | null;
   goal_type?: "regular" | "big";
+  category?: "health" | "personal" | "financial" | "career" | "other";
+  category_color?: string | null;
 };
 
 type Step = {
@@ -51,8 +53,7 @@ export default function GoalsScreen() {
 
   async function loadGoals() {
     if (!userId) return;
-    setLoadingGoals(true);
-    setGoalErr(null);
+    setLoadingGoals(true); setGoalErr(null);
     const { data, error } = await supabase
       .from("goals")
       .select("*")
@@ -89,6 +90,8 @@ export default function GoalsScreen() {
       target_date: newGoalDate || null,
       status: "active",
       goal_type: "regular",
+      category: "other",
+      category_color: "#6b7280",
     });
     if (error) { setGoalErr(error.message); return; }
     setNewGoalTitle(""); setNewGoalDate("");
@@ -116,17 +119,20 @@ export default function GoalsScreen() {
     if (!error && selectedGoalId) loadSteps(selectedGoalId);
   }
 
-  // Prefix with BIG GOAL if the selected goal is 'big'
+  // Send to Today — include goal category + color and pin (priority 2)
   async function sendStepToToday(step: Step) {
     if (!userId) return;
     const goal = selectedGoal;
-    const title = goal?.goal_type === "big" ? `BIG GOAL — ${step.title}` : step.title;
+    const isBig = goal?.goal_type === "big";
+    const title = isBig ? `BIG GOAL — ${step.title}` : step.title;
     const { error } = await supabase.from("tasks").insert({
       user_id: userId,
       title,
       due_date: step.due_date || todayISO(),
-      source: goal?.goal_type === "big" ? "big_goal_step" : "goal",
+      source: isBig ? "big_goal_step" : "goal",
       priority: 2,
+      category: goal?.category || null,
+      category_color: goal?.category_color || null,
     });
     if (error) { setGoalErr(error.message); return; }
     alert("Sent to Today ✅");
@@ -134,14 +140,17 @@ export default function GoalsScreen() {
 
   async function sendGoalToToday(goal: Goal) {
     if (!userId) return;
-    const title = goal.goal_type === "big" ? `BIG GOAL — ${goal.title}` : goal.title;
-    const src = goal.goal_type === "big" ? "big_goal_target" : "goal_target";
+    const isBig = goal.goal_type === "big";
+    const title = isBig ? `BIG GOAL — ${goal.title}` : goal.title;
+    const src = isBig ? "big_goal_target" : "goal_target";
     const { error } = await supabase.from("tasks").insert({
       user_id: userId,
       title,
       due_date: goal.target_date || todayISO(),
       source: src,
       priority: 2,
+      category: goal.category || null,
+      category_color: goal.category_color || null,
     });
     if (error) { setGoalErr(error.message); return; }
     alert("Goal sent to Today ✅");
@@ -165,6 +174,7 @@ export default function GoalsScreen() {
         </div>
       )}
 
+      {/* Quick goal */}
       <div style={{ padding: 12, border: "1px solid #ddd", borderRadius: 8, marginBottom: 16 }}>
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>Create a new goal</h2>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -175,6 +185,7 @@ export default function GoalsScreen() {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 12 }}>
+        {/* Goals list */}
         <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 8, maxHeight: 420, overflow: "auto" }}>
           <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>Your goals</div>
           {loadingGoals ? <div>Loading…</div> : goals.length === 0 ? (
@@ -183,11 +194,28 @@ export default function GoalsScreen() {
             <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
               {goals.map((g) => (
                 <li key={g.id}>
-                  <button onClick={() => setSelectedGoalId(g.id)} style={{ width: "100%", textAlign: "left", padding: 8, marginBottom: 6, borderRadius: 8, border: "1px solid #eee", background: selectedGoalId === g.id ? "#f5f5f5" : "#fff" }}>
-                    <div style={{ fontWeight: 600 }}>{g.title}</div>
-                    <div style={{ fontSize: 12, color: "#666" }}>
-                      {(g.goal_type || "regular")}{g.target_date ? ` • target ${g.target_date}` : ""}
+                  <button
+                    onClick={() => setSelectedGoalId(g.id)}
+                    style={{
+                      width: "100%", textAlign: "left", padding: 8, marginBottom: 6,
+                      borderRadius: 8, border: "1px solid #eee",
+                      background: selectedGoalId === g.id ? "#f5f5f5" : "#fff",
+                      display: "flex", justifyContent: "space-between", alignItems: "center"
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{g.title}</div>
+                      <div style={{ fontSize: 12, color: "#666" }}>
+                        {(g.goal_type || "regular")}{g.target_date ? ` • target ${g.target_date}` : ""}
+                      </div>
                     </div>
+                    <span
+                      title={g.category || "other"}
+                      style={{
+                        display: "inline-block", width: 14, height: 14, borderRadius: 999,
+                        background: g.category_color || "#6b7280", border: "1px solid #ccc"
+                      }}
+                    />
                   </button>
                 </li>
               ))}
@@ -195,6 +223,7 @@ export default function GoalsScreen() {
           )}
         </div>
 
+        {/* Steps pane */}
         <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
           {!selectedGoal ? (
             <div style={{ color: "#666" }}>Select a goal to add steps.</div>
@@ -203,20 +232,25 @@ export default function GoalsScreen() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <div>
                   <div style={{ fontWeight: 600 }}>{selectedGoal.title}</div>
-                  <div style={{ fontSize: 12, color: "#666" }}>{selectedGoal.status}{selectedGoal.target_date ? ` • target ${selectedGoal.target_date}` : ""}</div>
+                  <div style={{ fontSize: 12, color: "#666" }}>
+                    {selectedGoal.status}{selectedGoal.target_date ? ` • target ${selectedGoal.target_date}` : ""}
+                  </div>
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <span title={selectedGoal.category || "other"} style={{ width: 14, height: 14, borderRadius: 999, background: selectedGoal.category_color || "#6b7280", border: "1px solid #ccc" }} />
                   <button onClick={() => loadSteps(selectedGoal.id)}>Refresh</button>
                   <button onClick={() => sendGoalToToday(selectedGoal)}>Send Goal to Today</button>
                 </div>
               </div>
 
+              {/* Add step */}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
                 <input placeholder="Step title (e.g., Email 10 beta users)" value={newStepTitle} onChange={(e) => setNewStepTitle(e.target.value)} style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6, flex: 1, minWidth: 240 }} />
                 <input type="date" value={newStepDate} onChange={(e) => setNewStepDate(e.target.value)} style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6 }} />
                 <button onClick={addStep} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 6 }}>Add Step</button>
               </div>
 
+              {/* Steps list */}
               {loadingSteps ? <div>Loading…</div> : steps.length === 0 ? (
                 <div style={{ color: "#666" }}>No steps yet.</div>
               ) : (
