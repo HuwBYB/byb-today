@@ -4,8 +4,9 @@ import TodayScreen from "./TodayScreen";
 import GoalsScreen from "./GoalsScreen";
 import CalendarScreen from "./CalendarScreen";
 import AlfredScreen from "./AlfredScreen";
+import VisionBoardScreen from "./VisionBoardScreen";
 
-type Tab = "today" | "goals" | "calendar" | "alfred";
+type Tab = "today" | "goals" | "calendar" | "vision" | "alfred";
 
 function todayISO() {
   const d = new Date();
@@ -26,23 +27,79 @@ export default function App() {
 
   return (
     <AuthGate>
-      <div style={{ maxWidth: 1100, margin: "0 auto", padding: 12 }}>
-        {/* Top nav */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-          <button onClick={gotoToday} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 8, background: tab === "today" ? "#f5f5f5" : "#fff" }}>Today</button>
-          <button onClick={() => setTab("goals")} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 8, background: tab === "goals" ? "#f5f5f5" : "#fff" }}>Goals</button>
-          <button onClick={() => setTab("calendar")} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 8, background: tab === "calendar" ? "#f5f5f5" : "#fff" }}>Calendar</button>
-          <button onClick={() => setTab("alfred")} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 8, background: tab === "alfred" ? "#f5f5f5" : "#fff" }}>Alfred</button>
+      {/* Top bar */}
+      <div className="topbar">
+        <div
+          className="container"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            paddingTop: 10,
+            paddingBottom: 10,
+          }}
+        >
+          <div className="brand">
+            <span className="logo" />
+            Best You Blueprint
+          </div>
+          <nav className="tabs">
+            <button
+              className="tab"
+              aria-current={tab === "today" ? "page" : undefined}
+              onClick={gotoToday}
+            >
+              Today
+            </button>
+            <button
+              className="tab"
+              aria-current={tab === "goals" ? "page" : undefined}
+              onClick={() => setTab("goals")}
+            >
+              Goals
+            </button>
+            <button
+              className="tab"
+              aria-current={tab === "calendar" ? "page" : undefined}
+              onClick={() => setTab("calendar")}
+            >
+              Calendar
+            </button>
+            <button
+              className="tab"
+              aria-current={tab === "vision" ? "page" : undefined}
+              onClick={() => setTab("vision")}
+            >
+              Vision
+            </button>
+            <button
+              className="tab"
+              aria-current={tab === "alfred" ? "page" : undefined}
+              onClick={() => setTab("alfred")}
+            >
+              Alfred
+            </button>
+          </nav>
         </div>
+      </div>
 
-        {/* Screens */}
+      {/* Screen container */}
+      <div className="container" style={{ paddingTop: 16 }}>
         {tab === "today" && <TodayScreen externalDateISO={selectedDateISO} />}
+
         {tab === "goals" && <GoalsScreen />}
+
         {tab === "calendar" && (
           <CalendarScreen
-            onSelectDate={(iso) => { setSelectedDateISO(iso); setTab("today"); }}
+            onSelectDate={(iso) => {
+              setSelectedDateISO(iso);
+              setTab("today");
+            }}
           />
         )}
+
+        {tab === "vision" && <VisionBoardScreen />}
+
         {tab === "alfred" && <AlfredScreen />}
       </div>
     </AuthGate>
