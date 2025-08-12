@@ -11,6 +11,45 @@ function todayISO() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+// ---- recurrence helpers (local time) ----
+function fromISO(s: string) {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
+}
+function toISO(d: Date) {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+function addDaysISO(iso: string, days: number) {
+  const d = fromISO(iso);
+  d.setDate(d.getDate() + days);
+  return toISO(d);
+}
+function lastDayOfMonth(year: number, month0: number) {
+  return new Date(year, month0 + 1, 0).getDate();
+}
+function addMonthsClampedISO(iso: string, months: number) {
+  const d = fromISO(iso);
+  const anchor = d.getDate();
+  const y = d.getFullYear();
+  const m = d.getMonth() + months;
+  const first = new Date(y, m, 1);
+  const ld = lastDayOfMonth(first.getFullYear(), first.getMonth());
+  const day = Math.min(anchor, ld);
+  return toISO(new Date(first.getFullYear(), first.getMonth(), day));
+}
+function nextDue(iso: string, freq: string) {
+  switch (freq) {
+    case "daily": return addDaysISO(iso, 1);
+    case "weekly": return addDaysISO(iso, 7);
+    case "monthly": return addMonthsClampedISO(iso, 1);
+    case "yearly": return addMonthsClampedISO(iso, 12);
+    default: return iso;
+  }
+}
+
 export default function TodayScreen({ externalDateISO }: { externalDateISO?: string }) {
   const [userId, setUserId] = useState<string | null>(null);
   const [dateISO, setDateISO] = useState<string>(todayISO());
@@ -19,8 +58,12 @@ export default function TodayScreen({ externalDateISO }: { externalDateISO?: str
   const [affirmationText, setAffirmationText] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(true);
   const [err, setErr] = useState<string | null>(null);
+
+  // Add Task form
   const [newTask, setNewTask] = useState<string>("");
   const [newTaskDate, setNewTaskDate] = useState<string>(todayISO());
+  const [isRecurring, setIsRecurring] = useState<boolean>(false);
+  const [recurFreq, setRecurFreq] = useState<"daily" | "weekly" | "monthly" | "yearly">("daily");
 
   // pick up date from Calendar when provided
   useEffect(() => {
@@ -67,7 +110,6 @@ export default function TodayScreen({ externalDateISO }: { externalDateISO?: str
       setLoading(false);
     }
   }
-
   useEffect(() => { if (userId) refresh(); }, [userId, dateISO]);
 
   const topPriority = useMemo(() => items.filter(i => i.priority === 2), [items]);
@@ -75,23 +117,71 @@ export default function TodayScreen({ externalDateISO }: { externalDateISO?: str
 
   async function addTask() {
     if (!newTask.trim() || !userId) return;
-    const { error } = await supabase.from("tasks").insert({
+    const payload: any = {
       user_id: userId,
       title: newTask.trim(),
       due_date: newTaskDate,
-      source: "manual"
-    });
+      source: "manual",
+    };
+    if (isRecurring) {
+      payload.is_recurring = true;
+      payload.recur_freq = recurFreq;
+    }
+    const { error } = await supabase.from("tasks").insert(payload);
     if (error) { setErr(error.message); return; }
     setNewTask("");
+    setIsRecurring(false);
+    setRecurFreq("daily");
     setNewTaskDate(dateISO);
     refresh();
   }
 
+  // mark item complete; if recurring task, spawn the next occurrence
   async function completeItem(itemType: ItemType, id: number) {
-    const table = itemType === "task" ? "tasks" : "daily_actions";
-    const { error } = await supabase.from(table).update({ status: "done" }).eq("id", id);
-    if (error) { setErr(error.message); return; }
-    refresh();
+    if (itemType !== "task") {
+      // if you later add daily_actions, handle separately
+      const { error } = await supabase.from("daily_actions").update({ status: "done" }).eq("id", id);
+      if (error) { setErr(error.message); return; }
+      refresh();
+      return;
+    }
+
+    try {
+      // get the task (to know if recurring, its freq, and its due_date)
+      const { data: row, error: selErr } = await supabase
+        .from("tasks")
+        .select("id,user_id,title,priority,source,due_date,is_recurring,recur_freq,recur_until")
+        .eq("id", id)
+        .single();
+      if (selErr) throw selErr;
+
+      // mark done
+      const { error: upErr } = await supabase.from("tasks").update({ status: "done" }).eq("id", id);
+      if (upErr) throw upErr;
+
+      // if recurring, create the next one
+      if (row?.is_recurring && row.recur_freq && row.due_date) {
+        const next = nextDue(row.due_date, row.recur_freq);
+        // respect optional end date
+        const until = row.recur_until as string | null;
+        if (!until || next <= until) {
+          const { error: insErr } = await supabase.from("tasks").insert({
+            user_id: row.user_id,
+            title: row.title,
+            due_date: next,
+            source: row.source || "manual",
+            priority: row.priority ?? 0,
+            is_recurring: true,
+            recur_freq: row.recur_freq,
+            recur_until: until || null,
+          });
+          if (insErr) throw insErr;
+        }
+      }
+      refresh();
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    }
   }
 
   async function setFocus(itemType: ItemType, id: number, isFocus: boolean) {
@@ -189,12 +279,12 @@ export default function TodayScreen({ externalDateISO }: { externalDateISO?: str
 
       <div style={{ marginTop: 16, padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
         <h2 style={{ fontSize: 18, marginBottom: 8 }}>Add Task</h2>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, alignItems: "center" }}>
           <input
             placeholder="Task title (e.g., Buy gift for Carys)"
             value={newTask}
             onChange={e => setNewTask(e.target.value)}
-            style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6, flex: 1, minWidth: 200 }}
+            style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6 }}
           />
           <input
             type="date"
@@ -203,6 +293,27 @@ export default function TodayScreen({ externalDateISO }: { externalDateISO?: str
             style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6 }}
           />
           <button onClick={addTask} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 6 }}>Add</button>
+        </div>
+
+        <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input type="checkbox" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} />
+            Repeat
+          </label>
+          <select
+            disabled={!isRecurring}
+            value={recurFreq}
+            onChange={e => setRecurFreq(e.target.value as any)}
+            style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6 }}
+          >
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+          <span style={{ fontSize: 12, color: "#666" }}>
+            {isRecurring ? "Next one auto-creates when you mark it Done." : " "}
+          </span>
         </div>
       </div>
 
