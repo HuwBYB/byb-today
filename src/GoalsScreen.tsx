@@ -120,6 +120,8 @@ export default function GoalsScreen() {
   }
 
   // Send to Today = create a normal task with source 'goal'
+  // NOTE: we intentionally DO NOT set `status` so the DB default is used,
+  // which avoids the "tasks_status_check" constraint error.
   async function sendStepToToday(step: Step) {
     if (!userId) return;
     const { error } = await supabase.from("tasks").insert({
@@ -127,8 +129,7 @@ export default function GoalsScreen() {
       title: step.title,
       due_date: step.due_date || todayISO(),
       source: "goal",
-      status: "todo",
-      priority: 0,
+      priority: 0, // change to 2 if you want it to land in Top 3
     });
     if (error) { setGoalErr(error.message); return; }
     alert("Sent to Today ✅");
@@ -165,7 +166,7 @@ export default function GoalsScreen() {
         </div>
       </div>
 
-      {/* List goals */}
+      {/* List goals + steps */}
       <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 12 }}>
         <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 8, maxHeight: 420, overflow: "auto" }}>
           <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>Your goals</div>
@@ -200,7 +201,6 @@ export default function GoalsScreen() {
           )}
         </div>
 
-        {/* Steps panel */}
         <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
           {!selectedGoal ? (
             <div style={{ color: "#666" }}>Select a goal to add steps.</div>
@@ -216,7 +216,7 @@ export default function GoalsScreen() {
                 <button onClick={() => loadSteps(selectedGoal.id)}>Refresh</button>
               </div>
 
-              {/* add step */}
+              {/* Add step */}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
                 <input
                   placeholder="Step title (e.g., Email 10 beta users)"
@@ -235,7 +235,7 @@ export default function GoalsScreen() {
                 </button>
               </div>
 
-              {/* steps list */}
+              {/* Steps list */}
               {loadingSteps ? (
                 <div>Loading…</div>
               ) : steps.length === 0 ? (
