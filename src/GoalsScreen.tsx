@@ -22,9 +22,7 @@ type Step = {
   status: "todo" | "in_progress" | "done";
 };
 
-function todayISO() {
-  return new Date().toISOString().slice(0, 10);
-}
+function todayISO() { return new Date().toISOString().slice(0,10); }
 
 export default function GoalsScreen() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -82,7 +80,7 @@ export default function GoalsScreen() {
   }
   useEffect(() => { if (selectedGoalId) loadSteps(selectedGoalId); }, [selectedGoalId]);
 
-  // Quick "regular" goal (no seeding; use Send Goal to Today if needed)
+  // Quick regular goal
   async function createGoal() {
     if (!userId || !newGoalTitle.trim()) return;
     const { error } = await supabase.from("goals").insert({
@@ -114,21 +112,20 @@ export default function GoalsScreen() {
   }
 
   async function markStepDone(stepId: number, done: boolean) {
-    const { error } = await supabase
-      .from("goal_steps")
-      .update({ status: done ? "done" : "todo" })
-      .eq("id", stepId);
+    const { error } = await supabase.from("goal_steps").update({ status: done ? "done" : "todo" }).eq("id", stepId);
     if (!error && selectedGoalId) loadSteps(selectedGoalId);
   }
 
-  // Pin goal/step tasks to Top Priority (priority: 2)
+  // Prefix with BIG GOAL if the selected goal is 'big'
   async function sendStepToToday(step: Step) {
     if (!userId) return;
+    const goal = selectedGoal;
+    const title = goal?.goal_type === "big" ? `BIG GOAL — ${step.title}` : step.title;
     const { error } = await supabase.from("tasks").insert({
       user_id: userId,
-      title: step.title,
+      title,
       due_date: step.due_date || todayISO(),
-      source: "goal",
+      source: goal?.goal_type === "big" ? "big_goal_step" : "goal",
       priority: 2,
     });
     if (error) { setGoalErr(error.message); return; }
@@ -137,27 +134,25 @@ export default function GoalsScreen() {
 
   async function sendGoalToToday(goal: Goal) {
     if (!userId) return;
+    const title = goal.goal_type === "big" ? `BIG GOAL — ${goal.title}` : goal.title;
+    const src = goal.goal_type === "big" ? "big_goal_target" : "goal_target";
     const { error } = await supabase.from("tasks").insert({
       user_id: userId,
-      title: goal.title,
+      title,
       due_date: goal.target_date || todayISO(),
-      source: "goal_target",
+      source: src,
       priority: 2,
     });
     if (error) { setGoalErr(error.message); return; }
     alert("Goal sent to Today ✅");
   }
 
-  const selectedGoal = useMemo(
-    () => goals.find(g => g.id === selectedGoalId) || null,
-    [goals, selectedGoalId]
-  );
+  const selectedGoal = useMemo(() => goals.find(g => g.id === selectedGoalId) || null, [goals, selectedGoalId]);
 
   return (
     <div style={{ padding: 16, maxWidth: 1000, margin: "0 auto" }}>
       <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 12 }}>Goals</h1>
 
-      {/* Big Goal wizard */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         <button onClick={() => setShowWizard(true)} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 8 }}>
           Create Big Goal (guided)
@@ -166,59 +161,29 @@ export default function GoalsScreen() {
 
       {showWizard && (
         <div style={{ marginBottom: 16 }}>
-          <BigGoalWizard
-            onClose={() => setShowWizard(false)}
-            onCreated={() => { setShowWizard(false); loadGoals(); }}
-          />
+          <BigGoalWizard onClose={() => setShowWizard(false)} onCreated={() => { setShowWizard(false); loadGoals(); }} />
         </div>
       )}
 
-      {/* Quick regular goal */}
       <div style={{ padding: 12, border: "1px solid #ddd", borderRadius: 8, marginBottom: 16 }}>
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>Create a new goal</h2>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <input
-            placeholder="Goal title (e.g., Launch BYB MVP)"
-            value={newGoalTitle}
-            onChange={(e) => setNewGoalTitle(e.target.value)}
-            style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6, flex: 1, minWidth: 240 }}
-          />
-          <input
-            type="date"
-            value={newGoalDate}
-            onChange={(e) => setNewGoalDate(e.target.value)}
-            style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6 }}
-          />
-          <button onClick={createGoal} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 6 }}>
-            Add Goal
-          </button>
+          <input placeholder="Goal title (e.g., Launch BYB MVP)" value={newGoalTitle} onChange={(e) => setNewGoalTitle(e.target.value)} style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6, flex: 1, minWidth: 240 }} />
+          <input type="date" value={newGoalDate} onChange={(e) => setNewGoalDate(e.target.value)} style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6 }} />
+          <button onClick={createGoal} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 6 }}>Add Goal</button>
         </div>
       </div>
 
-      {/* Goals + Steps */}
       <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 12 }}>
         <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 8, maxHeight: 420, overflow: "auto" }}>
           <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>Your goals</div>
-          {loadingGoals ? (
-            <div>Loading…</div>
-          ) : goals.length === 0 ? (
+          {loadingGoals ? <div>Loading…</div> : goals.length === 0 ? (
             <div style={{ color: "#666" }}>No goals yet.</div>
           ) : (
             <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
               {goals.map((g) => (
                 <li key={g.id}>
-                  <button
-                    onClick={() => setSelectedGoalId(g.id)}
-                    style={{
-                      width: "100%",
-                      textAlign: "left",
-                      padding: 8,
-                      marginBottom: 6,
-                      borderRadius: 8,
-                      border: "1px solid #eee",
-                      background: selectedGoalId === g.id ? "#f5f5f5" : "#fff",
-                    }}
-                  >
+                  <button onClick={() => setSelectedGoalId(g.id)} style={{ width: "100%", textAlign: "left", padding: 8, marginBottom: 6, borderRadius: 8, border: "1px solid #eee", background: selectedGoalId === g.id ? "#f5f5f5" : "#fff" }}>
                     <div style={{ fontWeight: 600 }}>{g.title}</div>
                     <div style={{ fontSize: 12, color: "#666" }}>
                       {(g.goal_type || "regular")}{g.target_date ? ` • target ${g.target_date}` : ""}
@@ -238,9 +203,7 @@ export default function GoalsScreen() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <div>
                   <div style={{ fontWeight: 600 }}>{selectedGoal.title}</div>
-                  <div style={{ fontSize: 12, color: "#666" }}>
-                    {selectedGoal.status}{selectedGoal.target_date ? ` • target ${selectedGoal.target_date}` : ""}
-                  </div>
+                  <div style={{ fontSize: 12, color: "#666" }}>{selectedGoal.status}{selectedGoal.target_date ? ` • target ${selectedGoal.target_date}` : ""}</div>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button onClick={() => loadSteps(selectedGoal.id)}>Refresh</button>
@@ -248,29 +211,13 @@ export default function GoalsScreen() {
                 </div>
               </div>
 
-              {/* Add step */}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                <input
-                  placeholder="Step title (e.g., Email 10 beta users)"
-                  value={newStepTitle}
-                  onChange={(e) => setNewStepTitle(e.target.value)}
-                  style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6, flex: 1, minWidth: 240 }}
-                />
-                <input
-                  type="date"
-                  value={newStepDate}
-                  onChange={(e) => setNewStepDate(e.target.value)}
-                  style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6 }}
-                />
-                <button onClick={addStep} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 6 }}>
-                  Add Step
-                </button>
+                <input placeholder="Step title (e.g., Email 10 beta users)" value={newStepTitle} onChange={(e) => setNewStepTitle(e.target.value)} style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6, flex: 1, minWidth: 240 }} />
+                <input type="date" value={newStepDate} onChange={(e) => setNewStepDate(e.target.value)} style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6 }} />
+                <button onClick={addStep} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 6 }}>Add Step</button>
               </div>
 
-              {/* Steps list */}
-              {loadingSteps ? (
-                <div>Loading…</div>
-              ) : steps.length === 0 ? (
+              {loadingSteps ? <div>Loading…</div> : steps.length === 0 ? (
                 <div style={{ color: "#666" }}>No steps yet.</div>
               ) : (
                 <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
@@ -278,15 +225,11 @@ export default function GoalsScreen() {
                     <li key={s.id} style={{ display: "flex", justifyContent: "space-between", border: "1px solid #eee", borderRadius: 8, padding: 8, marginBottom: 8 }}>
                       <div>
                         <div style={{ fontWeight: 600 }}>{s.title}</div>
-                        <div style={{ fontSize: 12, color: "#666" }}>
-                          {s.status}{s.due_date ? ` • due ${s.due_date}` : ""}
-                        </div>
+                        <div style={{ fontSize: 12, color: "#666" }}>{s.status}{s.due_date ? ` • due ${s.due_date}` : ""}</div>
                       </div>
                       <div>
                         <button onClick={() => sendStepToToday(s)} style={{ marginRight: 8 }}>Send to Today</button>
-                        <button onClick={() => markStepDone(s.id, s.status !== "done")}>
-                          {s.status === "done" ? "Mark Todo" : "Mark Done"}
-                        </button>
+                        <button onClick={() => markStepDone(s.id, s.status !== "done")}>{s.status === "done" ? "Mark Todo" : "Mark Done"}</button>
                       </div>
                     </li>
                   ))}
