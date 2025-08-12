@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 type ItemType = "task" | "daily_action";
+type RecurFreq = "daily" | "weekly" | "monthly" | "yearly";
+type DailyMode = "7days" | "monfri";
 
 function todayISO() {
   const d = new Date();
@@ -40,9 +42,21 @@ function addMonthsClampedISO(iso: string, months: number) {
   const day = Math.min(anchor, ld);
   return toISO(new Date(first.getFullYear(), first.getMonth(), day));
 }
-function nextDue(iso: string, freq: string) {
+function nextDue(iso: string, freq: RecurFreq, weekdayOnly?: boolean) {
   switch (freq) {
-    case "daily": return addDaysISO(iso, 1);
+    case "daily": {
+      let next = addDaysISO(iso, 1);
+      if (weekdayOnly) {
+        // 0=Sun,1=Mon,2=Tue,3=Wed,4=Thu,5=Fri,6=Sat
+        while (true) {
+          const d = fromISO(next).getDay();
+          if (d === 0) next = addDaysISO(next, 1);       // Sun -> Mon
+          else if (d === 6) next = addDaysISO(next, 2);  // Sat -> Mon
+          else break; // Mon–Fri
+        }
+      }
+      return next;
+    }
     case "weekly": return addDaysISO(iso, 7);
     case "monthly": return addMonthsClampedISO(iso, 1);
     case "yearly": return addMonthsClampedISO(iso, 12);
@@ -63,7 +77,8 @@ export default function TodayScreen({ externalDateISO }: { externalDateISO?: str
   const [newTask, setNewTask] = useState<string>("");
   const [newTaskDate, setNewTaskDate] = useState<string>(todayISO());
   const [isRecurring, setIsRecurring] = useState<boolean>(false);
-  const [recurFreq, setRecurFreq] = useState<"daily" | "weekly" | "monthly" | "yearly">("daily");
+  const [recurFreq, setRecurFreq] = useState<RecurFreq>("daily");
+  const [dailyMode, setDailyMode] = useState<DailyMode>("7days");
 
   // pick up date from Calendar when provided
   useEffect(() => {
@@ -126,12 +141,14 @@ export default function TodayScreen({ externalDateISO }: { externalDateISO?: str
     if (isRecurring) {
       payload.is_recurring = true;
       payload.recur_freq = recurFreq;
+      payload.weekday_only = recurFreq === "daily" ? (dailyMode === "monfri") : false;
     }
     const { error } = await supabase.from("tasks").insert(payload);
     if (error) { setErr(error.message); return; }
     setNewTask("");
     setIsRecurring(false);
     setRecurFreq("daily");
+    setDailyMode("7days");
     setNewTaskDate(dateISO);
     refresh();
   }
@@ -139,7 +156,6 @@ export default function TodayScreen({ externalDateISO }: { externalDateISO?: str
   // mark item complete; if recurring task, spawn the next occurrence
   async function completeItem(itemType: ItemType, id: number) {
     if (itemType !== "task") {
-      // if you later add daily_actions, handle separately
       const { error } = await supabase.from("daily_actions").update({ status: "done" }).eq("id", id);
       if (error) { setErr(error.message); return; }
       refresh();
@@ -147,22 +163,18 @@ export default function TodayScreen({ externalDateISO }: { externalDateISO?: str
     }
 
     try {
-      // get the task (to know if recurring, its freq, and its due_date)
       const { data: row, error: selErr } = await supabase
         .from("tasks")
-        .select("id,user_id,title,priority,source,due_date,is_recurring,recur_freq,recur_until")
+        .select("id,user_id,title,priority,source,due_date,is_recurring,recur_freq,recur_until,weekday_only")
         .eq("id", id)
         .single();
       if (selErr) throw selErr;
 
-      // mark done
       const { error: upErr } = await supabase.from("tasks").update({ status: "done" }).eq("id", id);
       if (upErr) throw upErr;
 
-      // if recurring, create the next one
       if (row?.is_recurring && row.recur_freq && row.due_date) {
-        const next = nextDue(row.due_date, row.recur_freq);
-        // respect optional end date
+        const next = nextDue(row.due_date as string, row.recur_freq as RecurFreq, !!row.weekday_only);
         const until = row.recur_until as string | null;
         if (!until || next <= until) {
           const { error: insErr } = await supabase.from("tasks").insert({
@@ -172,8 +184,9 @@ export default function TodayScreen({ externalDateISO }: { externalDateISO?: str
             source: row.source || "manual",
             priority: row.priority ?? 0,
             is_recurring: true,
-            recur_freq: row.recur_freq,
+            recur_freq: row.recur_freq as RecurFreq,
             recur_until: until || null,
+            weekday_only: !!row.weekday_only,
           });
           if (insErr) throw insErr;
         }
@@ -191,7 +204,6 @@ export default function TodayScreen({ externalDateISO }: { externalDateISO?: str
     refresh();
   }
 
-  // save a brand-new active affirmation
   async function saveAffirmation() {
     if (!userId) return;
     const text = affirmationText.trim();
@@ -300,20 +312,37 @@ export default function TodayScreen({ externalDateISO }: { externalDateISO?: str
             <input type="checkbox" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} />
             Repeat
           </label>
+
           <select
             disabled={!isRecurring}
             value={recurFreq}
-            onChange={e => setRecurFreq(e.target.value as any)}
-            style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6 }}
+            onChange={e => setRecurFreq(e.target.value as RecurFreq)}
+            style={{ padding: 8, border: "1px solid " + (isRecurring ? "#ccc" : "#eee"), borderRadius: 6 }}
           >
             <option value="daily">Daily</option>
             <option value="weekly">Weekly</option>
             <option value="monthly">Monthly</option>
             <option value="yearly">Yearly</option>
           </select>
-          <span style={{ fontSize: 12, color: "#666" }}>
-            {isRecurring ? "Next one auto-creates when you mark it Done." : " "}
-          </span>
+
+          {/* Only show daily mode when Daily is selected */}
+          {isRecurring && recurFreq === "daily" && (
+            <select
+              value={dailyMode}
+              onChange={e => setDailyMode(e.target.value as DailyMode)}
+              style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6 }}
+              title="Choose 7 days or weekdays only"
+            >
+              <option value="7days">7 days</option>
+              <option value="monfri">Mon–Fri</option>
+            </select>
+          )}
+
+          {isRecurring && (
+            <span style={{ fontSize: 12, color: "#666" }}>
+              Next one auto-creates when you mark it Done.
+            </span>
+          )}
         </div>
       </div>
 
