@@ -118,7 +118,7 @@ export default function AlfredScreen() {
       .single<Thread>();
     if (error) { setErr(error.message); return null; }
     await loadThreads(persona);
-    setSelectedThreadId(data?.id ?? null); // ✅ never passes undefined
+    setSelectedThreadId(data?.id ?? null); // never undefined
     return data?.id ?? null;
   }
 
@@ -239,12 +239,8 @@ export default function AlfredScreen() {
 
       {/* Right: messages */}
       <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12, display: "grid", gridTemplateRows: "auto 1fr auto", gap: 10 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>Alfred — {personaLabel}</h2>
-          <div style={{ fontSize: 12, color: "#666" }}>
-            Conversations are kept separate by mode.
-          </div>
-        </div>
+        {/* Header (trimmed) */}
+        <h2 style={{ margin: 0, fontSize: 18 }}>Alfred — {personaLabel}</h2>
 
         <div style={{ overflow: "auto", paddingRight: 4 }}>
           {selectedThreadId == null && (
