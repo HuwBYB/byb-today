@@ -30,7 +30,6 @@ const PERSONAS: { key: PersonaKey; label: string; system: string }[] = [
   },
 ];
 
-// Fallback response if the serverless function isn't set up yet
 function localFallbackReply(p: PersonaKey, userText: string) {
   const prefix: Record<PersonaKey, string> = {
     business: "Business Alfred",
@@ -68,39 +67,52 @@ function todayISO() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-/** Extract bullet-like action lines from assistant content */
-function extractActionBullets(text: string): string[] {
+/** Extract bullets only from the **Today** section of an assistant reply. */
+function extractTodayBullets(text: string): string[] {
   const lines = text.split(/\r?\n/);
-  const bullets: string[] = [];
+  const out: string[] = [];
+  let inToday = false;
+
+  const isHeading = (s: string) =>
+    /^\s*\*\*[A-Za-z].*\*\*\s*$/i.test(s) || // **Heading**
+    /^\s*#{1,6}\s+[A-Za-z]/.test(s) ||       // # Heading
+    /^\s*[A-Za-z].*:?\s*$/.test(s);          // Heading:
+
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
 
-    // Match bullets like: "-", "•", "*", or "1. ", "2) ", etc.
-    const m =
-      line.match(/^[-*•]\s+(.*)$/) ||
-      line.match(/^\d+[\.\)]\s+(.*)$/);
+    // Toggle sections — enter Today on a heading line that says Today
+    if (isHeading(line)) {
+      const plain = line.replace(/\*/g, "").trim();
+      inToday = /^today\b/i.test(plain);
+      continue;
+    }
 
+    if (!inToday) continue;
+
+    // Grab bullet/numbered lines inside Today
+    const m = line.match(/^[-*•]\s+(.*)$/) || line.match(/^\d+[\.\)]\s+(.*)$/);
     if (m && m[1]) {
       const t = m[1].trim();
-      if (t.length > 2) bullets.push(t);
+      if (t.length > 2) out.push(t);
       continue;
     }
 
-    // Heuristic: lines in "Today"/"This week"/"Checklist" sections may be plain
-    if (/^(today|this week|checklist)\b/i.test(line)) {
-      // skip section headers themselves
-      continue;
-    }
+    // Also allow short plain instruction lines within Today
+    if (line.length > 2) out.push(line.replace(/\*\*/g, ""));
   }
-  // Deduplicate small overlaps
+
+  // Deduplicate and trim to a sensible cap
   const seen = new Set<string>();
-  return bullets.filter(b => {
-    const key = b.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
+  const unique = out.filter((b) => {
+    const k = b.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
     return true;
-  }).slice(0, 12);
+  });
+
+  return unique.slice(0, 6);
 }
 
 export default function AlfredScreen() {
@@ -114,7 +126,7 @@ export default function AlfredScreen() {
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Quick-add options
+  // Quick-add options/state
   const [addAsTop, setAddAsTop] = useState<boolean>(false);
   const [addingKeys, setAddingKeys] = useState<Set<string>>(new Set());
 
@@ -125,7 +137,6 @@ export default function AlfredScreen() {
     });
   }, []);
 
-  // Load threads for persona
   async function loadThreads(p: PersonaKey) {
     if (!userId) return;
     const { data, error } = await supabase
@@ -139,7 +150,6 @@ export default function AlfredScreen() {
   }
   useEffect(() => { if (userId) loadThreads(persona); }, [userId, persona]);
 
-  // Load messages for selected thread
   async function loadMessages(threadId: number) {
     if (!userId) return;
     const { data, error } = await supabase
@@ -155,7 +165,6 @@ export default function AlfredScreen() {
 
   const personaLabel = useMemo(() => PERSONAS.find(p => p.key === persona)?.label || "", [persona]);
 
-  // Start a new thread
   async function startThread(firstUserText?: string): Promise<number | null> {
     if (!userId) return null;
     const title = (firstUserText || "New conversation").slice(0, 60);
@@ -170,7 +179,6 @@ export default function AlfredScreen() {
     return data?.id ?? null;
   }
 
-  // Send a message (create thread if needed), call API, save reply
   async function send() {
     const text = input.trim();
     if (!userId || !text || sending) return;
@@ -182,7 +190,6 @@ export default function AlfredScreen() {
         if (!threadId) throw new Error("Could not create thread.");
       }
 
-      // 1) store user message
       const { error: uerr } = await supabase
         .from("alfred_messages")
         .insert({ user_id: userId, thread_id: threadId, role: "user", content: text });
@@ -190,15 +197,13 @@ export default function AlfredScreen() {
       setInput("");
       await loadMessages(threadId);
 
-      // 2) prepare last N messages as history
-      const recent = messages.slice(-14); // last 14 + new user = 15
+      const recent = messages.slice(-14);
       const history = [
         { role: "system", content: PERSONAS.find(p => p.key === persona)?.system || "" },
         ...recent.map(m => ({ role: m.role, content: m.content })),
         { role: "user", content: text },
       ];
 
-      // 3) call serverless function (or fallback)
       let replyText = "";
       try {
         const resp = await fetch("/api/alfred", {
@@ -212,7 +217,6 @@ export default function AlfredScreen() {
         replyText = localFallbackReply(persona, text);
       }
 
-      // 4) store assistant reply
       const { error: aerr } = await supabase
         .from("alfred_messages")
         .insert({ user_id: userId, thread_id: threadId, role: "assistant", content: replyText });
@@ -227,14 +231,12 @@ export default function AlfredScreen() {
     }
   }
 
-  // New chat button
   async function newChat() {
     setSelectedThreadId(null);
     setMessages([]);
     await startThread();
   }
 
-  // Add one suggested bullet to Today
   async function addBulletToToday(text: string, key: string) {
     if (!userId) return;
     try {
@@ -247,7 +249,6 @@ export default function AlfredScreen() {
         priority: addAsTop ? 2 : 0,
       });
       if (error) throw error;
-      // stay on Alfred screen; Today will show it when user switches
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -256,6 +257,13 @@ export default function AlfredScreen() {
         n.delete(key);
         return n;
       });
+    }
+  }
+
+  async function addAll(bullets: string[], msgId: number) {
+    for (let i = 0; i < bullets.length; i++) {
+      const key = `${msgId}-${i}`;
+      await addBulletToToday(bullets[i], key);
     }
   }
 
@@ -311,18 +319,9 @@ export default function AlfredScreen() {
       </div>
 
       {/* Right: messages */}
-      <div className="card" style={{ display: "grid", gridTemplateRows: "auto auto 1fr auto", gap: 10 }}>
-        {/* Header (trimmed) */}
+      <div className="card" style={{ display: "grid", gridTemplateRows: "auto 1fr auto", gap: 10 }}>
+        {/* Header */}
         <h2 style={{ margin: 0, fontSize: 18 }}>Alfred — {personaLabel}</h2>
-
-        {/* Quick-add prefs */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-            <input type="checkbox" checked={addAsTop} onChange={(e) => setAddAsTop(e.target.checked)} />
-            Add as Top Priority
-          </label>
-          <span className="muted">Add actions straight to Today from Alfred’s bullets.</span>
-        </div>
 
         {/* Messages */}
         <div style={{ overflow: "auto", paddingRight: 4 }}>
@@ -334,17 +333,25 @@ export default function AlfredScreen() {
 
           {messages.map((m) => {
             const isAssistant = m.role === "assistant";
-            const bullets = isAssistant ? extractActionBullets(m.content) : [];
+            const todayBullets = isAssistant ? extractTodayBullets(m.content) : [];
+
             return (
               <div key={m.id} style={{ marginBottom: 14 }}>
                 <div className="muted" style={{ marginBottom: 4 }}>{isAssistant ? "Alfred" : "You"}</div>
                 <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
 
-                {isAssistant && bullets.length > 0 && (
-                  <div style={{ marginTop: 8 }}>
-                    <div className="section-title">Quick add to Today</div>
+                {isAssistant && todayBullets.length > 0 && (
+                  <div className="card" style={{ marginTop: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                      <div style={{ fontWeight: 600 }}>Quick add — Today</div>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <input type="checkbox" checked={addAsTop} onChange={(e) => setAddAsTop(e.target.checked)} />
+                        <span className="muted">Add as Top Priority</span>
+                      </label>
+                    </div>
+
                     <ul className="list">
-                      {bullets.map((b, idx) => {
+                      {todayBullets.map((b, idx) => {
                         const key = `${m.id}-${idx}`;
                         const adding = addingKeys.has(key);
                         return (
@@ -357,12 +364,24 @@ export default function AlfredScreen() {
                               style={{ padding: "6px 10px", borderRadius: 8 }}
                               title={addAsTop ? "Add as Top Priority today" : "Add to today"}
                             >
-                              {adding ? "Adding…" : "＋ Add to Today"}
+                              {adding ? "Adding…" : "＋ Add"}
                             </button>
                           </li>
                         );
                       })}
                     </ul>
+
+                    {todayBullets.length > 1 && (
+                      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+                        <button
+                          onClick={() => addAll(todayBullets, m.id)}
+                          className="btn-primary"
+                          style={{ borderRadius: 8 }}
+                        >
+                          ＋ Add all to Today
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
