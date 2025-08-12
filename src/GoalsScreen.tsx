@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
+import BigGoalWizard from "./BigGoalWizard";
 
 type Goal = {
   id: number;
@@ -7,7 +8,8 @@ type Goal = {
   title: string;
   description: string | null;
   status: "active" | "completed" | "archived";
-  target_date: string | null; // yyyy-mm-dd
+  target_date: string | null;
+  goal_type?: "regular" | "big";
 };
 
 type Step = {
@@ -16,21 +18,14 @@ type Step = {
   goal_id: number;
   step_order: number;
   title: string;
-  due_date: string | null; // yyyy-mm-dd
+  due_date: string | null;
   status: "todo" | "in_progress" | "done";
 };
 
-function todayISO() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
+function todayISO() { return new Date().toISOString().slice(0,10); }
 
 export default function GoalsScreen() {
   const [userId, setUserId] = useState<string | null>(null);
-
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loadingGoals, setLoadingGoals] = useState(true);
   const [goalErr, setGoalErr] = useState<string | null>(null);
@@ -44,6 +39,7 @@ export default function GoalsScreen() {
 
   const [newStepTitle, setNewStepTitle] = useState("");
   const [newStepDate, setNewStepDate] = useState<string>("");
+  const [showWizard, setShowWizard] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
@@ -65,7 +61,6 @@ export default function GoalsScreen() {
     else setGoals((data as any) || []);
     setLoadingGoals(false);
   }
-
   useEffect(() => { if (userId) loadGoals(); }, [userId]);
 
   async function loadSteps(goalId: number) {
@@ -82,38 +77,18 @@ export default function GoalsScreen() {
     else setSteps((data as any) || []);
     setLoadingSteps(false);
   }
-
   useEffect(() => { if (selectedGoalId) loadSteps(selectedGoalId); }, [selectedGoalId]);
 
-  // NEW: also create a task for the goal if it has a target_date
   async function createGoal() {
     if (!userId || !newGoalTitle.trim()) return;
-    setGoalErr(null);
-    const { data: inserted, error } = await supabase
-      .from("goals")
-      .insert({
-        user_id: userId,
-        title: newGoalTitle.trim(),
-        target_date: newGoalDate || null,
-        status: "active",
-      })
-      .select()
-      .single();
+    const { error } = await supabase.from("goals").insert({
+      user_id: userId,
+      title: newGoalTitle.trim(),
+      target_date: newGoalDate || null,
+      status: "active",
+      goal_type: "regular",
+    });
     if (error) { setGoalErr(error.message); return; }
-
-    // If a target date was provided, add a matching task so it shows in Today/Calendar
-    if (inserted?.target_date) {
-      const { error: tErr } = await supabase.from("tasks").insert({
-        user_id: userId,
-        title: inserted.title,
-        due_date: inserted.target_date,   // yyyy-mm-dd
-        source: "goal_target",
-        priority: 0,                      // change to 2 to land in Top 3
-        // status omitted → DB default
-      });
-      if (tErr) { setGoalErr(tErr.message); }
-    }
-
     setNewGoalTitle(""); setNewGoalDate("");
     await loadGoals();
   }
@@ -142,7 +117,6 @@ export default function GoalsScreen() {
     if (!error && selectedGoalId) loadSteps(selectedGoalId);
   }
 
-  // Send a STEP to Today (creates a normal task)
   async function sendStepToToday(step: Step) {
     if (!userId) return;
     const { error } = await supabase.from("tasks").insert({
@@ -151,13 +125,11 @@ export default function GoalsScreen() {
       due_date: step.due_date || todayISO(),
       source: "goal",
       priority: 0,
-      // status omitted → DB default
     });
     if (error) { setGoalErr(error.message); return; }
     alert("Sent to Today ✅");
   }
 
-  // NEW: Send the selected GOAL headline to Today (uses target date or today)
   async function sendGoalToToday(goal: Goal) {
     if (!userId) return;
     const { error } = await supabase.from("tasks").insert({
@@ -180,7 +152,23 @@ export default function GoalsScreen() {
     <div style={{ padding: 16, maxWidth: 1000, margin: "0 auto" }}>
       <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 12 }}>Goals</h1>
 
-      {/* Create goal */}
+      {/* quick buttons */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <button onClick={() => setShowWizard(true)} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 8 }}>
+          Create Big Goal (guided)
+        </button>
+      </div>
+
+      {showWizard && (
+        <div style={{ marginBottom: 16 }}>
+          <BigGoalWizard
+            onClose={() => setShowWizard(false)}
+            onCreated={() => { setShowWizard(false); loadGoals(); }}
+          />
+        </div>
+      )}
+
+      {/* quick regular goal */}
       <div style={{ padding: 12, border: "1px solid #ddd", borderRadius: 8, marginBottom: 16 }}>
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>Create a new goal</h2>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -202,7 +190,7 @@ export default function GoalsScreen() {
         </div>
       </div>
 
-      {/* Goals + Steps */}
+      {/* goals + steps */}
       <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 12 }}>
         <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 8, maxHeight: 420, overflow: "auto" }}>
           <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>Your goals</div>
@@ -228,7 +216,7 @@ export default function GoalsScreen() {
                   >
                     <div style={{ fontWeight: 600 }}>{g.title}</div>
                     <div style={{ fontSize: 12, color: "#666" }}>
-                      {g.status}{g.target_date ? ` • target ${g.target_date}` : ""}
+                      {(g.goal_type || "regular")}{g.target_date ? ` • target ${g.target_date}` : ""}
                     </div>
                   </button>
                 </li>
@@ -255,7 +243,7 @@ export default function GoalsScreen() {
                 </div>
               </div>
 
-              {/* Add step */}
+              {/* add step */}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
                 <input
                   placeholder="Step title (e.g., Email 10 beta users)"
@@ -274,7 +262,7 @@ export default function GoalsScreen() {
                 </button>
               </div>
 
-              {/* Steps list */}
+              {/* steps list */}
               {loadingSteps ? (
                 <div>Loading…</div>
               ) : steps.length === 0 ? (
