@@ -41,13 +41,31 @@ function localFallbackReply(p: PersonaKey, userText: string) {
   return `${prefix[p]}: I hear you — “${userText.slice(0, 140)}”. Here’s a simple next step:\n• Write the smallest action you can take in 10 minutes and add it to Today.`;
 }
 
+type Thread = {
+  id: number;
+  user_id: string;
+  persona: PersonaKey;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type Message = {
+  id: number;
+  thread_id: number;
+  user_id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  created_at: string;
+};
+
 export default function AlfredScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [persona, setPersona] = useState<PersonaKey>("business");
 
-  const [threads, setThreads] = useState<any[]>([]);
+  const [threads, setThreads] = useState<Thread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
-  const [messages, setMessages] = useState<any[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -69,7 +87,7 @@ export default function AlfredScreen() {
       .eq("persona", p)
       .order("updated_at", { ascending: false });
     if (error) { setErr(error.message); setThreads([]); return; }
-    setThreads(data || []);
+    setThreads((data as Thread[]) || []);
   }
   useEffect(() => { if (userId) loadThreads(persona); }, [userId, persona]);
 
@@ -83,25 +101,25 @@ export default function AlfredScreen() {
       .eq("thread_id", threadId)
       .order("created_at", { ascending: true });
     if (error) { setErr(error.message); setMessages([]); return; }
-    setMessages(data || []);
+    setMessages((data as Message[]) || []);
   }
   useEffect(() => { if (selectedThreadId) loadMessages(selectedThreadId); }, [selectedThreadId]);
 
   const personaLabel = useMemo(() => PERSONAS.find(p => p.key === persona)?.label || "", [persona]);
 
   // Start a new thread
-  async function startThread(firstUserText?: string) {
-    if (!userId) return;
+  async function startThread(firstUserText?: string): Promise<number | null> {
+    if (!userId) return null;
     const title = (firstUserText || "New conversation").slice(0, 60);
     const { data, error } = await supabase
       .from("alfred_threads")
       .insert({ user_id: userId, persona, title })
       .select()
-      .single();
+      .single<Thread>();
     if (error) { setErr(error.message); return null; }
     await loadThreads(persona);
-    setSelectedThreadId(data.id);
-    return data.id as number;
+    setSelectedThreadId(data?.id ?? null); // ✅ never passes undefined
+    return data?.id ?? null;
   }
 
   // Send a message (create thread if needed), call API, save reply
@@ -132,7 +150,7 @@ export default function AlfredScreen() {
         { role: "user", content: text },
       ];
 
-      // 3) call serverless function (or fallback if not configured)
+      // 3) call serverless function (or fallback)
       let replyText = "";
       try {
         const resp = await fetch("/api/alfred", {
