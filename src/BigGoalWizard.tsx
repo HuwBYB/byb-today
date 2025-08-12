@@ -52,7 +52,7 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
   }, [startDate, targetDate]);
 
   // preview counts
-  const previewCounts = useMemo(() => {
+  
     if (!targetDate) return { total:0,daily:0,weekly:0,monthly:0,milestones:0 };
     const start = fromISO(startDate), end = fromISO(targetDate);
     if (end < start) return { total:0,daily:0,weekly:0,monthly:0,milestones:0 };
