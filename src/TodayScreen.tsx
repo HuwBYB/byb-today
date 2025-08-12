@@ -140,7 +140,9 @@ export default function TodayScreen({ externalDateISO }: { externalDateISO?: str
 
   return (
     <div style={{ padding: 16, maxWidth: 800, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 8 }}>Today</h1>
+      <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 8 }}>
+  Day view — {dateISO}
+</h1>
       <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} />
 
       {/* Affirmation viewer + builder */}
@@ -268,3 +270,4 @@ export default function TodayScreen({ externalDateISO }: { externalDateISO?: str
     </div>
   );
 }
+
