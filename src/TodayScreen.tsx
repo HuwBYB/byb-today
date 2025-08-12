@@ -257,7 +257,10 @@ export default function TodayScreen({ externalDateISO }: { externalDateISO?: str
            {topPriority.map(i => (
              <li key={`${i.item_type}-${i.item_id}`} style={{ display: "flex", justifyContent: "space-between", border: "1px solid #eee", borderRadius: 8, padding: 8, marginBottom: 8 }}>
                <div>
-                 <div style={{ fontWeight: 600 }}>{i.title}</div>
+                 <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                   {i.category_color && <span style={{ width:10, height:10, borderRadius:999, background:i.category_color, border:"1px solid #ccc" }} />}
+                   <div style={{ fontWeight: 600 }}>{i.title}</div>
+                 </div>
                  <div style={{ fontSize: 12, color: "#666" }}>{i.item_type === "daily_action" ? "Big Goal step" : i.source}</div>
                </div>
                <div>
@@ -277,7 +280,10 @@ export default function TodayScreen({ externalDateISO }: { externalDateISO?: str
            {others.map(i => (
              <li key={`${i.item_type}-${i.item_id}`} style={{ display: "flex", justifyContent: "space-between", border: "1px solid #eee", borderRadius: 8, padding: 8, marginBottom: 8 }}>
                <div>
-                 <div style={{ fontWeight: 600 }}>{i.title}</div>
+                 <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                   {i.category_color && <span style={{ width:10, height:10, borderRadius:999, background:i.category_color, border:"1px solid #ccc" }} />}
+                   <div style={{ fontWeight: 600 }}>{i.title}</div>
+                 </div>
                  <div style={{ fontSize: 12, color: "#666" }}>{i.item_type === "daily_action" ? "Big Goal step" : i.source}</div>
                </div>
                <div>
