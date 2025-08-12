@@ -22,7 +22,9 @@ type Step = {
   status: "todo" | "in_progress" | "done";
 };
 
-function todayISO() { return new Date().toISOString().slice(0,10); }
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
 
 export default function GoalsScreen() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -39,6 +41,7 @@ export default function GoalsScreen() {
 
   const [newStepTitle, setNewStepTitle] = useState("");
   const [newStepDate, setNewStepDate] = useState<string>("");
+
   const [showWizard, setShowWizard] = useState(false);
 
   useEffect(() => {
@@ -79,6 +82,7 @@ export default function GoalsScreen() {
   }
   useEffect(() => { if (selectedGoalId) loadSteps(selectedGoalId); }, [selectedGoalId]);
 
+  // Quick "regular" goal (no seeding; use Send Goal to Today if needed)
   async function createGoal() {
     if (!userId || !newGoalTitle.trim()) return;
     const { error } = await supabase.from("goals").insert({
@@ -117,6 +121,7 @@ export default function GoalsScreen() {
     if (!error && selectedGoalId) loadSteps(selectedGoalId);
   }
 
+  // Pin goal/step tasks to Top Priority (priority: 2)
   async function sendStepToToday(step: Step) {
     if (!userId) return;
     const { error } = await supabase.from("tasks").insert({
@@ -124,7 +129,7 @@ export default function GoalsScreen() {
       title: step.title,
       due_date: step.due_date || todayISO(),
       source: "goal",
-      priority: 0,
+      priority: 2,
     });
     if (error) { setGoalErr(error.message); return; }
     alert("Sent to Today ✅");
@@ -137,7 +142,7 @@ export default function GoalsScreen() {
       title: goal.title,
       due_date: goal.target_date || todayISO(),
       source: "goal_target",
-      priority: 0,
+      priority: 2,
     });
     if (error) { setGoalErr(error.message); return; }
     alert("Goal sent to Today ✅");
@@ -152,7 +157,7 @@ export default function GoalsScreen() {
     <div style={{ padding: 16, maxWidth: 1000, margin: "0 auto" }}>
       <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 12 }}>Goals</h1>
 
-      {/* quick buttons */}
+      {/* Big Goal wizard */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         <button onClick={() => setShowWizard(true)} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 8 }}>
           Create Big Goal (guided)
@@ -168,7 +173,7 @@ export default function GoalsScreen() {
         </div>
       )}
 
-      {/* quick regular goal */}
+      {/* Quick regular goal */}
       <div style={{ padding: 12, border: "1px solid #ddd", borderRadius: 8, marginBottom: 16 }}>
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>Create a new goal</h2>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -190,7 +195,7 @@ export default function GoalsScreen() {
         </div>
       </div>
 
-      {/* goals + steps */}
+      {/* Goals + Steps */}
       <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 12 }}>
         <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 8, maxHeight: 420, overflow: "auto" }}>
           <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>Your goals</div>
@@ -243,7 +248,7 @@ export default function GoalsScreen() {
                 </div>
               </div>
 
-              {/* add step */}
+              {/* Add step */}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
                 <input
                   placeholder="Step title (e.g., Email 10 beta users)"
@@ -262,7 +267,7 @@ export default function GoalsScreen() {
                 </button>
               </div>
 
-              {/* steps list */}
+              {/* Steps list */}
               {loadingSteps ? (
                 <div>Loading…</div>
               ) : steps.length === 0 ? (
