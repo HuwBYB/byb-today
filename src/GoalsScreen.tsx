@@ -22,7 +22,10 @@ type Step = {
 
 function todayISO() {
   const d = new Date();
-  return d.toISOString().slice(0, 10);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 export default function GoalsScreen() {
@@ -82,15 +85,35 @@ export default function GoalsScreen() {
 
   useEffect(() => { if (selectedGoalId) loadSteps(selectedGoalId); }, [selectedGoalId]);
 
+  // NEW: also create a task for the goal if it has a target_date
   async function createGoal() {
     if (!userId || !newGoalTitle.trim()) return;
-    const { error } = await supabase.from("goals").insert({
-      user_id: userId,
-      title: newGoalTitle.trim(),
-      target_date: newGoalDate || null,
-      status: "active",
-    });
+    setGoalErr(null);
+    const { data: inserted, error } = await supabase
+      .from("goals")
+      .insert({
+        user_id: userId,
+        title: newGoalTitle.trim(),
+        target_date: newGoalDate || null,
+        status: "active",
+      })
+      .select()
+      .single();
     if (error) { setGoalErr(error.message); return; }
+
+    // If a target date was provided, add a matching task so it shows in Today/Calendar
+    if (inserted?.target_date) {
+      const { error: tErr } = await supabase.from("tasks").insert({
+        user_id: userId,
+        title: inserted.title,
+        due_date: inserted.target_date,   // yyyy-mm-dd
+        source: "goal_target",
+        priority: 0,                      // change to 2 to land in Top 3
+        // status omitted → DB default
+      });
+      if (tErr) { setGoalErr(tErr.message); }
+    }
+
     setNewGoalTitle(""); setNewGoalDate("");
     await loadGoals();
   }
@@ -119,9 +142,7 @@ export default function GoalsScreen() {
     if (!error && selectedGoalId) loadSteps(selectedGoalId);
   }
 
-  // Send to Today = create a normal task with source 'goal'
-  // NOTE: we intentionally DO NOT set `status` so the DB default is used,
-  // which avoids the "tasks_status_check" constraint error.
+  // Send a STEP to Today (creates a normal task)
   async function sendStepToToday(step: Step) {
     if (!userId) return;
     const { error } = await supabase.from("tasks").insert({
@@ -129,10 +150,25 @@ export default function GoalsScreen() {
       title: step.title,
       due_date: step.due_date || todayISO(),
       source: "goal",
-      priority: 0, // change to 2 if you want it to land in Top 3
+      priority: 0,
+      // status omitted → DB default
     });
     if (error) { setGoalErr(error.message); return; }
     alert("Sent to Today ✅");
+  }
+
+  // NEW: Send the selected GOAL headline to Today (uses target date or today)
+  async function sendGoalToToday(goal: Goal) {
+    if (!userId) return;
+    const { error } = await supabase.from("tasks").insert({
+      user_id: userId,
+      title: goal.title,
+      due_date: goal.target_date || todayISO(),
+      source: "goal_target",
+      priority: 0,
+    });
+    if (error) { setGoalErr(error.message); return; }
+    alert("Goal sent to Today ✅");
   }
 
   const selectedGoal = useMemo(
@@ -144,7 +180,7 @@ export default function GoalsScreen() {
     <div style={{ padding: 16, maxWidth: 1000, margin: "0 auto" }}>
       <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 12 }}>Goals</h1>
 
-      {/* New goal */}
+      {/* Create goal */}
       <div style={{ padding: 12, border: "1px solid #ddd", borderRadius: 8, marginBottom: 16 }}>
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>Create a new goal</h2>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -166,7 +202,7 @@ export default function GoalsScreen() {
         </div>
       </div>
 
-      {/* List goals + steps */}
+      {/* Goals + Steps */}
       <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 12 }}>
         <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 8, maxHeight: 420, overflow: "auto" }}>
           <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>Your goals</div>
@@ -213,7 +249,10 @@ export default function GoalsScreen() {
                     {selectedGoal.status}{selectedGoal.target_date ? ` • target ${selectedGoal.target_date}` : ""}
                   </div>
                 </div>
-                <button onClick={() => loadSteps(selectedGoal.id)}>Refresh</button>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => loadSteps(selectedGoal.id)}>Refresh</button>
+                  <button onClick={() => sendGoalToToday(selectedGoal)}>Send Goal to Today</button>
+                </div>
               </div>
 
               {/* Add step */}
