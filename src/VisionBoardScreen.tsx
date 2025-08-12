@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 type Item = {
@@ -97,9 +97,7 @@ export default function VisionBoardScreen() {
     if (!confirm("Remove this image from your vision board?")) return;
     setBusy(true); setErr(null);
     try {
-      // delete file
       await supabase.storage.from("vision").remove([it.storage_path]);
-      // delete row
       const { error } = await supabase.from("vision_items").delete().eq("id", it.id);
       if (error) throw error;
       await load();
@@ -111,14 +109,12 @@ export default function VisionBoardScreen() {
   }
 
   async function move(id: number, dir: -1 | 1) {
-    // simple up/down swap within current array
     const idx = items.findIndex(x => x.id === id);
     const j = idx + dir;
     if (idx < 0 || j < 0 || j >= items.length) return;
     const a = items[idx], b = items[j];
     setBusy(true);
     try {
-      // swap sort_order values (null-safe)
       const aOrder = a.sort_order ?? idx;
       const bOrder = b.sort_order ?? j;
       const { error: e1 } = await supabase.from("vision_items").update({ sort_order: 9999 }).eq("id", a.id);
@@ -157,7 +153,6 @@ export default function VisionBoardScreen() {
         </div>
       </div>
 
-      {/* Display */}
       {items.length === 0 ? (
         <div className="card" style={{ color: "#666" }}>
           Add up to six images that capture your future. You can give each a short caption.
