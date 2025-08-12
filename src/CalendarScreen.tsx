@@ -3,7 +3,7 @@ import { supabase } from "./lib/supabaseClient";
 
 type ItemType = "task" | "daily_action";
 
-// local-date ISO (yyyy-mm-dd)
+// LOCAL date string (yyyy-mm-dd)
 function toISO(d: Date): string {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -36,7 +36,6 @@ export default function CalendarScreen({
   const [loadingItems, setLoadingItems] = useState<boolean>(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // Who am I?
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -44,7 +43,7 @@ export default function CalendarScreen({
     });
   }, []);
 
-  // Build a 6x7 (Mon–Sun) grid
+  // Build 6x7 grid (Mon–Sun)
   const grid = useMemo(() => {
     const first = firstOfMonth(monthAnchor);
     const start = monthGridStartMonday(first);
@@ -52,11 +51,7 @@ export default function CalendarScreen({
     for (let i = 0; i < 42; i++) {
       const d = new Date(start);
       d.setDate(start.getDate() + i);
-      cells.push({
-        date: d,
-        iso: toISO(d),
-        inMonth: d.getMonth() === monthAnchor.getMonth(),
-      });
+      cells.push({ date: d, iso: toISO(d), inMonth: d.getMonth() === monthAnchor.getMonth() });
     }
     return cells;
   }, [monthAnchor]);
@@ -65,7 +60,7 @@ export default function CalendarScreen({
   const gridStartISO = grid.length ? grid[0].iso : toISO(monthAnchor);
   const gridEndISO = grid.length ? grid[grid.length - 1].iso : toISO(monthAnchor);
 
-  // Fetch counts for visible grid (async/await — avoids .finally typing)
+  // Fetch counts for visible grid (async/await to avoid Promise.finally typing)
   useEffect(() => {
     if (!userId || !gridStartISO || !gridEndISO) return;
     let cancelled = false;
@@ -79,10 +74,7 @@ export default function CalendarScreen({
           .eq("user_id", userId)
           .gte("item_date", gridStartISO)
           .lte("item_date", gridEndISO);
-        if (error) {
-          if (!cancelled) { setErr(error.message); setCounts({}); }
-          return;
-        }
+        if (error) { if (!cancelled) { setErr(error.message); setCounts({}); } return; }
         const map: Record<string, number> = {};
         (data || []).forEach((row: any) => { map[row.item_date] = row.item_count; });
         if (!cancelled) setCounts(map);
@@ -93,7 +85,7 @@ export default function CalendarScreen({
     return () => { cancelled = true; };
   }, [userId, gridStartISO, gridEndISO]);
 
-  // Keep selected day in current grid
+  // Keep selected day inside grid
   useEffect(() => {
     if (!grid.length) return;
     if (selectedISO < gridStartISO || selectedISO > gridEndISO) {
@@ -113,18 +105,13 @@ export default function CalendarScreen({
       .eq("item_date", iso)
       .order("priority", { ascending: false })
       .order("created_at", { ascending: true });
-    if (error) { setErr(error.message); setItems([]); }
-    else { setItems(data || []); }
+    if (error) { setErr(error.message); setItems([]); } else { setItems(data || []); }
     setLoadingItems(false);
   }
   useEffect(() => { if (userId && selectedISO) loadDay(selectedISO); }, [userId, selectedISO]);
 
-  function prevMonth() {
-    setMonthAnchor(new Date(monthAnchor.getFullYear(), monthAnchor.getMonth() - 1, 1));
-  }
-  function nextMonth() {
-    setMonthAnchor(new Date(monthAnchor.getFullYear(), monthAnchor.getMonth() + 1, 1));
-  }
+  function prevMonth() { setMonthAnchor(new Date(monthAnchor.getFullYear(), monthAnchor.getMonth() - 1, 1)); }
+  function nextMonth() { setMonthAnchor(new Date(monthAnchor.getFullYear(), monthAnchor.getMonth() + 1, 1)); }
 
   async function completeItem(itemType: ItemType, id: number) {
     const table = itemType === "task" ? "tasks" : "daily_actions";
@@ -138,6 +125,7 @@ export default function CalendarScreen({
   }
 
   const monthName = monthAnchor.toLocaleString(undefined, { month: "long", year: "numeric" });
+  const todayISO = toISO(new Date());
 
   return (
     <div style={{ padding: 16, maxWidth: 1000, margin: "0 auto" }}>
@@ -159,14 +147,11 @@ export default function CalendarScreen({
         {grid.map((cell) => {
           const count = counts[cell.iso] || 0;
           const isSelected = cell.iso === selectedISO;
-          const isToday = cell.iso === toISO(new Date());
+          const isToday = cell.iso === todayISO;
           return (
             <button
               key={cell.iso}
-              onClick={() => {
-                setSelectedISO(cell.iso);
-                if (onSelectDate) onSelectDate(cell.iso); // NEW: tell parent
-              }}
+              onClick={() => { setSelectedISO(cell.iso); if (onSelectDate) onSelectDate(cell.iso); }}
               style={{
                 position: "relative",
                 height: 72,
@@ -181,17 +166,7 @@ export default function CalendarScreen({
                 {cell.date.getDate()}
               </div>
               {!loadingCounts && count > 0 ? (
-                <div
-                  style={{
-                    position: "absolute",
-                    right: 6,
-                    bottom: 6,
-                    padding: "2px 6px",
-                    borderRadius: 999,
-                    border: "1px solid #ddd",
-                    fontSize: 12,
-                  }}
-                >
+                <div style={{ position: "absolute", right: 6, bottom: 6, padding: "2px 6px", borderRadius: 999, border: "1px solid #ddd", fontSize: 12 }}>
                   {count}
                 </div>
               ) : null}
@@ -214,17 +189,7 @@ export default function CalendarScreen({
         ) : (
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
             {items.map((i: any) => (
-              <li
-                key={`${i.item_type}-${i.item_id}`}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  border: "1px solid #eee",
-                  borderRadius: 8,
-                  padding: 8,
-                  marginBottom: 8,
-                }}
-              >
+              <li key={`${i.item_type}-${i.item_id}`} style={{ display: "flex", justifyContent: "space-between", border: "1px solid #eee", borderRadius: 8, padding: 8, marginBottom: 8 }}>
                 <div>
                   <div style={{ fontWeight: 600 }}>{i.title}</div>
                   <div style={{ fontSize: 12, color: "#666" }}>
@@ -232,9 +197,7 @@ export default function CalendarScreen({
                   </div>
                 </div>
                 <div>
-                  <button onClick={() => setFocus(i.item_type as ItemType, i.item_id, true)} style={{ marginRight: 8 }}>
-                    Make Top 3
-                  </button>
+                  <button onClick={() => setFocus(i.item_type as ItemType, i.item_id, true)} style={{ marginRight: 8 }}>Make Top 3</button>
                   <button onClick={() => completeItem(i.item_type as ItemType, i.item_id)}>Done</button>
                 </div>
               </li>
