@@ -8,25 +8,25 @@ const PERSONAS: { key: PersonaKey; label: string; system: string }[] = [
     key: "business",
     label: "Business Advisor",
     system:
-      "You are Alfred, a concise, practical business adviser with a British butler's manners. Give clear step-by-step plans, prioritise impact, and keep replies brief. Ask one clarifying question only when essential.",
+      "You are Alfred, a concise British-butler business adviser. Always structure replies as: **Plan (bullets)** → **Today (1–3 concrete actions)** → **This week (1–2 actions)** → **Risks & assumptions (1–3)** → **One clarification question**. Prefer UK examples (Companies House, HMRC) when relevant. Keep it brief and practical.",
   },
   {
     key: "financial",
     label: "Financial Advisor",
     system:
-      "You are Alfred, a cautious personal finance guide with a British butler's tone. Explain simply, note assumptions, and include a brief risk/next-step checklist. You are not a regulated adviser; add a one-line disclaimer.",
+      "You are Alfred, a cautious British-butler personal-finance guide. Structure: **Summary** → **Today** → **This month** → **Checklist** → **One question**. Use UK terms (ISA, PAYE, HMRC). Add: “Not regulated financial advice.” Keep it clear and pragmatic.",
   },
   {
     key: "health",
     label: "Health Advisor",
     system:
-      "You are Alfred, a supportive health coach with a British butler's tact. Focus on habits, sleep, movement, nutrition, stress. Avoid diagnoses; advise seeing a professional when appropriate. Keep it practical.",
+      "You are Alfred, a supportive British-butler health coach. Structure: **Focus area** → **Today (1–2 habits)** → **This week** → **Pitfalls** → **One question**. Avoid diagnoses or treatment; suggest seeing a professional when appropriate. Be practical.",
   },
   {
     key: "friend",
     label: "Friend",
     system:
-      "You are Alfred, a kind, encouraging friend (still a butler!). Be warm, reflective, and solution-focused. Keep it light but useful.",
+      "You are Alfred, a kind, encouraging friend (still a butler). Be warm and brief. Structure: **Reflection** → **Tiny next step (≤10 min)** → **Encouragement** → **One light question**.",
   },
 ];
 
@@ -59,6 +59,50 @@ type Message = {
   created_at: string;
 };
 
+// ---- helpers ----
+function todayISO() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/** Extract bullet-like action lines from assistant content */
+function extractActionBullets(text: string): string[] {
+  const lines = text.split(/\r?\n/);
+  const bullets: string[] = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    // Match bullets like: "-", "•", "*", or "1. ", "2) ", etc.
+    const m =
+      line.match(/^[-*•]\s+(.*)$/) ||
+      line.match(/^\d+[\.\)]\s+(.*)$/);
+
+    if (m && m[1]) {
+      const t = m[1].trim();
+      if (t.length > 2) bullets.push(t);
+      continue;
+    }
+
+    // Heuristic: lines in "Today"/"This week"/"Checklist" sections may be plain
+    if (/^(today|this week|checklist)\b/i.test(line)) {
+      // skip section headers themselves
+      continue;
+    }
+  }
+  // Deduplicate small overlaps
+  const seen = new Set<string>();
+  return bullets.filter(b => {
+    const key = b.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 12);
+}
+
 export default function AlfredScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [persona, setPersona] = useState<PersonaKey>("business");
@@ -69,6 +113,10 @@ export default function AlfredScreen() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Quick-add options
+  const [addAsTop, setAddAsTop] = useState<boolean>(false);
+  const [addingKeys, setAddingKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
@@ -118,7 +166,7 @@ export default function AlfredScreen() {
       .single<Thread>();
     if (error) { setErr(error.message); return null; }
     await loadThreads(persona);
-    setSelectedThreadId(data?.id ?? null); // never undefined
+    setSelectedThreadId(data?.id ?? null);
     return data?.id ?? null;
   }
 
@@ -143,7 +191,7 @@ export default function AlfredScreen() {
       await loadMessages(threadId);
 
       // 2) prepare last N messages as history
-      const recent = messages.slice(-14); // keep last 14 + this new one = 15
+      const recent = messages.slice(-14); // last 14 + new user = 15
       const history = [
         { role: "system", content: PERSONAS.find(p => p.key === persona)?.system || "" },
         ...recent.map(m => ({ role: m.role, content: m.content })),
@@ -186,12 +234,37 @@ export default function AlfredScreen() {
     await startThread();
   }
 
+  // Add one suggested bullet to Today
+  async function addBulletToToday(text: string, key: string) {
+    if (!userId) return;
+    try {
+      setAddingKeys(prev => new Set(prev).add(key));
+      const { error } = await supabase.from("tasks").insert({
+        user_id: userId,
+        title: text.slice(0, 200),
+        due_date: todayISO(),
+        source: "alfred",
+        priority: addAsTop ? 2 : 0,
+      });
+      if (error) throw error;
+      // stay on Alfred screen; Today will show it when user switches
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setAddingKeys(prev => {
+        const n = new Set(prev);
+        n.delete(key);
+        return n;
+      });
+    }
+  }
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 12, height: "calc(100vh - 140px)" }}>
       {/* Left: persona & threads */}
-      <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 10, overflow: "auto" }}>
+      <div className="card" style={{ overflow: "auto" }}>
         <div style={{ display: "grid", gap: 8 }}>
-          <div style={{ fontSize: 12, color: "#666" }}>Choose Alfred mode</div>
+          <div className="section-title">Choose Alfred mode</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
             {PERSONAS.map(p => (
               <button
@@ -209,14 +282,14 @@ export default function AlfredScreen() {
             ))}
           </div>
 
-          <button onClick={newChat} style={{ padding: "8px 10px", border: "1px solid #333", borderRadius: 6 }}>
+          <button onClick={newChat} className="btn-primary" style={{ padding: "8px 10px", borderRadius: 6 }}>
             + New Conversation
           </button>
 
-          <div style={{ fontSize: 12, color: "#666" }}>Conversations</div>
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          <div className="section-title">Conversations</div>
+          <ul className="list">
             {threads.length === 0 ? (
-              <li style={{ color: "#666" }}>No conversations yet.</li>
+              <li className="muted">No conversations yet.</li>
             ) : (
               threads.map((t) => (
                 <li key={t.id} style={{ marginBottom: 6 }}>
@@ -238,25 +311,67 @@ export default function AlfredScreen() {
       </div>
 
       {/* Right: messages */}
-      <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12, display: "grid", gridTemplateRows: "auto 1fr auto", gap: 10 }}>
+      <div className="card" style={{ display: "grid", gridTemplateRows: "auto auto 1fr auto", gap: 10 }}>
         {/* Header (trimmed) */}
         <h2 style={{ margin: 0, fontSize: 18 }}>Alfred — {personaLabel}</h2>
 
+        {/* Quick-add prefs */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" checked={addAsTop} onChange={(e) => setAddAsTop(e.target.checked)} />
+            Add as Top Priority
+          </label>
+          <span className="muted">Add actions straight to Today from Alfred’s bullets.</span>
+        </div>
+
+        {/* Messages */}
         <div style={{ overflow: "auto", paddingRight: 4 }}>
           {selectedThreadId == null && (
-            <div style={{ color: "#666", marginBottom: 8 }}>
+            <div className="muted" style={{ marginBottom: 8 }}>
               Start a conversation or pick one on the left.
             </div>
           )}
-          {messages.map((m) => (
-            <div key={m.id} style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 12, color: "#666" }}>{m.role === "assistant" ? "Alfred" : "You"}</div>
-              <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
-            </div>
-          ))}
+
+          {messages.map((m) => {
+            const isAssistant = m.role === "assistant";
+            const bullets = isAssistant ? extractActionBullets(m.content) : [];
+            return (
+              <div key={m.id} style={{ marginBottom: 14 }}>
+                <div className="muted" style={{ marginBottom: 4 }}>{isAssistant ? "Alfred" : "You"}</div>
+                <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
+
+                {isAssistant && bullets.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <div className="section-title">Quick add to Today</div>
+                    <ul className="list">
+                      {bullets.map((b, idx) => {
+                        const key = `${m.id}-${idx}`;
+                        const adding = addingKeys.has(key);
+                        return (
+                          <li key={key} className="item">
+                            <div style={{ flex: 1 }}>{b}</div>
+                            <button
+                              onClick={() => addBulletToToday(b, key)}
+                              disabled={adding}
+                              className="btn-primary"
+                              style={{ padding: "6px 10px", borderRadius: 8 }}
+                              title={addAsTop ? "Add as Top Priority today" : "Add to today"}
+                            >
+                              {adding ? "Adding…" : "＋ Add to Today"}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            );
+          })}
           {sending && <div style={{ fontStyle: "italic", color: "#666" }}>Alfred is typing…</div>}
         </div>
 
+        {/* Composer */}
         <div style={{ display: "flex", gap: 8 }}>
           <input
             placeholder="Ask Alfred…"
@@ -265,7 +380,7 @@ export default function AlfredScreen() {
             onKeyDown={(e) => { if (e.key === "Enter") send(); }}
             style={{ flex: 1, padding: 10, border: "1px solid #ccc", borderRadius: 8 }}
           />
-          <button onClick={send} disabled={sending || !input.trim()} style={{ padding: "10px 14px", border: "1px solid #333", borderRadius: 8 }}>
+          <button onClick={send} disabled={sending || !input.trim()} className="btn-primary" style={{ padding: "10px 14px", borderRadius: 8 }}>
             Send
           </button>
         </div>
