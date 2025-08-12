@@ -19,7 +19,7 @@ export default function App() {
   const [selectedDateISO, setSelectedDateISO] = useState<string>(todayISO());
 
   function gotoToday() {
-    setSelectedDateISO(todayISO()); // <— force reset to real today
+    setSelectedDateISO(todayISO()); // always reset to actual today
     setTab("today");
   }
 
@@ -71,7 +71,7 @@ export default function App() {
         {tab === "calendar" && (
           <CalendarScreen
             onSelectDate={(iso) => {
-              // Clicking a date (or the Calendar's "Today" button) jumps to Day view at that date
+              // Selecting a date (or the Calendar's "Today" button) jumps to Day view at that date
               setSelectedDateISO(iso);
               setTab("today");
             }}
