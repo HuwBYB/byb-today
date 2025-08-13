@@ -1,41 +1,65 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-type ItemType = "task" | "daily_action";
-
-// LOCAL date string (yyyy-mm-dd)
-function toISO(d: Date): string {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-function firstOfMonth(d: Date) {
-  return new Date(d.getFullYear(), d.getMonth(), 1);
-}
-function monthGridStartMonday(first: Date) {
-  // JS getDay(): 0=Sun..6=Sat → convert to Mon=0..Sun=6
-  const dowMon0 = (first.getDay() + 6) % 7;
-  const start = new Date(first);
-  start.setDate(first.getDate() - dowMon0);
-  return start;
-}
-
-export default function CalendarScreen({
-  onSelectDate,
-}: {
+type Props = {
   onSelectDate?: (iso: string) => void;
-}) {
-  const [userId, setUserId] = useState<string | null>(null);
-  const [monthAnchor, setMonthAnchor] = useState<Date>(firstOfMonth(new Date()));
-  const [selectedISO, setSelectedISO] = useState<string>(toISO(new Date()));
+};
 
-  const [counts, setCounts] = useState<Record<string, number>>({});
-  const [items, setItems] = useState<any[]>([]);
-  const [loadingCounts, setLoadingCounts] = useState<boolean>(true);
-  const [loadingItems, setLoadingItems] = useState<boolean>(true);
+type Task = {
+  id: number;
+  user_id: string;
+  title: string;
+  due_date: string | null; // 'YYYY-MM-DD'
+  due_time: string | null; // 'HH:MM:SS' (optional)
+  status: "pending" | "done" | string;
+  priority: number | null;
+  category_color: string | null;
+};
+
+function toISO(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+function fromISO(s: string) {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
+}
+function startOfMonthGrid(d: Date) {
+  const first = new Date(d.getFullYear(), d.getMonth(), 1);
+  // Monday-start weeks
+  const wd = (first.getDay() + 6) % 7; // Mon=0..Sun=6
+  const gridStart = new Date(first);
+  gridStart.setDate(first.getDate() - wd);
+  return gridStart;
+}
+function endOfMonthGrid(d: Date) {
+  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  const wd = (last.getDay() + 6) % 7; // Mon=0..Sun=6
+  const gridEnd = new Date(last);
+  gridEnd.setDate(last.getDate() + (6 - wd));
+  return gridEnd;
+}
+function formatTime(t: string | null) {
+  if (!t) return ""; // all-day
+  // Expect 'HH:MM:SS' (or 'HH:MM')
+  const [hhStr, mmStr] = t.split(":");
+  const hh = Number(hhStr);
+  const mm = Number(mmStr || "0");
+  const ampm = hh >= 12 ? "pm" : "am";
+  const h12 = ((hh + 11) % 12) + 1;
+  return `${h12}${mm ? ":" + String(mm).padStart(2, "0") : ""}${ampm}`;
+}
+
+export default function CalendarScreen({ onSelectDate }: Props) {
+  const [userId, setUserId] = useState<string | null>(null);
+  const [cursor, setCursor] = useState<Date>(new Date()); // month being viewed
+  const [byDate, setByDate] = useState<Record<string, Task[]>>({});
+  const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // auth
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -43,168 +67,211 @@ export default function CalendarScreen({
     });
   }, []);
 
-  // Build 6x7 grid (Mon–Sun)
-  const grid = useMemo(() => {
-    const first = firstOfMonth(monthAnchor);
-    const start = monthGridStartMonday(first);
-    const cells: { date: Date; iso: string; inMonth: boolean }[] = [];
-    for (let i = 0; i < 42; i++) {
-      const d = new Date(start);
-      d.setDate(start.getDate() + i);
-      cells.push({ date: d, iso: toISO(d), inMonth: d.getMonth() === monthAnchor.getMonth() });
-    }
-    return cells;
-  }, [monthAnchor]);
+  const gridStart = useMemo(() => startOfMonthGrid(cursor), [cursor]);
+  const gridEnd = useMemo(() => endOfMonthGrid(cursor), [cursor]);
 
-  const weekLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const gridStartISO = grid.length ? grid[0].iso : toISO(monthAnchor);
-  const gridEndISO = grid.length ? grid[grid.length - 1].iso : toISO(monthAnchor);
-
-  // Fetch counts for visible grid (async/await to avoid Promise.finally typing)
-  useEffect(() => {
-    if (!userId || !gridStartISO || !gridEndISO) return;
-    let cancelled = false;
-    (async () => {
-      setLoadingCounts(true);
-      setErr(null);
-      try {
-        const { data, error } = await supabase
-          .from("calendar_counts_v")
-          .select("*")
-          .eq("user_id", userId)
-          .gte("item_date", gridStartISO)
-          .lte("item_date", gridEndISO);
-        if (error) { if (!cancelled) { setErr(error.message); setCounts({}); } return; }
-        const map: Record<string, number> = {};
-        (data || []).forEach((row: any) => { map[row.item_date] = row.item_count; });
-        if (!cancelled) setCounts(map);
-      } finally {
-        if (!cancelled) setLoadingCounts(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [userId, gridStartISO, gridEndISO]);
-
-  // Keep selected day inside grid
-  useEffect(() => {
-    if (!grid.length) return;
-    if (selectedISO < gridStartISO || selectedISO > gridEndISO) {
-      setSelectedISO(toISO(firstOfMonth(monthAnchor)));
-    }
-  }, [grid, gridStartISO, gridEndISO, monthAnchor, selectedISO]);
-
-  // Load items for selected day
-  async function loadDay(iso: string) {
+  async function loadMonth() {
     if (!userId) return;
-    setLoadingItems(true);
-    setErr(null);
-    const { data, error } = await supabase
-      .from("daily_items_v")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("item_date", iso)
-      .order("priority", { ascending: false })
-      .order("created_at", { ascending: true });
-    if (error) { setErr(error.message); setItems([]); } else { setItems(data || []); }
-    setLoadingItems(false);
-  }
-  useEffect(() => { if (userId && selectedISO) loadDay(selectedISO); }, [userId, selectedISO]);
+    setLoading(true); setErr(null);
+    try {
+      const { data, error } = await supabase
+        .from("tasks")
+        .select("id,user_id,title,due_date,due_time,status,priority,category_color")
+        .eq("user_id", userId)
+        .gte("due_date", toISO(gridStart))
+        .lte("due_date", toISO(gridEnd))
+        .order("due_date", { ascending: true })
+        .order("due_time", { ascending: true }); // times first, nulls last automatically
+      if (error) throw error;
 
-  function prevMonth() { setMonthAnchor(new Date(monthAnchor.getFullYear(), monthAnchor.getMonth() - 1, 1)); }
-  function nextMonth() { setMonthAnchor(new Date(monthAnchor.getFullYear(), monthAnchor.getMonth() + 1, 1)); }
+      const map: Record<string, Task[]> = {};
+      for (const t of (data as Task[])) {
+        const key = t.due_date || "";
+        if (!key) continue;
+        (map[key] ||= []).push(t);
+      }
+      // Optional: sort by priority within same time
+      Object.values(map).forEach(list => {
+        list.sort((a, b) => {
+          // earlier time first; if times equal/empty, higher priority first; then id
+          const ta = a.due_time || "99:99:99";
+          const tb = b.due_time || "99:99:99";
+          if (ta < tb) return -1;
+          if (ta > tb) return 1;
+          const pa = a.priority ?? 0, pb = b.priority ?? 0;
+          if (pa !== pb) return pb - pa;
+          return a.id - b.id;
+        });
+      });
 
-  async function completeItem(itemType: ItemType, id: number) {
-    const table = itemType === "task" ? "tasks" : "daily_actions";
-    const { error } = await supabase.from(table).update({ status: "done" }).eq("id", id);
-    if (!error) loadDay(selectedISO);
-  }
-  async function setFocus(itemType: ItemType, id: number, isFocus: boolean) {
-    const table = itemType === "task" ? "tasks" : "daily_actions";
-    const { error } = await supabase.from(table).update({ priority: isFocus ? 2 : 0 }).eq("id", id);
-    if (!error) loadDay(selectedISO);
+      setByDate(map);
+    } catch (e: any) {
+      setErr(e.message || String(e));
+      setByDate({});
+    } finally {
+      setLoading(false);
+    }
   }
 
-  const monthName = monthAnchor.toLocaleString(undefined, { month: "long", year: "numeric" });
-  const todayISO = toISO(new Date());
+  useEffect(() => { if (userId) loadMonth(); }, [userId, cursor]);
+
+  function monthLabel(d: Date) {
+    return d.toLocaleString(undefined, { month: "long", year: "numeric" });
+  }
+  function isSameDay(a: Date, b: Date) {
+    return a.getFullYear() === b.getFullYear()
+      && a.getMonth() === b.getMonth()
+      && a.getDate() === b.getDate();
+  }
+
+  const today = new Date();
+
+  function gotoToday() { setCursor(new Date()); }
+  function gotoPrevMonth() {
+    const d = new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1);
+    setCursor(d);
+  }
+  function gotoNextMonth() {
+    const d = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+    setCursor(d);
+  }
+
+  // Build 6 weeks grid
+  const days: Date[] = [];
+  {
+    const d = new Date(gridStart);
+    while (d <= gridEnd) {
+      days.push(new Date(d));
+      d.setDate(d.getDate() + 1);
+    }
+  }
 
   return (
-    <div style={{ padding: 16, maxWidth: 1000, margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <button onClick={prevMonth}>&laquo; Prev</button>
-        <h1 style={{ fontSize: 22, fontWeight: 600 }}>{monthName}</h1>
-        <button onClick={nextMonth}>Next &raquo;</button>
-      </div>
-
-      {/* Week labels */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, marginBottom: 6 }}>
-        {weekLabels.map((w) => (
-          <div key={w} style={{ textAlign: "center", fontSize: 12, color: "#666" }}>{w}</div>
-        ))}
-      </div>
-
-      {/* Month grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
-        {grid.map((cell) => {
-          const count = counts[cell.iso] || 0;
-          const isSelected = cell.iso === selectedISO;
-          const isToday = cell.iso === todayISO;
-          return (
-            <button
-              key={cell.iso}
-              onClick={() => { setSelectedISO(cell.iso); if (onSelectDate) onSelectDate(cell.iso); }}
-              style={{
-                position: "relative",
-                height: 72,
-                border: `1px solid ${isSelected ? "#333" : "#ddd"}`,
-                borderRadius: 8,
-                background: cell.inMonth ? "#fff" : "#fafafa",
-                outline: isToday ? "2px solid #6aa0ff" : "none",
-              }}
-              title={`${cell.iso}${count ? ` — ${count} item(s)` : ""}`}
-            >
-              <div style={{ position: "absolute", top: 6, left: 8, fontSize: 12, color: cell.inMonth ? "#333" : "#aaa" }}>
-                {cell.date.getDate()}
-              </div>
-              {!loadingCounts && count > 0 ? (
-                <div style={{ position: "absolute", right: 6, bottom: 6, padding: "2px 6px", borderRadius: 999, border: "1px solid #ddd", fontSize: 12 }}>
-                  {count}
-                </div>
-              ) : null}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Selected day list */}
-      <div style={{ marginTop: 16, padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h2 style={{ fontSize: 18, marginBottom: 8 }}>Items on {selectedISO}</h2>
-          <button onClick={() => loadDay(selectedISO)}>Refresh</button>
+    <div style={{ display: "grid", gap: 12 }}>
+      <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button onClick={gotoPrevMonth}>←</button>
+          <div style={{ fontWeight: 600 }}>{monthLabel(cursor)}</div>
+          <button onClick={gotoNextMonth}>→</button>
         </div>
-        {err ? <div style={{ color: "red", marginBottom: 8 }}>{err}</div> : null}
-        {loadingItems ? (
-          <div>Loading…</div>
-        ) : items.length === 0 ? (
-          <div style={{ color: "#666" }}>No items for this day.</div>
-        ) : (
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {items.map((i: any) => (
-              <li key={`${i.item_type}-${i.item_id}`} style={{ display: "flex", justifyContent: "space-between", border: "1px solid #eee", borderRadius: 8, padding: 8, marginBottom: 8 }}>
-                <div>
-                  <div style={{ fontWeight: 600 }}>{i.title}</div>
-                  <div style={{ fontSize: 12, color: "#666" }}>
-                    {(i.item_type === "daily_action" ? "Big Goal step" : i.source) + " • " + i.status}
-                  </div>
-                </div>
-                <div>
-                  <button onClick={() => setFocus(i.item_type as ItemType, i.item_id, true)} style={{ marginRight: 8 }}>Make Top 3</button>
-                  <button onClick={() => completeItem(i.item_type as ItemType, i.item_id)}>Done</button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button onClick={gotoToday}>Today</button>
+          {loading && <span className="muted">Loading…</span>}
+        </div>
       </div>
+
+      <div className="card">
+        {/* Weekday headers (Mon..Sun) */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(7, 1fr)",
+            gap: 6,
+            marginBottom: 6,
+            fontSize: 12,
+            color: "#6b7280",
+          }}
+        >
+          {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((w) => (
+            <div key={w} style={{ textAlign: "right", paddingRight: 6 }}>{w}</div>
+          ))}
+        </div>
+
+        {/* Calendar grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
+          {days.map((d) => {
+            const iso = toISO(d);
+            const inMonth = d.getMonth() === cursor.getMonth();
+            const tasks = byDate[iso] || [];
+            return (
+              <div
+                key={iso}
+                style={{
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  padding: 6,
+                  minHeight: 96,
+                  background: inMonth ? "#fff" : "#f9fafb",
+                  opacity: inMonth ? 1 : 0.7,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                }}
+              >
+                {/* Day number */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <button
+                    onClick={() => onSelectDate && onSelectDate(iso)}
+                    title="Open this day in Today"
+                    style={{
+                      fontWeight: isSameDay(d, today) ? 700 : 600,
+                      background: "transparent",
+                      border: "none",
+                      padding: 0,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {d.getDate()}
+                  </button>
+                  {tasks.length > 0 && (
+                    <span className="muted" style={{ fontSize: 12 }}>{tasks.length}</span>
+                  )}
+                </div>
+
+                {/* Task list preview (first 3) */}
+                <div style={{ display: "grid", gap: 4 }}>
+                  {tasks.slice(0, 3).map((t) => (
+                    <div
+                      key={t.id}
+                      title={t.title}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        fontSize: 12,
+                        opacity: t.status === "done" ? 0.6 : 1,
+                        textDecoration: t.status === "done" ? "line-through" : "none",
+                      }}
+                    >
+                      {/* category dot */}
+                      <span
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: 999,
+                          background: t.category_color || "#d1d5db",
+                          flex: "0 0 auto",
+                        }}
+                      />
+                      {/* time (if any) */}
+                      <span style={{ minWidth: 40, textAlign: "right", color: "#6b7280" }}>
+                        {formatTime(t.due_time) || ""}
+                      </span>
+                      {/* title */}
+                      <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {t.title}
+                      </span>
+                    </div>
+                  ))}
+                  {tasks.length > 3 && (
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      +{tasks.length - 3} more
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {err && <div style={{ color: "red" }}>{err}</div>}
     </div>
   );
 }
