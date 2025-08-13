@@ -96,7 +96,7 @@ export default function ConfidenceScreen() {
         <TabButton active={tab === "affirm"} onClick={() => setTab("affirm")} label="Affirmation" />
       </div>
 
-      {tab === "pose" && <PowerPose running={running} />}
+      {tab === "pose" && <PowerPose />}
       {tab === "breath" && <Breathing running={running} />}
       {tab === "affirm" && <Affirmation running={running} />}
     </div>
@@ -124,7 +124,7 @@ function TabButton({ active, onClick, label }: { active: boolean; onClick: () =>
 /* ===========================
    Power Pose (static silhouette)
    =========================== */
-function PowerPose({ running }: { running: boolean }) {
+function PowerPose() {
   return (
     <div className="card confidence-layout">
       <style>{CSS_POSE}</style>
@@ -180,21 +180,11 @@ function PowerPose({ running }: { running: boolean }) {
       <div style={{ display: "grid", gap: 10 }}>
         <h2 style={{ margin: 0 }}>Stand like a superhero</h2>
         <ul className="list" style={{ lineHeight: 1.4 }}>
-          <li>
-            <b>Feet</b> shoulder-width apart
-          </li>
-          <li>
-            <b>Hands</b> on hips (or arms open)
-          </li>
-          <li>
-            <b>Chest</b> up, <b>chin</b> level
-          </li>
-          <li>
-            <b>Breathe</b> slow through the nose
-          </li>
-          <li>
-            <b>Eyes</b> soften; tiny smile
-          </li>
+          <li><b>Feet</b> shoulder-width apart</li>
+          <li><b>Hands</b> on hips (or arms open)</li>
+          <li><b>Chest</b> up, <b>chin</b> level</li>
+          <li><b>Breathe</b> slow through the nose</li>
+          <li><b>Eyes</b> soften; tiny smile</li>
         </ul>
         <div className="muted">Hold for one minute. The cape is your cue to stay tall.</div>
       </div>
