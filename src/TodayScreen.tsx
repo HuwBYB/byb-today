@@ -8,7 +8,7 @@ type Task = {
   due_date: string | null;     // 'YYYY-MM-DD'
   status: "pending" | "done" | string;
   priority: number | null;     // >=2 = Top 3 Focus
-  source: string | null;
+  source: string | null;       // e.g. 'big_goal_daily'
   category: string | null;
   category_color: string | null;
   completed_at: string | null; // ISO timestamp
@@ -25,6 +25,14 @@ function todayISO() {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+/** Ensure we show a clean title without duplicate BIG GOAL prefix */
+function displayTitle(t: Task) {
+  const base = (t.title || "").trim();
+  const isBigSource = (t.source || "").startsWith("big_goal");
+  const alreadyPrefixed = base.toUpperCase().startsWith("BIG GOAL");
+  return isBigSource && !alreadyPrefixed ? `BIG GOAL — ${base}` : base;
 }
 
 export default function TodayScreen({ externalDateISO }: Props) {
@@ -167,12 +175,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
                     title={t.status === "done" ? "Mark as not done" : "Mark as done"}
                   />
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600 }}>
-                      {(t.source?.startsWith("big_goal") ? "BIG GOAL — " : "")}{t.title}
-                    </div>
-                    <div className="muted" style={{ fontSize: 12 }}>
-                      {t.category ? `${t.category}` : ""}{t.source ? ` · ${t.source}` : ""}
-                    </div>
+                    <div style={{ fontWeight: 600 }}>{displayTitle(t)}</div>
+                    {/* removed the source line to keep the UI clean */}
                   </div>
                 </label>
               </li>
@@ -197,12 +201,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
                     title={t.status === "done" ? "Mark as not done" : "Mark as done"}
                   />
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: (t.priority ?? 0) >= 2 ? 600 : 400 }}>
-                      {(t.source?.startsWith("big_goal") ? "BIG GOAL — " : "")}{t.title}
-                    </div>
-                    <div className="muted" style={{ fontSize: 12 }}>
-                      {t.category ? `${t.category}` : ""}{t.source ? ` · ${t.source}` : ""}
-                    </div>
+                    <div style={{ fontWeight: (t.priority ?? 0) >= 2 ? 600 : 400 }}>{displayTitle(t)}</div>
+                    {/* removed the source line to keep the UI clean */}
                   </div>
                 </label>
               </li>
