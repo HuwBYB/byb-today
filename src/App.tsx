@@ -9,6 +9,7 @@ import GratitudeScreen from "./GratitudeScreen";
 import WinsScreen from "./WinsScreen";
 import AlfredScreen from "./AlfredScreen";
 import ConfidenceScreen from "./ConfidenceScreen";
+import ExerciseDiaryScreen from "./ExerciseDiaryScreen";
 
 type Tab =
   | "today"
@@ -16,6 +17,7 @@ type Tab =
   | "goals"
   | "vision"
   | "gratitude"
+  | "exercise"
   | "wins"
   | "alfred"
   | "confidence";
@@ -44,6 +46,7 @@ export default function App() {
             <NavBtn active={tab === "goals"} onClick={() => setTab("goals")} label="Goals" />
             <NavBtn active={tab === "vision"} onClick={() => setTab("vision")} label="Vision" />
             <NavBtn active={tab === "gratitude"} onClick={() => setTab("gratitude")} label="Gratitude" />
+            <NavBtn active={tab === "exercise"} onClick={() => setTab("exercise")} label="Exercise" />
             <NavBtn active={tab === "wins"} onClick={() => setTab("wins")} label="Successes" />
             <NavBtn active={tab === "alfred"} onClick={() => setTab("alfred")} label="Alfred" />
             <NavBtn active={tab === "confidence"} onClick={() => setTab("confidence")} label="Confidence" />
@@ -64,6 +67,8 @@ export default function App() {
         {tab === "vision" && <VisionBoardScreen />}
 
         {tab === "gratitude" && <GratitudeScreen />}
+
+        {tab === "exercise" && <ExerciseDiaryScreen />}
 
         {tab === "wins" && <WinsScreen />}
 
