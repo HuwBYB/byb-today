@@ -195,3 +195,40 @@ input:focus, select:focus, textarea:focus{
 
 /* Small text */
 .muted{ color: var(--muted); font-size: 12px; }
+/* ---- Mobile overflow fixes (drop-in) ----------------------------------- */
+
+/* Safety net: never scroll sideways */
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Let flex/grid children shrink so they don't push the page wider */
+.card, .item, .tabs { min-width: 0; }
+.card > *, .item > *, .tabs > * { min-width: 0; }
+
+/* Wrap long words, emojis, or pasted links */
+p, li, .item, .gratitude-text, .heading, .section-title {
+  overflow-wrap: anywhere;   /* modern */
+  word-break: break-word;    /* fallback */
+}
+
+/* Inputs & textareas never exceed the viewport */
+input[type="text"], input[type="date"], input[type="number"], select, textarea {
+  max-width: 100%;
+}
+
+/* Media should scale down on mobile */
+img, video, canvas, svg { max-width: 100%; height: auto; display: block; }
+
+/* Tighten paddings a touch on very small screens */
+@media (max-width: 480px) {
+  .container { padding: 12px; }    /* keep within viewport */
+  .tab { padding: 8px 12px; }      /* reduce chance of overflow */
+  .item { padding: 10px; }
+}
+
+/* If the Gratitude page uses a two-column layout, stack it on phones */
+@media (max-width: 640px) {
+  .two-col { display: block; }
+}
