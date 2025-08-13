@@ -1,280 +1,195 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 import BigGoalWizard from "./BigGoalWizard";
 
 type Goal = {
-  id: number;
+  id: number; // BIGINT
   user_id: string;
   title: string;
-  description: string | null;
-  status: "active" | "completed" | "archived";
+  category: string | null;
+  category_color: string | null;
+  start_date: string | null;
   target_date: string | null;
-  goal_type?: "regular" | "big";
-  category?: "health" | "personal" | "financial" | "career" | "other";
-  category_color?: string | null;
+  status: string | null;
 };
 
 type Step = {
   id: number;
   user_id: string;
-  goal_id: number;
-  step_order: number;
-  title: string;
-  due_date: string | null;
-  status: "todo" | "in_progress" | "done";
+  goal_id: number; // BIGINT
+  cadence: "daily"|"weekly"|"monthly";
+  description: string;
+  active: boolean;
 };
 
-function todayISO() { return new Date().toISOString().slice(0,10); }
-
 export default function GoalsScreen() {
-  const [userId, setUserId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string|null>(null);
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [loadingGoals, setLoadingGoals] = useState(true);
-  const [goalErr, setGoalErr] = useState<string | null>(null);
-
-  const [selectedGoalId, setSelectedGoalId] = useState<number | null>(null);
-  const [steps, setSteps] = useState<Step[]>([]);
-  const [loadingSteps, setLoadingSteps] = useState(false);
-
-  const [newGoalTitle, setNewGoalTitle] = useState("");
-  const [newGoalDate, setNewGoalDate] = useState<string>("");
-
-  const [newStepTitle, setNewStepTitle] = useState("");
-  const [newStepDate, setNewStepDate] = useState<string>("");
-
+  const [selected, setSelected] = useState<Goal | null>(null);
   const [showWizard, setShowWizard] = useState(false);
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data, error }) => {
-      if (error) { setGoalErr(error.message); return; }
+  const [daily, setDaily]     = useState<string[]>([]);
+  const [weekly, setWeekly]   = useState<string[]>([]);
+  const [monthly, setMonthly] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string|null>(null);
+
+  useEffect(()=> {
+    supabase.auth.getUser().then(({data,error})=>{
+      if (error) { setErr(error.message); return; }
       setUserId(data.user?.id ?? null);
     });
-  }, []);
+  },[]);
 
   async function loadGoals() {
     if (!userId) return;
-    setLoadingGoals(true); setGoalErr(null);
     const { data, error } = await supabase
       .from("goals")
-      .select("*")
+      .select("id,user_id,title,category,category_color,start_date,target_date,status")
       .eq("user_id", userId)
-      .order("created_at", { ascending: true });
-    if (error) { setGoalErr(error.message); setGoals([]); }
-    else setGoals((data as any) || []);
-    setLoadingGoals(false);
+      .order("created_at", { ascending: false });
+    if (error) { setErr(error.message); setGoals([]); return; }
+    setGoals(data as Goal[]);
   }
-  useEffect(() => { if (userId) loadGoals(); }, [userId]);
+  useEffect(()=>{ if(userId) loadGoals(); },[userId]);
 
-  async function loadSteps(goalId: number) {
-    if (!userId) return;
-    setLoadingSteps(true);
+  async function openGoal(g: Goal) {
+    setSelected(g);
     const { data, error } = await supabase
-      .from("goal_steps")
+      .from("big_goal_steps")
       .select("*")
-      .eq("user_id", userId)
-      .eq("goal_id", goalId)
-      .order("step_order", { ascending: true })
-      .order("created_at", { ascending: true });
-    if (error) { setGoalErr(error.message); setSteps([]); }
-    else setSteps((data as any) || []);
-    setLoadingSteps(false);
-  }
-  useEffect(() => { if (selectedGoalId) loadSteps(selectedGoalId); }, [selectedGoalId]);
-
-  // Quick regular goal
-  async function createGoal() {
-    if (!userId || !newGoalTitle.trim()) return;
-    const { error } = await supabase.from("goals").insert({
-      user_id: userId,
-      title: newGoalTitle.trim(),
-      target_date: newGoalDate || null,
-      status: "active",
-      goal_type: "regular",
-      category: "other",
-      category_color: "#6b7280",
-    });
-    if (error) { setGoalErr(error.message); return; }
-    setNewGoalTitle(""); setNewGoalDate("");
-    await loadGoals();
+      .eq("goal_id", g.id)
+      .eq("active", true)
+      .order("id", { ascending: true });
+    if (error) { setErr(error.message); setDaily([]); setWeekly([]); setMonthly([]); return; }
+    const rows = (data as Step[]) || [];
+    setDaily(rows.filter(r=>r.cadence==="daily").map(r=>r.description));
+    setWeekly(rows.filter(r=>r.cadence==="weekly").map(r=>r.description));
+    setMonthly(rows.filter(r=>r.cadence==="monthly").map(r=>r.description));
   }
 
-  async function addStep() {
-    if (!userId || !selectedGoalId || !newStepTitle.trim()) return;
-    const maxOrder = steps.reduce((m, s) => Math.max(m, s.step_order), 0);
-    const { error } = await supabase.from("goal_steps").insert({
-      user_id: userId,
-      goal_id: selectedGoalId,
-      title: newStepTitle.trim(),
-      due_date: newStepDate || null,
-      step_order: maxOrder + 1,
-      status: "todo",
-    });
-    if (error) { setGoalErr(error.message); return; }
-    setNewStepTitle(""); setNewStepDate("");
-    await loadSteps(selectedGoalId);
-  }
+  function add(setter: (xs:string[])=>void, xs:string[]) { setter([...xs, ""]); }
+  function upd(setter:(xs:string[])=>void, xs:string[], i:number, v:string){ setter(xs.map((x,idx)=> idx===i? v : x)); }
+  function rm(setter:(xs:string[])=>void, xs:string[], i:number){ setter(xs.filter((_,idx)=> idx!==i)); }
 
-  async function markStepDone(stepId: number, done: boolean) {
-    const { error } = await supabase.from("goal_steps").update({ status: done ? "done" : "todo" }).eq("id", stepId);
-    if (!error && selectedGoalId) loadSteps(selectedGoalId);
-  }
+  async function saveSteps() {
+    if (!userId || !selected) return;
+    setBusy(true); setErr(null);
+    try {
+      const { error: de } = await supabase
+        .from("big_goal_steps")
+        .update({ active: false })
+        .eq("goal_id", selected.id);
+      if (de) throw de;
 
-  // Send to Today — include goal category + color and pin (priority 2)
-  async function sendStepToToday(step: Step) {
-    if (!userId) return;
-    const goal = selectedGoal;
-    const isBig = goal?.goal_type === "big";
-    const title = isBig ? `BIG GOAL — ${step.title}` : step.title;
-    const { error } = await supabase.from("tasks").insert({
-      user_id: userId,
-      title,
-      due_date: step.due_date || todayISO(),
-      source: isBig ? "big_goal_step" : "goal",
-      priority: 2,
-      category: goal?.category || null,
-      category_color: goal?.category_color || null,
-    });
-    if (error) { setGoalErr(error.message); return; }
-    alert("Sent to Today ✅");
-  }
+      const rows:any[] = [];
+      const push = (cadence:"daily"|"weekly"|"monthly", arr:string[])=>{
+        for (const s of arr.map(x=>x.trim()).filter(Boolean)) {
+          rows.push({ user_id: userId, goal_id: selected.id, cadence, description: s, active: true });
+        }
+      };
+      push("daily", daily); push("weekly", weekly); push("monthly", monthly);
+      if (rows.length) {
+        const { error: ie } = await supabase.from("big_goal_steps").insert(rows);
+        if (ie) throw ie;
+      }
 
-  async function sendGoalToToday(goal: Goal) {
-    if (!userId) return;
-    const isBig = goal.goal_type === "big";
-    const title = isBig ? `BIG GOAL — ${goal.title}` : goal.title;
-    const src = isBig ? "big_goal_target" : "goal_target";
-    const { error } = await supabase.from("tasks").insert({
-      user_id: userId,
-      title,
-      due_date: goal.target_date || todayISO(),
-      source: src,
-      priority: 2,
-      category: goal.category || null,
-      category_color: goal.category_color || null,
-    });
-    if (error) { setGoalErr(error.message); return; }
-    alert("Goal sent to Today ✅");
-  }
+      await supabase.rpc("reseed_big_goal_steps", { p_goal_id: selected.id });
 
-  const selectedGoal = useMemo(() => goals.find(g => g.id === selectedGoalId) || null, [goals, selectedGoalId]);
+      alert("Steps saved and future tasks updated.");
+    } catch(e:any) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
-    <div style={{ padding: 16, maxWidth: 1000, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 12 }}>Goals</h1>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-        <button onClick={() => setShowWizard(true)} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 8 }}>
-          Create Big Goal (guided)
+    <div style={{ display:"grid", gridTemplateColumns:"320px 1fr", gap:12 }}>
+      <div className="card">
+        <h1>Goals</h1>
+        <button className="btn-primary" onClick={()=> setShowWizard(true)} style={{ marginTop:8, marginBottom:12 }}>
+          + Create Big Goal
         </button>
+
+        <div className="section-title">Your goals</div>
+        <ul className="list">
+          {goals.length===0 && <li className="muted">No goals yet.</li>}
+          {goals.map(g=>(
+            <li key={g.id} className="item">
+              <button style={{ width:"100%", textAlign:"left" }} onClick={()=>openGoal(g)}>
+                <div style={{ fontWeight:600 }}>{g.title}</div>
+                <div className="muted">target • {g.target_date || "-"}</div>
+              </button>
+            </li>
+          ))}
+        </ul>
+        {showWizard && (
+          <div style={{ marginTop:12 }}>
+            <BigGoalWizard onClose={()=> setShowWizard(false)} onCreated={()=> { setShowWizard(false); loadGoals(); }} />
+          </div>
+        )}
       </div>
 
-      {showWizard && (
-        <div style={{ marginBottom: 16 }}>
-          <BigGoalWizard onClose={() => setShowWizard(false)} onCreated={() => { setShowWizard(false); loadGoals(); }} />
-        </div>
-      )}
+      <div className="card">
+        {!selected ? (
+          <div className="muted">Select a goal to view and edit its steps.</div>
+        ) : (
+          <div style={{ display:"grid", gap:12 }}>
+            <div>
+              <h2 style={{ margin:0 }}>{selected.title}</h2>
+              <div className="muted">
+                {selected.start_date} → {selected.target_date}
+                {selected.category ? ` • ${selected.category}` : ""}
+              </div>
+            </div>
 
-      {/* Quick goal */}
-      <div style={{ padding: 12, border: "1px solid #ddd", borderRadius: 8, marginBottom: 16 }}>
-        <h2 style={{ fontSize: 16, marginBottom: 8 }}>Create a new goal</h2>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <input placeholder="Goal title (e.g., Launch BYB MVP)" value={newGoalTitle} onChange={(e) => setNewGoalTitle(e.target.value)} style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6, flex: 1, minWidth: 240 }} />
-          <input type="date" value={newGoalDate} onChange={(e) => setNewGoalDate(e.target.value)} style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6 }} />
-          <button onClick={createGoal} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 6 }}>Add Goal</button>
-        </div>
-      </div>
+            <div>
+              <h3 style={{ marginTop:0 }}>Steps</h3>
 
-      <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 12 }}>
-        {/* Goals list */}
-        <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 8, maxHeight: 420, overflow: "auto" }}>
-          <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>Your goals</div>
-          {loadingGoals ? <div>Loading…</div> : goals.length === 0 ? (
-            <div style={{ color: "#666" }}>No goals yet.</div>
-          ) : (
-            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-              {goals.map((g) => (
-                <li key={g.id}>
-                  <button
-                    onClick={() => setSelectedGoalId(g.id)}
-                    style={{
-                      width: "100%", textAlign: "left", padding: 8, marginBottom: 6,
-                      borderRadius: 8, border: "1px solid #eee",
-                      background: selectedGoalId === g.id ? "#f5f5f5" : "#fff",
-                      display: "flex", justifyContent: "space-between", alignItems: "center"
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 600 }}>{g.title}</div>
-                      <div style={{ fontSize: 12, color: "#666" }}>
-                        {(g.goal_type || "regular")}{g.target_date ? ` • target ${g.target_date}` : ""}
-                      </div>
-                    </div>
-                    <span
-                      title={g.category || "other"}
-                      style={{
-                        display: "inline-block", width: 14, height: 14, borderRadius: 999,
-                        background: g.category_color || "#6b7280", border: "1px solid #ccc"
-                      }}
-                    />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {/* Steps pane */}
-        <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-          {!selectedGoal ? (
-            <div style={{ color: "#666" }}>Select a goal to add steps.</div>
-          ) : (
-            <>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <div>
-                  <div style={{ fontWeight: 600 }}>{selectedGoal.title}</div>
-                  <div style={{ fontSize: 12, color: "#666" }}>
-                    {selectedGoal.status}{selectedGoal.target_date ? ` • target ${selectedGoal.target_date}` : ""}
+              <fieldset style={{ border:"1px solid #eee", borderRadius:8, padding:10, marginBottom:10 }}>
+                <legend>Daily</legend>
+                {daily.map((v,i)=>(
+                  <div key={`d${i}`} style={{ display:"flex", gap:6, marginBottom:6 }}>
+                    <input value={v} onChange={e=>upd(setDaily, daily, i, e.target.value)} placeholder="Daily step…" style={{ flex:1 }}/>
+                    {daily.length>1 && <button onClick={()=>rm(setDaily, daily, i)}>–</button>}
                   </div>
-                </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <span title={selectedGoal.category || "other"} style={{ width: 14, height: 14, borderRadius: 999, background: selectedGoal.category_color || "#6b7280", border: "1px solid #ccc" }} />
-                  <button onClick={() => loadSteps(selectedGoal.id)}>Refresh</button>
-                  <button onClick={() => sendGoalToToday(selectedGoal)}>Send Goal to Today</button>
-                </div>
-              </div>
+                ))}
+                <button onClick={()=>add(setDaily, daily)}>+ Add daily step</button>
+              </fieldset>
 
-              {/* Add step */}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                <input placeholder="Step title (e.g., Email 10 beta users)" value={newStepTitle} onChange={(e) => setNewStepTitle(e.target.value)} style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6, flex: 1, minWidth: 240 }} />
-                <input type="date" value={newStepDate} onChange={(e) => setNewStepDate(e.target.value)} style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6 }} />
-                <button onClick={addStep} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 6 }}>Add Step</button>
-              </div>
+              <fieldset style={{ border:"1px solid #eee", borderRadius:8, padding:10, marginBottom:10 }}>
+                <legend>Weekly</legend>
+                {weekly.map((v,i)=>(
+                  <div key={`w${i}`} style={{ display:"flex", gap:6, marginBottom:6 }}>
+                    <input value={v} onChange={e=>upd(setWeekly, weekly, i, e.target.value)} placeholder="Weekly step…" style={{ flex:1 }}/>
+                    {weekly.length>1 && <button onClick={()=>rm(setWeekly, weekly, i)}>–</button>}
+                  </div>
+                ))}
+                <button onClick={()=>add(setWeekly, weekly)}>+ Add weekly step</button>
+              </fieldset>
 
-              {/* Steps list */}
-              {loadingSteps ? <div>Loading…</div> : steps.length === 0 ? (
-                <div style={{ color: "#666" }}>No steps yet.</div>
-              ) : (
-                <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                  {steps.map((s) => (
-                    <li key={s.id} style={{ display: "flex", justifyContent: "space-between", border: "1px solid #eee", borderRadius: 8, padding: 8, marginBottom: 8 }}>
-                      <div>
-                        <div style={{ fontWeight: 600 }}>{s.title}</div>
-                        <div style={{ fontSize: 12, color: "#666" }}>{s.status}{s.due_date ? ` • due ${s.due_date}` : ""}</div>
-                      </div>
-                      <div>
-                        <button onClick={() => sendStepToToday(s)} style={{ marginRight: 8 }}>Send to Today</button>
-                        <button onClick={() => markStepDone(s.id, s.status !== "done")}>{s.status === "done" ? "Mark Todo" : "Mark Done"}</button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
-        </div>
+              <fieldset style={{ border:"1px solid #eee", borderRadius:8, padding:10 }}>
+                <legend>Monthly</legend>
+                {monthly.map((v,i)=>(
+                  <div key={`m${i}`} style={{ display:"flex", gap:6, marginBottom:6 }}>
+                    <input value={v} onChange={e=>upd(setMonthly, monthly, i, e.target.value)} placeholder="Monthly step…" style={{ flex:1 }}/>
+                    {monthly.length>1 && <button onClick={()=>rm(setMonthly, monthly, i)}>–</button>}
+                  </div>
+                ))}
+                <button onClick={()=>add(setMonthly, monthly)}>+ Add monthly step</button>
+              </fieldset>
+
+              {err && <div style={{ color:"red", marginTop:8 }}>{err}</div>}
+              <div style={{ display:"flex", gap:8, marginTop:8 }}>
+                <button onClick={saveSteps} disabled={busy} className="btn-primary" style={{ borderRadius:8 }}>
+                  {busy? "Saving…" : "Save steps & reseed"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-
-      {goalErr && <div style={{ color: "red", marginTop: 12 }}>{goalErr}</div>}
     </div>
   );
 }
