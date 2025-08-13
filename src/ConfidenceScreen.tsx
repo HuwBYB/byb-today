@@ -1,26 +1,49 @@
 import { useEffect, useMemo, useState } from "react";
 
 /** ----- tiny helpers ----- */
-function clamp(n: number, min: number, max: number) { return Math.max(min, Math.min(max, n)); }
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
 
 /** Breathing patterns (seconds per phase) */
 type BreathPatternKey = "box" | "478" | "coherent";
-type Pattern = { name: string; phases: { label: string; secs: number }[]; };
+type Pattern = { name: string; phases: { label: string; secs: number }[] };
 const PATTERNS: Record<BreathPatternKey, Pattern> = {
-  box:      { name: "Box 4-4-4-4", phases: [{label:"Inhale",secs:4},{label:"Hold",secs:4},{label:"Exhale",secs:4},{label:"Hold",secs:4}] },
-  "478":    { name: "4-7-8",       phases: [{label:"Inhale",secs:4},{label:"Hold",secs:7},{label:"Exhale",secs:8}] },
-  coherent: { name: "Coherent 5/5",phases: [{label:"Inhale",secs:5},{label:"Exhale",secs:5}] },
+  box: {
+    name: "Box 4-4-4-4",
+    phases: [
+      { label: "Inhale", secs: 4 },
+      { label: "Hold", secs: 4 },
+      { label: "Exhale", secs: 4 },
+      { label: "Hold", secs: 4 },
+    ],
+  },
+  "478": {
+    name: "4-7-8",
+    phases: [
+      { label: "Inhale", secs: 4 },
+      { label: "Hold", secs: 7 },
+      { label: "Exhale", secs: 8 },
+    ],
+  },
+  coherent: {
+    name: "Coherent 5/5",
+    phases: [
+      { label: "Inhale", secs: 5 },
+      { label: "Exhale", secs: 5 },
+    ],
+  },
 };
 
 export default function ConfidenceScreen() {
-  const [tab, setTab] = useState<"pose"|"breath"|"affirm">("pose");
+  const [tab, setTab] = useState<"pose" | "breath" | "affirm">("pose");
   const [countdown, setCountdown] = useState(60);
   const [running, setRunning] = useState(false);
 
   // Timer
   useEffect(() => {
     if (!running) return;
-    const id = setInterval(() => setCountdown(s => clamp(s-1, 0, 60)), 1000);
+    const id = setInterval(() => setCountdown((s) => clamp(s - 1, 0, 60)), 1000);
     return () => clearInterval(id);
   }, [running]);
 
@@ -28,135 +51,168 @@ export default function ConfidenceScreen() {
     if (running && countdown === 0) setRunning(false);
   }, [countdown, running]);
 
-  function startOneMinute() { setCountdown(60); setRunning(true); }
-  function stop() { setRunning(false); }
-  function reset() { setRunning(false); setCountdown(60); }
+  function startOneMinute() {
+    setCountdown(60);
+    setRunning(true);
+  }
+  function stop() {
+    setRunning(false);
+  }
+  function reset() {
+    setRunning(false);
+    setCountdown(60);
+  }
 
   return (
-    <div className="page-confidence" style={{ display:"grid", gap:12 }}>
+    <div className="page-confidence" style={{ display: "grid", gap: 12 }}>
+      {/* Top bar */}
       <div className="card">
-        <div className="confidence-toolbar" style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
+        <div
+          className="confidence-toolbar"
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}
+        >
           <div>
-            <h1 style={{ margin:0 }}>Confidence Moves</h1>
+            <h1 style={{ margin: 0 }}>Confidence Moves</h1>
             <div className="muted">A focused minute before your meeting or interview.</div>
           </div>
-          <div className="confidence-toolbar" style={{ display:"flex", gap:8, alignItems:"center" }}>
-            <button onClick={startOneMinute} className="btn-primary" style={{ borderRadius:8 }}>Start 1-minute</button>
+
+          <div className="confidence-toolbar" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button onClick={startOneMinute} className="btn-primary" style={{ borderRadius: 8 }}>
+              Start 1-minute
+            </button>
             <button onClick={stop}>Pause</button>
             <button onClick={reset}>Reset</button>
-            <div className="muted" style={{ width:64, textAlign:"right", fontVariantNumeric:"tabular-nums" }}>{countdown}s</div>
+            <div className="muted" style={{ width: 64, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+              {countdown}s
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="card" style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-        <TabButton active={tab==="pose"} onClick={()=>setTab("pose")} label="Power Pose" />
-        <TabButton active={tab==="breath"} onClick={()=>setTab("breath")} label="Breathing" />
-        <TabButton active={tab==="affirm"} onClick={()=>setTab("affirm")} label="Affirmation" />
+      {/* Tabs */}
+      <div className="card" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <TabButton active={tab === "pose"} onClick={() => setTab("pose")} label="Power Pose" />
+        <TabButton active={tab === "breath"} onClick={() => setTab("breath")} label="Breathing" />
+        <TabButton active={tab === "affirm"} onClick={() => setTab("affirm")} label="Affirmation" />
       </div>
 
-      {tab==="pose"   && <PowerPose running={running} />}
-      {tab==="breath" && <Breathing running={running} />}
-      {tab==="affirm" && <Affirmation running={running} />}
+      {tab === "pose" && <PowerPose running={running} />}
+      {tab === "breath" && <Breathing running={running} />}
+      {tab === "affirm" && <Affirmation running={running} />}
     </div>
   );
 }
 
-function TabButton({ active, onClick, label }: { active:boolean; onClick:()=>void; label:string }) {
+function TabButton({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
   return (
-    <button onClick={onClick}
+    <button
+      onClick={onClick}
       style={{
-        padding:"8px 12px", borderRadius:8, border:"1px solid",
-        borderColor: active? "#111" : "#ddd",
-        background: active? "#111" : "#fff", color: active? "#fff" : "#111",
-      }}>
+        padding: "8px 12px",
+        borderRadius: 8,
+        border: "1px solid",
+        borderColor: active ? "#111" : "#ddd",
+        background: active ? "#111" : "#fff",
+        color: active ? "#fff" : "#111",
+      }}
+    >
       {label}
     </button>
   );
 }
 
 /* ===========================
-   Power Pose (clean SVG hero)
+   Power Pose (static silhouette)
    =========================== */
-function PowerPose({ running }: { running:boolean }) {
+function PowerPose({ running }: { running: boolean }) {
   return (
     <div className="card confidence-layout">
       <style>{CSS_POSE}</style>
-      <div className={running ? "pose is-running" : "pose"} style={{ display:"grid", placeItems:"center", minHeight:260 }}>
-        <svg viewBox="0 0 200 240" className="hero hero-bob" aria-label="Superhero standing confidently">
+
+      {/* Left: static hero */}
+      <div style={{ display: "grid", placeItems: "center", minHeight: 260 }}>
+        <svg viewBox="0 0 300 260" className="hero-static" aria-label="Superhero silhouette">
           <defs>
+            {/* soft background glow (uses your pastel theme variables) */}
+            <radialGradient id="bgGlow" cx="50%" cy="45%" r="65%">
+              <stop offset="0%" stopColor="hsl(var(--pastel-hsl, 210 95% 78%))" stopOpacity="0.85" />
+              <stop offset="60%" stopColor="hsl(var(--pastel-hsl, 210 95% 78%))" stopOpacity="0.18" />
+              <stop offset="100%" stopColor="transparent" />
+            </radialGradient>
             <linearGradient id="capeGrad" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.95" />
-              <stop offset="100%" stopColor="hsl(var(--pastel-hsl))" stopOpacity="0.85" />
+              <stop offset="0%" stopColor="var(--primary, #6d28d9)" stopOpacity="0.95" />
+              <stop offset="100%" stopColor="hsl(var(--pastel-hsl, 210 95% 78%))" stopOpacity="0.85" />
             </linearGradient>
           </defs>
 
-          <ellipse cx="100" cy="225" rx="42" ry="8" className="shadow" />
+          <rect x="0" y="0" width="300" height="260" fill="url(#bgGlow)" />
+          <ellipse cx="150" cy="232" rx="48" ry="10" className="shadow" />
 
-          {/* Cape behind body */}
+          {/* cape behind body */}
           <path
             className="cape"
-            d="M92 86
-               C 60 90, 34 110, 28 148
-               C 58 144, 92 168, 126 184
-               C 136 170, 138 150, 132 132
-               C 124 112, 110 96, 100 90 Z"
+            d="M150 96
+               C 110 100, 76 122, 66 160
+               C 120 152, 170 192, 214 206
+               C 224 182, 210 142, 192 118
+               C 178 104, 164 98, 150 96 Z"
           />
 
-          {/* Body */}
-          <g className="body">
+          {/* silhouette body */}
+          <g className="silhouette">
             {/* head */}
-            <circle cx="100" cy="54" r="18" />
-            {/* torso */}
-            <rect x="82" y="72" width="36" height="48" rx="9" />
-            {/* hands-on-hips arms */}
-            <path d="M82 84 L64 96 L78 108" />
-            <path d="M118 84 L136 96 L122 108" />
+            <circle cx="150" cy="58" r="22" />
+            {/* chest/torso */}
+            <path d="M112 90 Q150 74 188 90 L180 132 Q150 146 120 132 Z" />
+            {/* arms on hips */}
+            <path d="M112 96 L90 112 L112 126 L124 108 Z" />
+            <path d="M188 96 L210 112 L188 126 L176 108 Z" />
             {/* hips/core */}
-            <rect x="88" y="120" width="24" height="20" rx="6" />
+            <rect x="135" y="132" width="30" height="22" rx="8" />
             {/* legs */}
-            <rect x="76" y="140" width="14" height="46" rx="7" />
-            <rect x="110" y="140" width="14" height="46" rx="7" />
+            <path d="M134 154 L118 208 L136 208 L146 156 Z" />
+            <path d="M166 154 L182 208 L164 208 L154 156 Z" />
           </g>
         </svg>
       </div>
 
-      <div style={{ display:"grid", gap:10 }}>
-        <h2 style={{ margin:0 }}>Stand like a superhero</h2>
-        <ul className="list" style={{ lineHeight:1.4 }}>
-          <li><b>Feet</b> shoulder-width apart</li>
-          <li><b>Hands</b> on hips (or arms open)</li>
-          <li><b>Chest</b> up, <b>chin</b> level</li>
-          <li><b>Breathe</b> slow through the nose</li>
-          <li><b>Eyes</b> soften; tiny smile</li>
+      {/* Right: instructions */}
+      <div style={{ display: "grid", gap: 10 }}>
+        <h2 style={{ margin: 0 }}>Stand like a superhero</h2>
+        <ul className="list" style={{ lineHeight: 1.4 }}>
+          <li>
+            <b>Feet</b> shoulder-width apart
+          </li>
+          <li>
+            <b>Hands</b> on hips (or arms open)
+          </li>
+          <li>
+            <b>Chest</b> up, <b>chin</b> level
+          </li>
+          <li>
+            <b>Breathe</b> slow through the nose
+          </li>
+          <li>
+            <b>Eyes</b> soften; tiny smile
+          </li>
         </ul>
-        <div className="muted">Hold for one minute. Let the cape remind you to stay tall.</div>
+        <div className="muted">Hold for one minute. The cape is your cue to stay tall.</div>
       </div>
     </div>
   );
 }
 
 const CSS_POSE = `
-/* sizes */
-.hero { width: 100%; max-width: 360px; }
-
-/* colours */
-.pose { --hero: #111; }
-.body { fill: var(--hero); stroke: var(--hero); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
-.cape { fill: url(#capeGrad); transform-origin: 92px 86px; }
-.shadow { fill: #000; opacity: 0.10; transform-origin: 100px 225px; }
-
-/* animation (gentle, only while running) */
-.is-running .hero-bob { animation: heroBob 2.2s ease-in-out infinite; }
-.is-running .cape { animation: capeSway 1.8s ease-in-out infinite; }
-@keyframes heroBob { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-3px) } }
-@keyframes capeSway { 0%{ transform: rotate(-4deg) skewX(0deg) } 50%{ transform: rotate(4deg) skewX(6deg) } 100%{ transform: rotate(-4deg) skewX(0deg) } }
+.hero-static { width: 100%; max-width: 420px; }
+.silhouette { fill: #111; }
+.cape { fill: url(#capeGrad); }
+.shadow { fill: #000; opacity: .10; }
 `;
 
 /* ===========================
    Breathing Guide
    =========================== */
-function Breathing({ running }: { running:boolean }) {
+function Breathing({ running }: { running: boolean }) {
   const [patternKey, setPatternKey] = useState<BreathPatternKey>("box");
   const pattern = PATTERNS[patternKey];
   const [phaseIdx, setPhaseIdx] = useState(0);
@@ -191,20 +247,23 @@ function Breathing({ running }: { running:boolean }) {
   return (
     <div className="card confidence-layout">
       <style>{CSS_BREATH}</style>
-      <div style={{ display:"grid", placeItems:"center", minHeight:240 }}>
-        <div className="ringWrap" style={{ width:size, height:size, transform:`scale(${scale})`, transition:"transform 900ms ease-in-out" }}>
+      <div style={{ display: "grid", placeItems: "center", minHeight: 240 }}>
+        <div
+          className="ringWrap"
+          style={{ width: size, height: size, transform: `scale(${scale})`, transition: "transform 900ms ease-in-out" }}
+        >
           <div className="ring" />
           <div className="ringInner" />
         </div>
-        <div style={{ marginTop:12, textAlign:"center" }}>
-          <div style={{ fontWeight:700 }}>{pattern.phases[phaseIdx].label}</div>
+        <div style={{ marginTop: 12, textAlign: "center" }}>
+          <div style={{ fontWeight: 700 }}>{pattern.phases[phaseIdx].label}</div>
           <div className="muted">{phaseLeft}s</div>
         </div>
       </div>
 
-      <div style={{ display:"grid", gap:10 }}>
-        <h2 style={{ margin:0 }}>Guided breathing</h2>
-        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+      <div style={{ display: "grid", gap: 10 }}>
+        <h2 style={{ margin: 0 }}>Guided breathing</h2>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <PatternButton current={patternKey} setKey={setPatternKey} k="box" label="Box 4-4-4-4" />
           <PatternButton current={patternKey} setKey={setPatternKey} k="478" label="4-7-8" />
           <PatternButton current={patternKey} setKey={setPatternKey} k="coherent" label="Coherent 5/5" />
@@ -214,11 +273,30 @@ function Breathing({ running }: { running:boolean }) {
     </div>
   );
 }
-function PatternButton({ current, setKey, k, label }:{ current:BreathPatternKey; setKey:(k:BreathPatternKey)=>void; k:BreathPatternKey; label:string }) {
-  const active = current===k;
+function PatternButton({
+  current,
+  setKey,
+  k,
+  label,
+}: {
+  current: BreathPatternKey;
+  setKey: (k: BreathPatternKey) => void;
+  k: BreathPatternKey;
+  label: string;
+}) {
+  const active = current === k;
   return (
-    <button onClick={()=>setKey(k)}
-      style={{ padding:"6px 10px", borderRadius:999, border:"1px solid", borderColor: active?"#111":"#ddd", background: active?"#111":"#fff", color: active?"#fff":"#111" }}>
+    <button
+      onClick={() => setKey(k)}
+      style={{
+        padding: "6px 10px",
+        borderRadius: 999,
+        border: "1px solid",
+        borderColor: active ? "#111" : "#ddd",
+        background: active ? "#111" : "#fff",
+        color: active ? "#fff" : "#111",
+      }}
+    >
       {label}
     </button>
   );
@@ -234,19 +312,22 @@ const CSS_BREATH = `
 /* ===========================
    Affirmation Flash
    =========================== */
-function Affirmation({ running }: { running:boolean }) {
+function Affirmation({ running }: { running: boolean }) {
   const LS_KEY = "byb_affirmation";
   const [text, setText] = useState<string>(() => localStorage.getItem(LS_KEY) || "I follow through on what matters today.");
   const [speak, setSpeak] = useState<boolean>(false);
 
-  useEffect(() => { localStorage.setItem(LS_KEY, text); }, [text]);
+  useEffect(() => {
+    localStorage.setItem(LS_KEY, text);
+  }, [text]);
 
   useEffect(() => {
     if (!running || !speak) return;
     const say = () => {
       try {
         const utter = new SpeechSynthesisUtterance(text);
-        utter.rate = 0.95; utter.pitch = 1;
+        utter.rate = 0.95;
+        utter.pitch = 1;
         window.speechSynthesis.speak(utter);
       } catch {}
     };
@@ -257,23 +338,30 @@ function Affirmation({ running }: { running:boolean }) {
 
   return (
     <div className="card confidence-layout">
-      <div style={{ display:"grid", gap:12 }}>
-        <h2 style={{ margin:0 }}>Affirmation</h2>
-        <div style={{
-          padding:20, border:"1px solid #e5e7eb", borderRadius:12,
-          fontSize:22, fontWeight:700, lineHeight:1.3, textAlign:"center"
-        }}>
+      <div style={{ display: "grid", gap: 12 }}>
+        <h2 style={{ margin: 0 }}>Affirmation</h2>
+        <div
+          style={{
+            padding: 20,
+            border: "1px solid #e5e7eb",
+            borderRadius: 12,
+            fontSize: 22,
+            fontWeight: 700,
+            lineHeight: 1.3,
+            textAlign: "center",
+          }}
+        >
           {text}
         </div>
-        <label style={{ display:"grid", gap:6 }}>
+        <label style={{ display: "grid", gap: 6 }}>
           <div className="section-title">Edit</div>
-          <input value={text} onChange={e=>setText(e.target.value)} />
+          <input value={text} onChange={(e) => setText(e.target.value)} />
         </label>
       </div>
-      <div style={{ display:"grid", gap:10 }}>
+      <div style={{ display: "grid", gap: 10 }}>
         <div className="muted">Tip: keep it short, active, and present-tense.</div>
-        <label style={{ display:"inline-flex", alignItems:"center", gap:8 }}>
-          <input type="checkbox" checked={speak} onChange={e=>setSpeak(e.target.checked)} />
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <input type="checkbox" checked={speak} onChange={(e) => setSpeak(e.target.checked)} />
           Speak it while the timer runs
         </label>
       </div>
