@@ -204,5 +204,16 @@ html, body { overflow-x: hidden; }
   border-style: dashed;
 }
 
+/* Reusable two-col layout that stacks on mobile */
+.two-col { display: grid; gap: 12px; grid-template-columns: 1fr; }
+@media (min-width: 900px){
+  .two-col { grid-template-columns: 260px 1fr; }
+}
+.sidebar-sticky { position: sticky; top: 12px; align-self: start; }
+
+/* Make the chat scroll area comfy on tall phones */
+@media (max-width: 899px){
+  .two-col main.card { min-height: 60vh; }
+}
 
 
