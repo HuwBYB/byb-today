@@ -408,3 +408,30 @@ body{
 /* General safety: inputs/media never exceed viewport width */
 .page-confidence input, .page-confidence select, .page-confidence textarea, .page-confidence button{ max-width:100%; }
 .page-confidence img, .page-confidence video, .page-confidence canvas, .page-confidence svg{ max-width:100%; height:auto; display:block; }
+/* ===== Confidence Moves: responsive & overflow fixes ==================== */
+.page-confidence { max-width:100%; overflow-x:hidden; }
+.page-confidence * { box-sizing: border-box; }
+
+/* Two columns on desktop, stack on phones */
+.page-confidence .confidence-layout{
+  display:grid;
+  grid-template-columns: minmax(0,1fr) 320px; /* content + optional sidebar */
+  gap:12px;
+}
+.page-confidence .confidence-layout > * { min-width:0; }
+@media (max-width:720px){
+  .page-confidence .confidence-layout{ grid-template-columns: 1fr; }
+}
+
+/* Top toolbar rows wrap & shrink properly */
+.page-confidence .confidence-toolbar{
+  display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+}
+.page-confidence .confidence-toolbar > *{ min-width:0; max-width:100%; }
+.page-confidence .confidence-toolbar input[type="date"]{ flex:1 1 180px; min-width:0; }
+
+/* Bottom actions (if added later) */
+.page-confidence .confidence-actions{
+  display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px;
+}
+.page-confidence .confidence-actions > *{ min-width:0; max-width:100%; }
