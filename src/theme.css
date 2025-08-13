@@ -358,3 +358,53 @@ body{
 
 .heading-gradient{ filter: saturate(1.08); }
 .btn-soft{ filter: saturate(1.1); }
+/* ===== Confidence Moves: responsive & overflow fixes ==================== */
+.page-confidence { max-width:100%; overflow-x:hidden; }
+.page-confidence * { box-sizing: border-box; }
+
+/* If this page uses two columns, this grid stacks on phones */
+.page-confidence .confidence-layout{
+  display:grid;
+  grid-template-columns: minmax(0,1fr) 320px;  /* editor + sidebar (if any) */
+  gap:12px;
+}
+.page-confidence .confidence-layout > * { min-width:0; }
+@media (max-width:720px){
+  .page-confidence .confidence-layout{ grid-template-columns: 1fr; }
+}
+
+/* Top toolbar row (e.g., Today/←/date/→/counts/tips) */
+.page-confidence .confidence-toolbar{
+  display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+}
+.page-confidence .confidence-toolbar > *{ min-width:0; max-width:100%; }
+.page-confidence .confidence-toolbar input[type="date"]{ flex:1 1 180px; min-width:0; }
+
+/* Right-aligned count/hint text trims instead of pushing wide */
+.page-confidence .confidence-toolbar .cm-count,
+.page-confidence .confidence-toolbar .cm-hint,
+.page-confidence .confidence-toolbar .muted{
+  margin-left:auto;
+  min-width:0;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  max-width:50%;
+}
+@media (max-width:480px){
+  .page-confidence .confidence-toolbar .cm-count,
+  .page-confidence .confidence-toolbar .cm-hint,
+  .page-confidence .confidence-toolbar .muted{ max-width:100%; }
+}
+
+/* Bottom actions row (e.g., Export, Save preset, etc.) */
+.page-confidence .confidence-actions{
+  display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px;
+}
+.page-confidence .confidence-actions > *{ min-width:0; max-width:100%; }
+
+/* Chip/badge rows often cause overflow — let them wrap */
+.page-confidence .cm-chips{ display:flex; flex-wrap:wrap; gap:8px; }
+.page-confidence .cm-chips > *{ min-width:0; }
+
+/* General safety: inputs/media never exceed viewport width */
+.page-confidence input, .page-confidence select, .page-confidence textarea, .page-confidence button{ max-width:100%; }
+.page-confidence img, .page-confidence video, .page-confidence canvas, .page-confidence svg{ max-width:100%; height:auto; display:block; }
