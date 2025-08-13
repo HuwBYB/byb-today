@@ -6,8 +6,16 @@ import CalendarScreen from "./CalendarScreen";
 import AlfredScreen from "./AlfredScreen";
 import VisionBoardScreen from "./VisionBoardScreen";
 import GratitudeScreen from "./GratitudeScreen";
+import WinsScreen from "./WinsScreen";
 
-type Tab = "today" | "goals" | "calendar" | "vision" | "alfred" | "gratitude";
+type Tab =
+  | "today"
+  | "goals"
+  | "calendar"
+  | "vision"
+  | "alfred"
+  | "gratitude"
+  | "successes";
 
 function todayISO() {
   const d = new Date();
@@ -45,12 +53,55 @@ export default function App() {
             Best You Blueprint
           </div>
           <nav className="tabs">
-            <button className="tab" aria-current={tab === "today" ? "page" : undefined} onClick={gotoToday}>Today</button>
-            <button className="tab" aria-current={tab === "goals" ? "page" : undefined} onClick={() => setTab("goals")}>Goals</button>
-            <button className="tab" aria-current={tab === "calendar" ? "page" : undefined} onClick={() => setTab("calendar")}>Calendar</button>
-            <button className="tab" aria-current={tab === "vision" ? "page" : undefined} onClick={() => setTab("vision")}>Vision</button>
-            <button className="tab" aria-current={tab === "alfred" ? "page" : undefined} onClick={() => setTab("alfred")}>Alfred</button>
-            <button className="tab" aria-current={tab === "gratitude" ? "page" : undefined} onClick={() => setTab("gratitude")}>Gratitude</button>
+            <button
+              className="tab"
+              aria-current={tab === "today" ? "page" : undefined}
+              onClick={gotoToday}
+            >
+              Today
+            </button>
+            <button
+              className="tab"
+              aria-current={tab === "goals" ? "page" : undefined}
+              onClick={() => setTab("goals")}
+            >
+              Goals
+            </button>
+            <button
+              className="tab"
+              aria-current={tab === "calendar" ? "page" : undefined}
+              onClick={() => setTab("calendar")}
+            >
+              Calendar
+            </button>
+            <button
+              className="tab"
+              aria-current={tab === "vision" ? "page" : undefined}
+              onClick={() => setTab("vision")}
+            >
+              Vision
+            </button>
+            <button
+              className="tab"
+              aria-current={tab === "alfred" ? "page" : undefined}
+              onClick={() => setTab("alfred")}
+            >
+              Alfred
+            </button>
+            <button
+              className="tab"
+              aria-current={tab === "gratitude" ? "page" : undefined}
+              onClick={() => setTab("gratitude")}
+            >
+              Gratitude
+            </button>
+            <button
+              className="tab"
+              aria-current={tab === "successes" ? "page" : undefined}
+              onClick={() => setTab("successes")}
+            >
+              Successes
+            </button>
           </nav>
         </div>
       </div>
@@ -75,6 +126,8 @@ export default function App() {
         {tab === "alfred" && <AlfredScreen />}
 
         {tab === "gratitude" && <GratitudeScreen />}
+
+        {tab === "successes" && <WinsScreen />}
       </div>
     </AuthGate>
   );
