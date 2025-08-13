@@ -40,18 +40,23 @@ export default function GoalsScreen() {
   const [selected, setSelected] = useState<Goal | null>(null);
   const [showWizard, setShowWizard] = useState(false);
 
+  // steps state (Monthly → Weekly → Daily)
   const [daily, setDaily] = useState<string[]>([]);
   const [weekly, setWeekly] = useState<string[]>([]);
   const [monthly, setMonthly] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // simple goal creator
   const [sgTitle, setSgTitle] = useState("");
   const [sgTarget, setSgTarget] = useState("");
   const [sgCat, setSgCat] = useState<CatKey>("personal");
   const [creatingSimple, setCreatingSimple] = useState(false);
 
+  // category editor for selected
   const [editCat, setEditCat] = useState<CatKey>("other");
+
+  /* ----- auth ----- */
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -59,6 +64,7 @@ export default function GoalsScreen() {
     });
   }, []);
 
+  /* ----- load goals ----- */
   useEffect(() => { if (userId) loadGoals(); }, [userId]);
 
   async function loadGoals() {
@@ -72,6 +78,7 @@ export default function GoalsScreen() {
     setGoals(data as Goal[]);
   }
 
+  /* ----- open selected goal (load steps) ----- */
   async function openGoal(g: Goal) {
     setSelected(g);
     const { data, error } = await supabase
@@ -91,36 +98,30 @@ export default function GoalsScreen() {
     setEditCat(CATS.some(c => c.key === k) ? k : "other");
   }
 
-  function add(setter: (xs: string[]) => void, xs: string[]) { setter([...xs, ""]); }
-  function upd(setter: (xs: string[]) => void, xs: string[], i: number, v: string) { setter(xs.map((x, idx) => idx === i ? v : x)); }
-  function rm(setter: (xs: string[]) => void, xs: string[], i: number) { setter(xs.filter((_, idx) => idx !== i)); }
-
+  /* ----- save steps (and reseed) ----- */
   async function saveSteps() {
     if (!userId || !selected) return;
     setBusy(true); setErr(null);
     try {
+      // deactivate existing
       const { error: de } = await supabase
         .from("big_goal_steps")
         .update({ active: false })
         .eq("goal_id", selected.id);
       if (de) throw de;
 
+      // insert new (Monthly → Weekly → Daily)
       const rows: any[] = [];
-      const push = (cad: "daily" | "weekly" | "monthly", arr: string[]) => {
-        for (const s of arr.map(x => x.trim()).filter(Boolean)) {
-          rows.push({ user_id: userId, goal_id: selected.id, cadence: cad, description: s, active: true });
-        }
-      };
-      push("monthly", monthly);
-      push("weekly", weekly);
-      push("daily", daily);
+      for (const s of monthly.map(x=>x.trim()).filter(Boolean)) rows.push({ user_id:userId, goal_id:selected.id, cadence:"monthly", description:s, active:true });
+      for (const s of weekly.map(x=>x.trim()).filter(Boolean))  rows.push({ user_id:userId, goal_id:selected.id, cadence:"weekly",  description:s, active:true });
+      for (const s of daily.map(x=>x.trim()).filter(Boolean))   rows.push({ user_id:userId, goal_id:selected.id, cadence:"daily",   description:s, active:true });
 
       if (rows.length) {
         const { error: ie } = await supabase.from("big_goal_steps").insert(rows);
         if (ie) throw ie;
       }
-      await supabase.rpc("reseed_big_goal_steps", { p_goal_id: selected.id });
 
+      await supabase.rpc("reseed_big_goal_steps", { p_goal_id: selected.id });
       alert("Steps saved and future tasks updated.");
     } catch (e:any) {
       setErr(e.message || String(e));
@@ -129,6 +130,7 @@ export default function GoalsScreen() {
     }
   }
 
+  /* ----- create simple goal ----- */
   async function createSimpleGoal() {
     if (!userId) return;
     const title = sgTitle.trim();
@@ -156,6 +158,7 @@ export default function GoalsScreen() {
     }
   }
 
+  /* ----- save selected goal details (category) ----- */
   async function saveGoalDetails() {
     if (!selected) return;
     setBusy(true); setErr(null);
@@ -177,7 +180,7 @@ export default function GoalsScreen() {
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 12 }}>
-      {/* Left */}
+      {/* Left: list + creators */}
       <div className="card" style={{ display: "grid", gap: 12 }}>
         <h1>Goals</h1>
 
@@ -255,7 +258,7 @@ export default function GoalsScreen() {
           <div style={{ display: "grid", gap: 12 }}>
             {/* Header */}
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <span style={{ width: 14, height: 14, borderRadius: 999, background: selected.category_color || "#e5e7eb", border: "1px solid #d1d5dB" }} />
+              <span style={{ width: 14, height: 14, borderRadius: 999, background: selected.category_color || "#e5e7eb", border: "1px solid #d1d5db" }} />
               <div>
                 <h2 style={{ margin: 0 }}>{selected.title}</h2>
                 <div className="muted">
