@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
-import BigGoalWizard from "./BigGoalWizard";
 
-/* ---------- Categories + colours ---------- */
+/* -------- categories + colours (same palette as Goals) -------- */
 const CATS = [
   { key: "personal",  label: "Personal",  color: "#a855f7" }, // purple
   { key: "health",    label: "Health",    color: "#22c55e" }, // green
@@ -13,178 +12,133 @@ const CATS = [
 type CatKey = typeof CATS[number]["key"];
 const colorOf = (k: CatKey) => CATS.find(c => c.key === k)?.color || "#6b7280";
 
-/* ---------- Types ---------- */
-type Goal = {
-  id: number; // BIGINT
-  user_id: string;
-  title: string;
-  category: string | null;
-  category_color: string | null;
-  start_date: string | null;
-  target_date: string | null;
-  status: string | null;
-};
+/* -------- date helpers (local) -------- */
+function toISO(d: Date) {
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,"0"), dd=String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${dd}`;
+}
+function fromISO(s: string) {
+  const [y,m,d] = s.split("-").map(Number);
+  return new Date(y,(m??1)-1,d??1);
+}
+function clampDay(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+function lastDayOfMonth(y:number,m0:number){ return new Date(y,m0+1,0).getDate(); }
+function addMonthsClamped(base: Date, months: number, anchorDay?: number) {
+  const anchor = anchorDay ?? base.getDate();
+  const y = base.getFullYear(), m = base.getMonth() + months;
+  const first = new Date(y, m, 1);
+  const ld = lastDayOfMonth(first.getFullYear(), first.getMonth());
+  return new Date(first.getFullYear(), first.getMonth(), Math.min(anchor, ld));
+}
 
-type Step = {
-  id: number;
-  user_id: string;
-  goal_id: number; // BIGINT
-  cadence: "daily" | "weekly" | "monthly";
-  description: string;
-  active: boolean;
-};
+type Props = { onClose: () => void; onCreated: () => void };
 
-export default function GoalsScreen() {
-  const [userId, setUserId] = useState<string | null>(null);
-  const [goals, setGoals] = useState<Goal[]>([]);
-  const [selected, setSelected] = useState<Goal | null>(null);
-  const [showWizard, setShowWizard] = useState(false);
-
-  // Steps editor state (we’ll render Monthly → Weekly → Daily)
-  const [daily, setDaily] = useState<string[]>([]);
-  const [weekly, setWeekly] = useState<string[]>([]);
-  const [monthly, setMonthly] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
+export default function BigGoalWizard({ onClose, onCreated }: Props) {
+  const todayISO = useMemo(() => toISO(new Date()), []);
+  const [title, setTitle] = useState("");
+  const [category, setCategory] = useState<CatKey>("other");
+  const [startDate, setStartDate] = useState(todayISO);
+  const [targetDate, setTargetDate] = useState("");
+  const [halfwayNote, setHalfwayNote] = useState("");
+  const [monthlyCommit, setMonthlyCommit] = useState("");
+  const [weeklyCommit, setWeeklyCommit] = useState("");
+  const [dailyCommit, setDailyCommit] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  // Simple goal creator
-  const [sgTitle, setSgTitle] = useState("");
-  const [sgTarget, setSgTarget] = useState("");
-  const [sgCat, setSgCat] = useState<CatKey>("personal");
-  const [creatingSimple, setCreatingSimple] = useState(false);
+  const catColor = colorOf(category);
 
-  // Selected goal meta editor
-  const [editCat, setEditCat] = useState<CatKey>("other");
-  useEffect(() => {
-    if (selected?.category) {
-      const k = selected.category as CatKey;
-      setEditCat(CATS.some(c => c.key === k) ? k : "other");
-    } else {
-      setEditCat("other");
-    }
-  }, [selected]);
+  // halfway = exact midpoint between start and target
+  const computedHalfDate = useMemo(() => {
+    if (!targetDate) return "";
+    const a = fromISO(startDate), b = fromISO(targetDate);
+    if (b < a) return "";
+    return toISO(new Date((a.getTime() + b.getTime()) / 2));
+  }, [startDate, targetDate]);
 
-  /* ----- auth ----- */
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data, error }) => {
-      if (error) { setErr(error.message); return; }
-      setUserId(data.user?.id ?? null);
-    });
-  }, []);
-
-  /* ----- load goals ----- */
-  async function loadGoals() {
-    if (!userId) return;
-    const { data, error } = await supabase
-      .from("goals")
-      .select("id,user_id,title,category,category_color,start_date,target_date,status")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false });
-    if (error) { setErr(error.message); setGoals([]); return; }
-    setGoals(data as Goal[]);
-  }
-  useEffect(() => { if (userId) loadGoals(); }, [userId]);
-
-  /* ----- open a goal (load its steps) ----- */
-  async function openGoal(g: Goal) {
-    setSelected(g);
-    const { data, error } = await supabase
-      .from("big_goal_steps")
-      .select("*")
-      .eq("goal_id", g.id)
-      .eq("active", true)
-      .order("id", { ascending: true });
-    if (error) { setErr(error.message); setDaily([]); setWeekly([]); setMonthly([]); return; }
-    const rows = (data as Step[]) || [];
-    setMonthly(rows.filter(r => r.cadence === "monthly").map(r => r.description));
-    setWeekly(rows.filter(r => r.cadence === "weekly").map(r => r.description));
-    setDaily(rows.filter(r => r.cadence === "daily").map(r => r.description));
-  }
-
-  /* ----- helpers for step arrays ----- */
-  function add(setter: (xs: string[]) => void, xs: string[]) { setter([...xs, ""]);}
-  function upd(setter: (xs: string[]) => void, xs: string[], i: number, v: string) { setter(xs.map((x, idx) => idx === i ? v : x));}
-  function rm(setter: (xs: string[]) => void, xs: string[], i: number) { setter(xs.filter((_, idx) => idx !== i));}
-
-  /* ----- save steps + reseed ----- */
-  async function saveSteps() {
-    if (!userId || !selected) return;
-    setBusy(true); setErr(null);
+  async function create() {
+    setErr(null);
+    if (!title.trim()) { setErr("Please enter a goal title."); return; }
+    if (!targetDate)   { setErr("Please choose a target date."); return; }
+    setBusy(true);
     try {
-      const { error: de } = await supabase
-        .from("big_goal_steps")
-        .update({ active: false })
-        .eq("goal_id", selected.id);
-      if (de) throw de;
+      const { data: userData, error: uerr } = await supabase.auth.getUser();
+      if (uerr) throw uerr;
+      const userId = userData.user?.id;
+      if (!userId) throw new Error("Not signed in.");
 
-      const rows: any[] = [];
-      const push = (cad: "daily" | "weekly" | "monthly", arr: string[]) => {
-        for (const s of arr.map(x => x.trim()).filter(Boolean)) {
-          rows.push({ user_id: userId, goal_id: selected.id, cadence: cad, description: s, active: true });
-        }
-      };
-      // Order of inserts doesn’t affect scheduling, but we’ll mirror UI order for sanity:
-      push("monthly", monthly);
-      push("weekly", weekly);
-      push("daily", daily);
-
-      if (rows.length) {
-        const { error: ie } = await supabase.from("big_goal_steps").insert(rows);
-        if (ie) throw ie;
-      }
-
-      await supabase.rpc("reseed_big_goal_steps", { p_goal_id: selected.id });
-
-      alert("Steps saved and future tasks updated.");
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  /* ----- create a simple (non-wizard) goal with category ----- */
-  async function createSimpleGoal() {
-    if (!userId) return;
-    const title = sgTitle.trim();
-    if (!title) return;
-    setCreatingSimple(true); setErr(null);
-    try {
-      const { error } = await supabase
-        .from("goals")
+      // 1) create goal
+      const { data: goal, error: gerr } = await supabase.from("goals")
         .insert({
           user_id: userId,
-          title,
-          goal_type: "simple",
-          target_date: sgTarget || null,
-          category: sgCat,
-          category_color: colorOf(sgCat),
+          title: title.trim(),
+          goal_type: "big",
+          category,
+          category_color: catColor,
+          start_date: startDate,
+          target_date: targetDate,
+          halfway_note: halfwayNote || null,
+          halfway_date: computedHalfDate || null,
           status: "active",
-        });
-      if (error) throw error;
-      setSgTitle(""); setSgTarget("");
-      await loadGoals();
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
-      setCreatingSimple(false);
-    }
-  }
+        })
+        .select()
+        .single();
+      if (gerr) throw gerr;
 
-  /* ----- update selected goal's category ----- */
-  async function saveGoalDetails() {
-    if (!selected) return;
-    setBusy(true); setErr(null);
-    try {
-      const catColor = colorOf(editCat);
-      const { error } = await supabase
-        .from("goals")
-        .update({ category: editCat, category_color: catColor })
-        .eq("id", selected.id);
-      if (error) throw error;
-      setSelected({ ...selected, category: editCat, category_color: catColor });
-      await loadGoals();
-    } catch (e: any) {
+      // 2) seed tasks (Top Priorities) — monthly, weekly, daily
+      const start = fromISO(startDate), end = fromISO(targetDate);
+      if (end < start) throw new Error("Target date is before start date.");
+
+      const tasks: any[] = [];
+      const cat = goal.category;
+      const col = goal.category_color;
+
+      // Milestones
+      tasks.push({ user_id:userId, title:`BIG GOAL — Target: ${goal.title}`, due_date: targetDate, source:"big_goal_target", priority:2, category:cat, category_color:col });
+      if (computedHalfDate && halfwayNote.trim()) {
+        tasks.push({ user_id:userId, title:`BIG GOAL — Halfway: ${halfwayNote.trim()}`, due_date: computedHalfDate, source:"big_goal_halfway", priority:2, category:cat, category_color:col });
+      }
+
+      // Monthly — start next month, same DOM
+      if (monthlyCommit.trim()) {
+        let d = addMonthsClamped(start, 1, start.getDate());
+        while (d <= end) {
+          tasks.push({ user_id:userId, title:`BIG GOAL — Monthly: ${monthlyCommit.trim()}`, due_date: toISO(d), source:"big_goal_monthly", priority:2, category:cat, category_color:col });
+          d = addMonthsClamped(d, 1, start.getDate());
+        }
+      }
+
+      // Weekly — start next week (same weekday)
+      if (weeklyCommit.trim()) {
+        let d = new Date(start); d.setDate(d.getDate() + 7);
+        while (d <= end) {
+          tasks.push({ user_id:userId, title:`BIG GOAL — Weekly: ${weeklyCommit.trim()}`, due_date: toISO(d), source:"big_goal_weekly", priority:2, category:cat, category_color:col });
+          d.setDate(d.getDate() + 7);
+        }
+      }
+
+      // Daily — from today (or future start) through end
+      if (dailyCommit.trim()) {
+        let d = clampDay(new Date(Math.max(Date.now(), start.getTime())));
+        while (d <= end) {
+          tasks.push({ user_id:userId, title:`BIG GOAL — Daily: ${dailyCommit.trim()}`, due_date: toISO(d), source:"big_goal_daily", priority:2, category:cat, category_color:col });
+          d.setDate(d.getDate() + 1);
+        }
+      }
+
+      // 3) bulk insert
+      for (let i = 0; i < tasks.length; i += 500) {
+        const slice = tasks.slice(i, i + 500);
+        const { error: terr } = await supabase.from("tasks").insert(slice);
+        if (terr) throw terr;
+      }
+
+      onCreated();
+      onClose();
+      alert(`Big goal created! Seeded ${tasks.length} item(s).`);
+    } catch (e:any) {
       setErr(e.message || String(e));
     } finally {
       setBusy(false);
@@ -192,171 +146,71 @@ export default function GoalsScreen() {
   }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 12 }}>
-      {/* Left: list + create */}
-      <div className="card" style={{ display: "grid", gap: 12 }}>
-        <h1>Goals</h1>
+    <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 16, background: "#fff" }}>
+      <h2 style={{ fontSize: 18, marginBottom: 8 }}>Create a Big Goal (guided)</h2>
 
-        {/* Simple goal creator */}
-        <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 10 }}>
-          <div className="section-title">Create a simple goal</div>
-          <label style={{ display: "grid", gap: 6, marginTop: 6 }}>
-            <span className="muted">Title</span>
-            <input value={sgTitle} onChange={e => setSgTitle(e.target.value)} placeholder="e.g., Read 12 books" />
+      <div style={{ display: "grid", gap: 10 }}>
+        {/* title */}
+        <label>
+          <div className="muted">Big goal title</div>
+          <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g., Get 30 new customers" />
+        </label>
+
+        {/* category */}
+        <label>
+          <div className="muted">Category</div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <select value={category} onChange={e=>setCategory(e.target.value as CatKey)}>
+              {CATS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </select>
+            <span title="Category color" style={{ display:"inline-block", width:18, height:18, borderRadius:999, background:catColor, border:"1px solid #ccc" }} />
+          </div>
+        </label>
+
+        {/* dates */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <label style={{ flex: 1, minWidth: 220 }}>
+            <div className="muted">Start date</div>
+            <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} />
           </label>
-          <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
-            <label style={{ flex: 1 }}>
-              <div className="muted">Target date (optional)</div>
-              <input type="date" value={sgTarget} onChange={e => setSgTarget(e.target.value)} />
-            </label>
-            <label style={{ flex: 1 }}>
-              <div className="muted">Category</div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <select value={sgCat} onChange={e => setSgCat(e.target.value as CatKey)}>
-                  {CATS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
-                </select>
-                <span style={{ width: 16, height: 16, borderRadius: 999, background: colorOf(sgCat), border: "1px solid #ccc" }} />
-              </div>
-            </label>
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-            <button className="btn-primary" onClick={createSimpleGoal} disabled={!sgTitle.trim() || creatingSimple} style={{ borderRadius: 8 }}>
-              {creatingSimple ? "Adding…" : "Add Goal"}
-            </button>
-          </div>
+          <label style={{ flex: 1, minWidth: 220 }}>
+            <div className="muted">Target date</div>
+            <input type="date" value={targetDate} onChange={e=>setTargetDate(e.target.value)} />
+          </label>
         </div>
 
-        {/* Big Goal wizard launcher */}
-        <button className="btn-primary" onClick={() => setShowWizard(true)} style={{ borderRadius: 8 }}>
-          + Create Big Goal
-        </button>
+        {/* halfway note */}
+        <label>
+          <div className="muted">How will you know you’re halfway?</div>
+          <input value={halfwayNote} onChange={e=>setHalfwayNote(e.target.value)} placeholder="e.g., 15 customers or £X MRR" />
+          {computedHalfDate && <div className="muted" style={{ marginTop:6 }}>Halfway milestone: <b>{computedHalfDate}</b></div>}
+        </label>
 
-        <div className="section-title">Your goals</div>
-        <ul className="list">
-          {goals.length === 0 && <li className="muted">No goals yet.</li>}
-          {goals.map(g => (
-            <li key={g.id} className="item">
-              <button style={{ width: "100%", textAlign: "left", display: "flex", gap: 8, alignItems: "center" }} onClick={() => openGoal(g)}>
-                <span
-                  title={g.category || "No category"}
-                  style={{
-                    width: 10, height: 10, borderRadius: 999,
-                    background: g.category_color || "#e5e7eb",
-                    border: "1px solid #d1d5db",
-                    flex: "0 0 auto"
-                  }}
-                />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600 }}>{g.title}</div>
-                  <div className="muted">
-                    {(g.category ? `${g.category}` : "uncategorised")}
-                    {g.target_date ? ` • target ${g.target_date}` : ""}
-                  </div>
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
+        {/* commitments — ORDER: Monthly → Weekly → Daily */}
+        <label>
+          <div className="muted">Monthly commitment (optional)</div>
+          <input value={monthlyCommit} onChange={e=>setMonthlyCommit(e.target.value)} placeholder="e.g., At least 2 new customers" />
+          <div className="muted" style={{ marginTop:6 }}>Starts next month on same day-of-month.</div>
+        </label>
 
-        {showWizard && (
-          <div style={{ marginTop: 8 }}>
-            <BigGoalWizard
-              onClose={() => setShowWizard(false)}
-              onCreated={() => { setShowWizard(false); loadGoals(); }}
-            />
-          </div>
-        )}
-      </div>
+        <label>
+          <div className="muted">Weekly commitment (optional)</div>
+          <input value={weeklyCommit} onChange={e=>setWeeklyCommit(e.target.value)} placeholder="e.g., 5 new prospects" />
+          <div className="muted" style={{ marginTop:6 }}>Starts next week on same weekday.</div>
+        </label>
 
-      {/* Right: details + category editor + steps editor */}
-      <div className="card">
-        {!selected ? (
-          <div className="muted">Select a goal to view or edit details and steps.</div>
-        ) : (
-          <div style={{ display: "grid", gap: 12 }}>
-            {/* Header */}
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <span
-                style={{
-                  width: 14, height: 14, borderRadius: 999,
-                  background: selected.category_color || "#e5e7eb",
-                  border: "1px solid #d1d5db"
-                }}
-              />
-              <div>
-                <h2 style={{ margin: 0 }}>{selected.title}</h2>
-                <div className="muted">
-                  {selected.start_date || "-"} → {selected.target_date || "-"}
-                  {selected.category ? ` • ${selected.category}` : ""}
-                </div>
-              </div>
-            </div>
+        <label>
+          <div className="muted">Daily commitment (optional)</div>
+          <input value={dailyCommit} onChange={e=>setDailyCommit(e.target.value)} placeholder="e.g., Call or email 15 people" />
+          <div className="muted" style={{ marginTop:6 }}>Seeds every day from today (or future start) through target date.</div>
+        </label>
 
-            {/* Category editor */}
-            <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 10 }}>
-              <div className="section-title">Edit details</div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
-                <label>
-                  <div className="muted">Category</div>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <select value={editCat} onChange={e => setEditCat(e.target.value as CatKey)}>
-                      {CATS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
-                    </select>
-                    <span style={{ width: 16, height: 16, borderRadius: 999, background: colorOf(editCat), border: "1px solid #ccc" }} />
-                  </div>
-                </label>
-                <button className="btn-primary" onClick={saveGoalDetails} disabled={busy} style={{ borderRadius: 8, marginLeft: "auto" }}>
-                  {busy ? "Saving…" : "Save details"}
-                </button>
-              </div>
-            </div>
+        {err && <div style={{ color: "red" }}>{err}</div>}
 
-            {/* Steps editor — ORDERED Monthly → Weekly → Daily */}
-            <div>
-              <h3 style={{ marginTop: 0 }}>Steps</h3>
-
-              <fieldset style={{ border: "1px solid #eee", borderRadius: 8, padding: 10, marginBottom: 10 }}>
-                <legend>Monthly</legend>
-                {monthly.map((v, i) => (
-                  <div key={`m${i}`} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                    <input value={v} onChange={e => upd(setMonthly, monthly, i, e.target.value)} placeholder="Monthly step…" style={{ flex: 1 }} />
-                    {monthly.length > 1 && <button onClick={() => rm(setMonthly, monthly, i)}>–</button>}
-                  </div>
-                ))}
-                <button onClick={() => add(setMonthly, monthly)}>+ Add monthly step</button>
-              </fieldset>
-
-              <fieldset style={{ border: "1px solid #eee", borderRadius: 8, padding: 10, marginBottom: 10 }}>
-                <legend>Weekly</legend>
-                {weekly.map((v, i) => (
-                  <div key={`w${i}`} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                    <input value={v} onChange={e => upd(setWeekly, weekly, i, e.target.value)} placeholder="Weekly step…" style={{ flex: 1 }} />
-                    {weekly.length > 1 && <button onClick={() => rm(setWeekly, weekly, i)}>–</button>}
-                  </div>
-                ))}
-                <button onClick={() => add(setWeekly, weekly)}>+ Add weekly step</button>
-              </fieldset>
-
-              <fieldset style={{ border: "1px solid #eee", borderRadius: 8, padding: 10 }}>
-                <legend>Daily</legend>
-                {daily.map((v, i) => (
-                  <div key={`d${i}`} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                    <input value={v} onChange={e => upd(setDaily, daily, i, e.target.value)} placeholder="Daily step…" style={{ flex: 1 }} />
-                    {daily.length > 1 && <button onClick={() => rm(setDaily, daily, i)}>–</button>}
-                  </div>
-                ))}
-                <button onClick={() => add(setDaily, daily)}>+ Add daily step</button>
-              </fieldset>
-
-              {err && <div style={{ color: "red", marginTop: 8 }}>{err}</div>}
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button onClick={saveSteps} disabled={busy} className="btn-primary" style={{ borderRadius: 8 }}>
-                  {busy ? "Saving…" : "Save steps & reseed"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <div style={{ display:"flex", gap:8, marginTop:8 }}>
+          <button onClick={create} disabled={busy} className="btn-primary" style={{ borderRadius:8 }}>{busy?"Creating…":"Create Big Goal"}</button>
+          <button onClick={onClose} disabled={busy}>Cancel</button>
+        </div>
       </div>
     </div>
   );
