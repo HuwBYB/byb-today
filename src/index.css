@@ -94,7 +94,7 @@ button:disabled { opacity:.6; cursor:not-allowed; }
   background: #ffffffd9; backdrop-filter: blur(10px);
   border-top:1px solid var(--border);
   padding-bottom: var(--safe-bottom);
-  z-index: 50;
+  z-index: 50; /* overridden to 9999 below to ensure it's always on top */
 }
 .tabbar-inner{
   height: var(--tabbar-height);
@@ -136,3 +136,31 @@ input[type="radio"] {
   vertical-align: middle;
   margin: 0;
 }
+
+/* ===== Mobile overflow + layout fixes ===== */
+
+/* Never allow sideways scroll on the page */
+html, body { overflow-x: hidden; }
+
+/* Prevent children from forcing cards wider than the viewport */
+.card > * { min-width: 0; }
+
+/* On small screens, collapse our common 2-col grids to 1 column */
+@media (max-width: 899px){
+  /* Collapse inline-styled grids used across screens */
+  [style*="grid-template-columns: 1fr 320px"],
+  [style*="grid-template-columns: 320px 1fr"],
+  [style*="grid-template-columns: 1fr 300px"],
+  [style*="grid-template-columns: 300px 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Make sure inputs don’t push width */
+  input, select, textarea { max-width: 100%; }
+
+  /* Give cards a little extra bottom padding so the tab bar never covers actions */
+  .app-shell { padding-bottom: calc(var(--tabbar-height) + var(--safe-bottom) + 16px); }
+}
+
+/* Keep the tab bar above everything, everywhere */
+.tabbar { z-index: 9999; }
