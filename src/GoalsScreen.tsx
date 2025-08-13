@@ -4,18 +4,18 @@ import BigGoalWizard from "./BigGoalWizard";
 
 /* ---------- Categories + colours ---------- */
 const CATS = [
-  { key: "personal",  label: "Personal",  color: "#a855f7" }, // purple
-  { key: "health",    label: "Health",    color: "#22c55e" }, // green
-  { key: "business",  label: "Business",  color: "#3b82f6" }, // blue
-  { key: "finance",   label: "Finance",   color: "#f59e0b" }, // amber
-  { key: "other",     label: "Other",     color: "#6b7280" }, // gray
+  { key: "personal",  label: "Personal",  color: "#a855f7" },
+  { key: "health",    label: "Health",    color: "#22c55e" },
+  { key: "business",  label: "Business",  color: "#3b82f6" },
+  { key: "finance",   label: "Finance",   color: "#f59e0b" },
+  { key: "other",     label: "Other",     color: "#6b7280" },
 ] as const;
 type CatKey = typeof CATS[number]["key"];
 const colorOf = (k: CatKey) => CATS.find(c => c.key === k)?.color || "#6b7280";
 
 /* ---------- Types ---------- */
 type Goal = {
-  id: number; // BIGINT
+  id: number;
   user_id: string;
   title: string;
   category: string | null;
@@ -28,7 +28,7 @@ type Goal = {
 type Step = {
   id: number;
   user_id: string;
-  goal_id: number; // BIGINT
+  goal_id: number;
   cadence: "daily" | "weekly" | "monthly";
   description: string;
   active: boolean;
@@ -40,32 +40,18 @@ export default function GoalsScreen() {
   const [selected, setSelected] = useState<Goal | null>(null);
   const [showWizard, setShowWizard] = useState(false);
 
-  // Steps editor state
   const [daily, setDaily] = useState<string[]>([]);
   const [weekly, setWeekly] = useState<string[]>([]);
   const [monthly, setMonthly] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Simple goal creator state
   const [sgTitle, setSgTitle] = useState("");
   const [sgTarget, setSgTarget] = useState("");
   const [sgCat, setSgCat] = useState<CatKey>("personal");
   const [creatingSimple, setCreatingSimple] = useState(false);
 
-  // Selected goal meta editor
   const [editCat, setEditCat] = useState<CatKey>("other");
-  useEffect(() => {
-    if (selected?.category) {
-      const k = (selected.category as CatKey);
-      if (CATS.some(c => c.key === k)) setEditCat(k);
-      else setEditCat("other");
-    } else {
-      setEditCat("other");
-    }
-  }, [selected]);
-
-  /* ----- auth ----- */
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -73,7 +59,8 @@ export default function GoalsScreen() {
     });
   }, []);
 
-  /* ----- load goals ----- */
+  useEffect(() => { if (userId) loadGoals(); }, [userId]);
+
   async function loadGoals() {
     if (!userId) return;
     const { data, error } = await supabase
@@ -84,9 +71,7 @@ export default function GoalsScreen() {
     if (error) { setErr(error.message); setGoals([]); return; }
     setGoals(data as Goal[]);
   }
-  useEffect(() => { if (userId) loadGoals(); }, [userId]);
 
-  /* ----- open a goal (load its steps) ----- */
   async function openGoal(g: Goal) {
     setSelected(g);
     const { data, error } = await supabase
@@ -97,17 +82,19 @@ export default function GoalsScreen() {
       .order("id", { ascending: true });
     if (error) { setErr(error.message); setDaily([]); setWeekly([]); setMonthly([]); return; }
     const rows = (data as Step[]) || [];
-    setDaily(rows.filter(r => r.cadence === "daily").map(r => r.description));
-    setWeekly(rows.filter(r => r.cadence === "weekly").map(r => r.description));
     setMonthly(rows.filter(r => r.cadence === "monthly").map(r => r.description));
+    setWeekly(rows.filter(r => r.cadence === "weekly").map(r => r.description));
+    setDaily(rows.filter(r => r.cadence === "daily").map(r => r.description));
+
+    // prime category editor
+    const k = (g.category || "other") as CatKey;
+    setEditCat(CATS.some(c => c.key === k) ? k : "other");
   }
 
-  /* ----- helpers for step arrays ----- */
   function add(setter: (xs: string[]) => void, xs: string[]) { setter([...xs, ""]); }
   function upd(setter: (xs: string[]) => void, xs: string[], i: number, v: string) { setter(xs.map((x, idx) => idx === i ? v : x)); }
   function rm(setter: (xs: string[]) => void, xs: string[], i: number) { setter(xs.filter((_, idx) => idx !== i)); }
 
-  /* ----- save steps + reseed ----- */
   async function saveSteps() {
     if (!userId || !selected) return;
     setBusy(true); setErr(null);
@@ -124,24 +111,24 @@ export default function GoalsScreen() {
           rows.push({ user_id: userId, goal_id: selected.id, cadence: cad, description: s, active: true });
         }
       };
-      push("daily", daily); push("weekly", weekly); push("monthly", monthly);
+      push("monthly", monthly);
+      push("weekly", weekly);
+      push("daily", daily);
+
       if (rows.length) {
         const { error: ie } = await supabase.from("big_goal_steps").insert(rows);
         if (ie) throw ie;
       }
-
-      // Reseed the future tasks for this goal
       await supabase.rpc("reseed_big_goal_steps", { p_goal_id: selected.id });
 
       alert("Steps saved and future tasks updated.");
-    } catch (e: any) {
+    } catch (e:any) {
       setErr(e.message || String(e));
     } finally {
       setBusy(false);
     }
   }
 
-  /* ----- create a simple (non-wizard) goal with category ----- */
   async function createSimpleGoal() {
     if (!userId) return;
     const title = sgTitle.trim();
@@ -162,14 +149,13 @@ export default function GoalsScreen() {
       if (error) throw error;
       setSgTitle(""); setSgTarget("");
       await loadGoals();
-    } catch (e: any) {
+    } catch (e:any) {
       setErr(e.message || String(e));
     } finally {
       setCreatingSimple(false);
     }
   }
 
-  /* ----- update selected goal's category ----- */
   async function saveGoalDetails() {
     if (!selected) return;
     setBusy(true); setErr(null);
@@ -180,11 +166,9 @@ export default function GoalsScreen() {
         .update({ category: editCat, category_color: catColor })
         .eq("id", selected.id);
       if (error) throw error;
-      // reflect locally
       setSelected({ ...selected, category: editCat, category_color: catColor });
-      // reload list so colours update in sidebar
       await loadGoals();
-    } catch (e: any) {
+    } catch (e:any) {
       setErr(e.message || String(e));
     } finally {
       setBusy(false);
@@ -193,7 +177,7 @@ export default function GoalsScreen() {
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 12 }}>
-      {/* Left: list + create */}
+      {/* Left */}
       <div className="card" style={{ display: "grid", gap: 12 }}>
         <h1>Goals</h1>
 
@@ -226,7 +210,7 @@ export default function GoalsScreen() {
           </div>
         </div>
 
-        {/* Big Goal wizard launcher */}
+        {/* Big Goal wizard */}
         <button className="btn-primary" onClick={() => setShowWizard(true)} style={{ borderRadius: 8 }}>
           + Create Big Goal
         </button>
@@ -239,12 +223,7 @@ export default function GoalsScreen() {
               <button style={{ width: "100%", textAlign: "left", display: "flex", gap: 8, alignItems: "center" }} onClick={() => openGoal(g)}>
                 <span
                   title={g.category || "No category"}
-                  style={{
-                    width: 10, height: 10, borderRadius: 999,
-                    background: g.category_color || "#e5e7eb",
-                    border: "1px solid #d1d5db",
-                    flex: "0 0 auto"
-                  }}
+                  style={{ width: 10, height: 10, borderRadius: 999, background: g.category_color || "#e5e7eb", border: "1px solid #d1d5db", flex: "0 0 auto" }}
                 />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 600 }}>{g.title}</div>
@@ -268,7 +247,7 @@ export default function GoalsScreen() {
         )}
       </div>
 
-      {/* Right: details + category editor + steps editor (for big goals) */}
+      {/* Right: details + steps */}
       <div className="card">
         {!selected ? (
           <div className="muted">Select a goal to view or edit details and steps.</div>
@@ -276,13 +255,7 @@ export default function GoalsScreen() {
           <div style={{ display: "grid", gap: 12 }}>
             {/* Header */}
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <span
-                style={{
-                  width: 14, height: 14, borderRadius: 999,
-                  background: selected.category_color || "#e5e7eb",
-                  border: "1px solid #d1d5db"
-                }}
-              />
+              <span style={{ width: 14, height: 14, borderRadius: 999, background: selected.category_color || "#e5e7eb", border: "1px solid #d1d5dB" }} />
               <div>
                 <h2 style={{ margin: 0 }}>{selected.title}</h2>
                 <div className="muted">
@@ -311,41 +284,41 @@ export default function GoalsScreen() {
               </div>
             </div>
 
-            {/* Steps editor (visible for any goal; harmless for simple goals) */}
+            {/* Steps editor — ORDER: Monthly → Weekly → Daily */}
             <div>
               <h3 style={{ marginTop: 0 }}>Steps</h3>
 
               <fieldset style={{ border: "1px solid #eee", borderRadius: 8, padding: 10, marginBottom: 10 }}>
-                <legend>Daily</legend>
-                {daily.map((v, i) => (
-                  <div key={`d${i}`} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                    <input value={v} onChange={e => upd(setDaily, daily, i, e.target.value)} placeholder="Daily step…" style={{ flex: 1 }} />
-                    {daily.length > 1 && <button onClick={() => rm(setDaily, daily, i)}>–</button>}
+                <legend>Monthly</legend>
+                {monthly.map((v, i) => (
+                  <div key={`m${i}`} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                    <input value={v} onChange={e => setMonthly(monthly.map((x,idx)=>idx===i?e.target.value:x))} placeholder="Monthly step…" style={{ flex: 1 }} />
+                    {monthly.length > 1 && <button onClick={() => setMonthly(monthly.filter((_,idx)=>idx!==i))}>–</button>}
                   </div>
                 ))}
-                <button onClick={() => add(setDaily, daily)}>+ Add daily step</button>
+                <button onClick={() => setMonthly([...monthly, ""])}>+ Add monthly step</button>
               </fieldset>
 
               <fieldset style={{ border: "1px solid #eee", borderRadius: 8, padding: 10, marginBottom: 10 }}>
                 <legend>Weekly</legend>
                 {weekly.map((v, i) => (
                   <div key={`w${i}`} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                    <input value={v} onChange={e => upd(setWeekly, weekly, i, e.target.value)} placeholder="Weekly step…" style={{ flex: 1 }} />
-                    {weekly.length > 1 && <button onClick={() => rm(setWeekly, weekly, i)}>–</button>}
+                    <input value={v} onChange={e => setWeekly(weekly.map((x,idx)=>idx===i?e.target.value:x))} placeholder="Weekly step…" style={{ flex: 1 }} />
+                    {weekly.length > 1 && <button onClick={() => setWeekly(weekly.filter((_,idx)=>idx!==i))}>–</button>}
                   </div>
                 ))}
-                <button onClick={() => add(setWeekly, weekly)}>+ Add weekly step</button>
+                <button onClick={() => setWeekly([...weekly, ""])}>+ Add weekly step</button>
               </fieldset>
 
               <fieldset style={{ border: "1px solid #eee", borderRadius: 8, padding: 10 }}>
-                <legend>Monthly</legend>
-                {monthly.map((v, i) => (
-                  <div key={`m${i}`} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                    <input value={v} onChange={e => upd(setMonthly, monthly, i, e.target.value)} placeholder="Monthly step…" style={{ flex: 1 }} />
-                    {monthly.length > 1 && <button onClick={() => rm(setMonthly, monthly, i)}>–</button>}
+                <legend>Daily</legend>
+                {daily.map((v, i) => (
+                  <div key={`d${i}`} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                    <input value={v} onChange={e => setDaily(daily.map((x,idx)=>idx===i?e.target.value:x))} placeholder="Daily step…" style={{ flex: 1 }} />
+                    {daily.length > 1 && <button onClick={() => setDaily(daily.filter((_,idx)=>idx!==i))}>–</button>}
                   </div>
                 ))}
-                <button onClick={() => add(setMonthly, monthly)}>+ Add monthly step</button>
+                <button onClick={() => setDaily([...daily, ""])}>+ Add daily step</button>
               </fieldset>
 
               {err && <div style={{ color: "red", marginTop: 8 }}>{err}</div>}
