@@ -1,58 +1,66 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-type Props = {
-  onSelectDate?: (iso: string) => void;
-};
-
 type Task = {
   id: number;
   user_id: string;
   title: string;
-  due_date: string | null; // 'YYYY-MM-DD'
-  due_time: string | null; // 'HH:MM:SS' (optional)
-  status: "pending" | "done" | string;
+  due_date: string | null; // YYYY-MM-DD
   priority: number | null;
+  category: string | null;
   category_color: string | null;
+  completed_at: string | null;
+  source: string | null;
 };
 
-function toISO(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${dd}`;
-}
-function startOfMonthGrid(d: Date) {
-  const first = new Date(d.getFullYear(), d.getMonth(), 1);
-  const wd = (first.getDay() + 6) % 7; // Mon=0..Sun=6
-  const gridStart = new Date(first);
-  gridStart.setDate(first.getDate() - wd);
-  return gridStart;
-}
-function endOfMonthGrid(d: Date) {
-  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-  const wd = (last.getDay() + 6) % 7; // Mon=0..Sun=6
-  const gridEnd = new Date(last);
-  gridEnd.setDate(last.getDate() + (6 - wd));
-  return gridEnd;
-}
-function formatTime(t: string | null) {
-  if (!t) return "";
-  const [hhStr, mmStr] = t.split(":");
-  const hh = Number(hhStr);
-  const mm = Number(mmStr || "0");
-  const ampm = hh >= 12 ? "pm" : "am";
-  const h12 = ((hh + 11) % 12) + 1;
-  return `${h12}${mm ? ":" + String(mm).padStart(2, "0") : ""}${ampm}`;
-}
-
-export default function CalendarScreen({ onSelectDate }: Props) {
+export default function CalendarScreen({
+  onSelectDate,
+}: {
+  onSelectDate?: (iso: string) => void;
+}) {
   const [userId, setUserId] = useState<string | null>(null);
-  const [cursor, setCursor] = useState<Date>(new Date()); // month being viewed
-  const [byDate, setByDate] = useState<Record<string, Task[]>>({});
+  const todayISO = toISO(new Date());
+
+  const [cursor, setCursor] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+  const [selectedISO, setSelectedISO] = useState<string>(todayISO);
+
+  const monthLabel = useMemo(() => cursor.toLocaleString(undefined, { month: "long", year: "numeric" }), [cursor]);
+
+  const firstDayOfMonth = useMemo(() => new Date(cursor.getFullYear(), cursor.getMonth(), 1), [cursor]);
+  const lastDayOfMonth = useMemo(() => new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0), [cursor]);
+
+  const startGrid = useMemo(() => {
+    const d = new Date(firstDayOfMonth);
+    // Start on Monday (ISO week). Adjust so Mon=0 … Sun=6.
+    const dow = (d.getDay() + 6) % 7;
+    d.setDate(d.getDate() - dow);
+    return d;
+  }, [firstDayOfMonth]);
+  const endGrid = useMemo(() => {
+    const d = new Date(lastDayOfMonth);
+    const dow = (d.getDay() + 6) % 7; // Mon=0 … Sun=6
+    d.setDate(d.getDate() + (6 - dow));
+    return d;
+  }, [lastDayOfMonth]);
+
+  const gridDays = useMemo(() => {
+    const out: string[] = [];
+    const d = new Date(startGrid);
+    while (d <= endGrid) {
+      out.push(toISO(d));
+      d.setDate(d.getDate() + 1);
+    }
+    return out;
+  }, [startGrid, endGrid]);
+
+  const [tasksByDay, setTasksByDay] = useState<Record<string, Task[]>>({});
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // auth
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -60,204 +68,196 @@ export default function CalendarScreen({ onSelectDate }: Props) {
     });
   }, []);
 
-  const gridStart = useMemo(() => startOfMonthGrid(cursor), [cursor]);
-  const gridEnd = useMemo(() => endOfMonthGrid(cursor), [cursor]);
-
-  async function loadMonth() {
+  // load month tasks
+  useEffect(() => {
     if (!userId) return;
-    setLoading(true); setErr(null);
+    loadMonthTasks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, firstDayOfMonth.getTime(), lastDayOfMonth.getTime()]);
+
+  async function loadMonthTasks() {
+    if (!userId) return;
+    setErr(null); setLoading(true);
     try {
       const { data, error } = await supabase
         .from("tasks")
-        .select("id,user_id,title,due_date,due_time,status,priority,category_color")
+        .select("id,user_id,title,due_date,priority,category,category_color,completed_at,source")
         .eq("user_id", userId)
-        .gte("due_date", toISO(gridStart))
-        .lte("due_date", toISO(gridEnd))
+        .gte("due_date", toISO(firstDayOfMonth))
+        .lte("due_date", toISO(lastDayOfMonth))
         .order("due_date", { ascending: true })
-        .order("due_time", { ascending: true });
+        .order("priority", { ascending: true })
+        .order("id", { ascending: true });
       if (error) throw error;
-
       const map: Record<string, Task[]> = {};
       for (const t of (data as Task[])) {
-        const key = t.due_date || "";
-        if (!key) continue;
-        (map[key] ||= []).push(t);
+        const day = (t.due_date || "").slice(0, 10);
+        if (!day) continue;
+        (map[day] ||= []).push(t);
       }
-      Object.values(map).forEach(list => {
-        list.sort((a, b) => {
-          const ta = a.due_time || "99:99:99";
-          const tb = b.due_time || "99:99:99";
-          if (ta < tb) return -1;
-          if (ta > tb) return 1;
-          const pa = a.priority ?? 0, pb = b.priority ?? 0;
-          if (pa !== pb) return pb - pa;
-          return a.id - b.id;
-        });
-      });
-
-      setByDate(map);
+      setTasksByDay(map);
     } catch (e: any) {
       setErr(e.message || String(e));
-      setByDate({});
+      setTasksByDay({});
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { if (userId) loadMonth(); }, [userId, cursor]);
-
-  function monthLabel(d: Date) {
-    return d.toLocaleString(undefined, { month: "long", year: "numeric" });
+  function prevMonth() {
+    const d = new Date(cursor);
+    d.setMonth(d.getMonth() - 1);
+    setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
   }
-  function isSameDay(a: Date, b: Date) {
-    return a.getFullYear() === b.getFullYear()
-      && a.getMonth() === b.getMonth()
-      && a.getDate() === b.getDate();
+  function nextMonth() {
+    const d = new Date(cursor);
+    d.setMonth(d.getMonth() + 1);
+    setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
   }
-
-  const today = new Date();
-
-  function gotoToday() { setCursor(new Date()); }
-  function gotoPrevMonth() {
-    setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1));
-  }
-  function gotoNextMonth() {
-    setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1));
+  function goToday() {
+    const d = new Date();
+    setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
+    setSelectedISO(toISO(d));
+    if (onSelectDate) onSelectDate(toISO(d));
   }
 
-  // Build 6 weeks grid
-  const days: Date[] = [];
-  {
-    const d = new Date(gridStart);
-    while (d <= gridEnd) {
-      days.push(new Date(d));
-      d.setDate(d.getDate() + 1);
-    }
+  function isSameMonth(iso: string) {
+    const d = fromISO(iso);
+    return d.getMonth() === cursor.getMonth() && d.getFullYear() === cursor.getFullYear();
   }
+
+  const dayTasks = tasksByDay[selectedISO] || [];
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button onClick={gotoPrevMonth}>←</button>
-          <div style={{ fontWeight: 600 }}>{monthLabel(cursor)}</div>
-          <button onClick={gotoNextMonth}>→</button>
+      <div className="card" style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <button onClick={goToday}>Today</button>
+          <button onClick={prevMonth}>←</button>
+          <strong>{monthLabel}</strong>
+          <button onClick={nextMonth}>→</button>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button onClick={gotoToday}>Today</button>
-          {loading && <span className="muted">Loading…</span>}
-        </div>
+        {loading ? <div className="muted">Loading…</div> : <div className="muted">{Object.values(tasksByDay).reduce((a, b) => a + b.length, 0)} tasks this month</div>}
       </div>
 
-      <div className="card">
-        {/* Weekday headers (Mon..Sun) */}
+      {/* Weekday header (Mon..Sun) */}
+      <div className="card" style={{ padding: 8 }}>
         <div
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(7, 1fr)",
             gap: 6,
-            marginBottom: 6,
             fontSize: 12,
-            color: "#6b7280",
+            color: "#64748b",
           }}
         >
-          {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((w) => (
-            <div key={w} style={{ textAlign: "right", paddingRight: 6 }}>{w}</div>
+          {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d => (
+            <div key={d} style={{ textAlign: "center" }}>{d}</div>
           ))}
         </div>
+      </div>
 
-        {/* Calendar grid */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
-          {days.map((d) => {
-            const iso = toISO(d);
-            const inMonth = d.getMonth() === cursor.getMonth();
-            const tasks = byDate[iso] || [];
+      {/* Month grid */}
+      <div className="card" style={{ padding: 8 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(7, 1fr)",
+            gap: 6,
+          }}
+        >
+          {gridDays.map((iso) => {
+            const inMonth = isSameMonth(iso);
+            const list = (tasksByDay[iso] || []).slice(0); // copy
+            // sort by priority asc, then incomplete first
+            list.sort((a, b) => {
+              const pa = a.priority ?? 9, pb = b.priority ?? 9;
+              if (pa !== pb) return pa - pb;
+              const ca = a.completed_at ? 1 : 0;
+              const cb = b.completed_at ? 1 : 0;
+              if (ca !== cb) return ca - cb;
+              return (a.id ?? 0) - (b.id ?? 0);
+            });
+
+            // mobile-friendly: show up to 2 pills + "+N"
+            const maxPills = 2;
+            const visible = list.slice(0, maxPills);
+            const extra = Math.max(0, list.length - visible.length);
+
+            const isSelected = iso === selectedISO;
+
             return (
-              <div
+              <button
                 key={iso}
+                onClick={() => {
+                  setSelectedISO(iso);
+                  if (onSelectDate) onSelectDate(iso);
+                }}
+                className="cal-day"
+                title={`${iso}${list.length ? ` • ${list.length} task(s)` : ""}`}
                 style={{
-                  border: "1px solid #e5e7eb",
-                  borderRadius: 8,
-                  padding: 6,
-                  minHeight: 96,
-                  background: inMonth ? "#fff" : "#f9fafb",
-                  opacity: inMonth ? 1 : 0.7,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 6,
+                  textAlign: "left",
+                  padding: 8,
+                  borderRadius: 10,
+                  border: "1px solid var(--border)",
+                  background: isSelected ? "#eef2ff" : "#fff",
+                  opacity: inMonth ? 1 : 0.5,
                 }}
               >
-                {/* Day number */}
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <button
-                    onClick={() => onSelectDate && onSelectDate(iso)}
-                    title="Open this day in Today"
-                    style={{
-                      fontWeight: isSameDay(d, today) ? 700 : 600,
-                      background: "transparent",
-                      border: "none",
-                      padding: 0,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {d.getDate()}
-                  </button>
-                  {tasks.length > 0 && (
-                    <span className="muted" style={{ fontSize: 12 }}>{tasks.length}</span>
-                  )}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{fromISO(iso).getDate()}</div>
+                  {!!list.length && <div className="muted" style={{ fontSize: 11 }}>{list.length}</div>}
                 </div>
 
-                {/* Task list preview (first 3) */}
+                {/* task pills */}
                 <div style={{ display: "grid", gap: 4 }}>
-                  {tasks.slice(0, 3).map((t) => (
-                    <div
-                      key={t.id}
-                      title={t.title}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        fontSize: 12,
-                        opacity: t.status === "done" ? 0.6 : 1,
-                        textDecoration: t.status === "done" ? "line-through" : "none",
-                      }}
-                    >
-                      <span
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: 999,
-                          background: t.category_color || "#d1d5db",
-                          flex: "0 0 auto",
-                        }}
-                      />
-                      <span style={{ minWidth: 40, textAlign: "right", color: "#6b7280" }}>
-                        {formatTime(t.due_time) || ""}
-                      </span>
-                      <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {t.title}
-                      </span>
+                  {visible.map(t => (
+                    <div key={t.id} className="day-pill" style={{ borderColor: t.category_color || "#e5e7eb" }}>
+                      <span className="dot" style={{ background: t.category_color || "#e5e7eb" }} />
+                      <span className="txt">{t.title}</span>
                     </div>
                   ))}
-                  {tasks.length > 3 && (
-                    <div className="muted" style={{ fontSize: 12 }}>
-                      +{tasks.length - 3} more
+                  {extra > 0 && (
+                    <div className="day-pill more">
+                      <span className="txt">+{extra} more</span>
                     </div>
                   )}
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
       </div>
 
-      {err && <div style={{ color: "red" }}>{err}</div>}
+      {/* Day detail list (full titles) */}
+      <div className="card" style={{ display: "grid", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <h2 style={{ margin: 0 }}>{selectedISO}</h2>
+          <span className="muted">{dayTasks.length} task{dayTasks.length === 1 ? "" : "s"}</span>
+        </div>
+        {dayTasks.length === 0 && <div className="muted">Nothing scheduled.</div>}
+        <ul className="list">
+          {dayTasks.map(t => (
+            <li key={t.id} className="item">
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span title={t.category || ""} style={{ width: 10, height: 10, borderRadius: 999, background: t.category_color || "#e5e7eb", border: "1px solid #d1d5db" }} />
+                <div style={{ textDecoration: t.completed_at ? "line-through" : "none" }}>{t.title}</div>
+              </div>
+            </li>
+          ))}
+        </ul>
+        {err && <div style={{ color: "red" }}>{err}</div>}
+      </div>
     </div>
   );
+}
+
+/* ===== date utils ===== */
+function toISO(d: Date) {
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,"0"), dd=String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${dd}`;
+}
+function fromISO(s: string) {
+  const [y,m,d] = s.split("-").map(Number);
+  return new Date(y,(m??1)-1,d??1);
 }
