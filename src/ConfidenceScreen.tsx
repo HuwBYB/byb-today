@@ -33,17 +33,19 @@ export default function ConfidenceScreen() {
   function reset() { setRunning(false); setCountdown(60); }
 
   return (
-    <div style={{ display:"grid", gap:12 }}>
-      <div className="card" style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
-        <div>
-          <h1 style={{ margin:0 }}>Confidence Moves</h1>
-          <div className="muted">A focused minute before your meeting or interview.</div>
-        </div>
-        <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-          <button onClick={startOneMinute} className="btn-primary" style={{ borderRadius:8 }}>Start 1-minute</button>
-          <button onClick={stop}>Pause</button>
-          <button onClick={reset}>Reset</button>
-          <div className="muted" style={{ width:64, textAlign:"right", fontVariantNumeric:"tabular-nums" }}>{countdown}s</div>
+    <div className="page-confidence" style={{ display:"grid", gap:12 }}>
+      <div className="card">
+        <div className="confidence-toolbar" style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
+          <div>
+            <h1 style={{ margin:0 }}>Confidence Moves</h1>
+            <div className="muted">A focused minute before your meeting or interview.</div>
+          </div>
+          <div className="confidence-toolbar" style={{ display:"flex", gap:8, alignItems:"center" }}>
+            <button onClick={startOneMinute} className="btn-primary" style={{ borderRadius:8 }}>Start 1-minute</button>
+            <button onClick={stop}>Pause</button>
+            <button onClick={reset}>Reset</button>
+            <div className="muted" style={{ width:64, textAlign:"right", fontVariantNumeric:"tabular-nums" }}>{countdown}s</div>
+          </div>
         </div>
       </div>
 
@@ -74,27 +76,48 @@ function TabButton({ active, onClick, label }: { active:boolean; onClick:()=>voi
 }
 
 /* ===========================
-   Power Pose (animated SVG)
+   Power Pose (clean SVG hero)
    =========================== */
 function PowerPose({ running }: { running:boolean }) {
   return (
-    <div className="card" style={{ display:"grid", gridTemplateColumns:"minmax(280px, 420px) 1fr", gap:16, alignItems:"center" }}>
+    <div className="card confidence-layout">
       <style>{CSS_POSE}</style>
-      <div style={{ display:"grid", placeItems:"center", minHeight:260 }}>
-        <svg viewBox="0 0 200 240" className="hero">
-          <ellipse cx="100" cy="225" rx="40" ry="8" className="shadow" />
-          <g className="body">
-            <circle cx="100" cy="48" r="18" />
-            <rect x="84" y="66" width="32" height="42" rx="8" />
-            <rect x="52" y="74" width="32" height="10" rx="5" transform="rotate(20 52 74)" />
-            <rect x="116" y="74" width="32" height="10" rx="5" transform="rotate(-20 148 74)" />
-            <rect x="88" y="110" width="24" height="22" rx="6" />
-            <rect x="78" y="132" width="12" height="46" rx="6" />
-            <rect x="110" y="132" width="12" height="46" rx="6" />
-          </g>
-          <path className={"cape"+(running?" cape-run":"")}
-            d="M100 74 C 65 84, 40 110, 36 144 C 60 138, 92 156, 118 170 C 126 160, 128 144, 124 130 C 122 120, 116 110, 108 100 Z"
+      <div className={running ? "pose is-running" : "pose"} style={{ display:"grid", placeItems:"center", minHeight:260 }}>
+        <svg viewBox="0 0 200 240" className="hero hero-bob" aria-label="Superhero standing confidently">
+          <defs>
+            <linearGradient id="capeGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.95" />
+              <stop offset="100%" stopColor="hsl(var(--pastel-hsl))" stopOpacity="0.85" />
+            </linearGradient>
+          </defs>
+
+          <ellipse cx="100" cy="225" rx="42" ry="8" className="shadow" />
+
+          {/* Cape behind body */}
+          <path
+            className="cape"
+            d="M92 86
+               C 60 90, 34 110, 28 148
+               C 58 144, 92 168, 126 184
+               C 136 170, 138 150, 132 132
+               C 124 112, 110 96, 100 90 Z"
           />
+
+          {/* Body */}
+          <g className="body">
+            {/* head */}
+            <circle cx="100" cy="54" r="18" />
+            {/* torso */}
+            <rect x="82" y="72" width="36" height="48" rx="9" />
+            {/* hands-on-hips arms */}
+            <path d="M82 84 L64 96 L78 108" />
+            <path d="M118 84 L136 96 L122 108" />
+            {/* hips/core */}
+            <rect x="88" y="120" width="24" height="20" rx="6" />
+            {/* legs */}
+            <rect x="76" y="140" width="14" height="46" rx="7" />
+            <rect x="110" y="140" width="14" height="46" rx="7" />
+          </g>
         </svg>
       </div>
 
@@ -114,16 +137,20 @@ function PowerPose({ running }: { running:boolean }) {
 }
 
 const CSS_POSE = `
+/* sizes */
 .hero { width: 100%; max-width: 360px; }
-.body { fill: #111; }
-.cape { fill: #ef4444; opacity: 0.95; transform-origin: 100px 74px; }
-.cape-run { animation: capeWave 1.6s ease-in-out infinite; }
-.shadow { fill: #000; opacity: 0.12; }
-@keyframes capeWave {
-  0%   { transform: rotate(-2deg) skewX(0deg); }
-  50%  { transform: rotate(2deg)  skewX(5deg); }
-  100% { transform: rotate(-2deg) skewX(0deg); }
-}
+
+/* colours */
+.pose { --hero: #111; }
+.body { fill: var(--hero); stroke: var(--hero); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+.cape { fill: url(#capeGrad); transform-origin: 92px 86px; }
+.shadow { fill: #000; opacity: 0.10; transform-origin: 100px 225px; }
+
+/* animation (gentle, only while running) */
+.is-running .hero-bob { animation: heroBob 2.2s ease-in-out infinite; }
+.is-running .cape { animation: capeSway 1.8s ease-in-out infinite; }
+@keyframes heroBob { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-3px) } }
+@keyframes capeSway { 0%{ transform: rotate(-4deg) skewX(0deg) } 50%{ transform: rotate(4deg) skewX(6deg) } 100%{ transform: rotate(-4deg) skewX(0deg) } }
 `;
 
 /* ===========================
@@ -162,7 +189,7 @@ function Breathing({ running }: { running:boolean }) {
   }, [pattern, phaseIdx]);
 
   return (
-    <div className="card" style={{ display:"grid", gridTemplateColumns:"minmax(260px, 340px) 1fr", gap:16, alignItems:"center" }}>
+    <div className="card confidence-layout">
       <style>{CSS_BREATH}</style>
       <div style={{ display:"grid", placeItems:"center", minHeight:240 }}>
         <div className="ringWrap" style={{ width:size, height:size, transform:`scale(${scale})`, transition:"transform 900ms ease-in-out" }}>
@@ -199,9 +226,7 @@ function PatternButton({ current, setKey, k, label }:{ current:BreathPatternKey;
 
 const CSS_BREATH = `
 .ringWrap { position: relative; }
-.ring, .ringInner {
-  position:absolute; inset:0; border-radius:9999px;
-}
+.ring, .ringInner { position:absolute; inset:0; border-radius:9999px; }
 .ring { border: 6px solid #111; opacity: 0.15; }
 .ringInner { border: 6px solid #111; opacity: 0.8; box-shadow: 0 0 24px rgba(0,0,0,0.08) inset; }
 `;
@@ -231,7 +256,7 @@ function Affirmation({ running }: { running:boolean }) {
   }, [running, speak, text]);
 
   return (
-    <div className="card" style={{ display:"grid", gridTemplateColumns:"1fr 320px", gap:16, alignItems:"center" }}>
+    <div className="card confidence-layout">
       <div style={{ display:"grid", gap:12 }}>
         <h2 style={{ margin:0 }}>Affirmation</h2>
         <div style={{
