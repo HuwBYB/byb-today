@@ -177,6 +177,32 @@ html, body { overflow-x: hidden; }
     min-width: 0 !important;
   }
 }
+/* === Calendar pills & day cell styles === */
+.cal-day { width: 100%; }
+.cal-day .day-pill{
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content 1fr;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  max-width: 100%;
+  background: #fff;
+}
+.cal-day .day-pill .dot{
+  width: 8px; height: 8px; border-radius: 999px; border: 1px solid #d1d5db;
+}
+.cal-day .day-pill .txt{
+  min-width: 0;
+  font-size: 11px; line-height: 1.2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cal-day .day-pill.more{
+  background: #f1f5f9;
+  border-style: dashed;
+}
 
 
 
