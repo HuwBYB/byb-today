@@ -1,134 +1,94 @@
 import { useState } from "react";
 import AuthGate from "./AuthGate";
+
 import TodayScreen from "./TodayScreen";
-import GoalsScreen from "./GoalsScreen";
 import CalendarScreen from "./CalendarScreen";
-import AlfredScreen from "./AlfredScreen";
+import GoalsScreen from "./GoalsScreen";
 import VisionBoardScreen from "./VisionBoardScreen";
 import GratitudeScreen from "./GratitudeScreen";
 import WinsScreen from "./WinsScreen";
+import AlfredScreen from "./AlfredScreen";
+import ConfidenceScreen from "./ConfidenceScreen";
 
 type Tab =
   | "today"
-  | "goals"
   | "calendar"
+  | "goals"
   | "vision"
-  | "alfred"
   | "gratitude"
-  | "successes";
-
-function todayISO() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
+  | "wins"
+  | "alfred"
+  | "confidence";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("today");
-  const [selectedDateISO, setSelectedDateISO] = useState<string>(todayISO());
+  const [externalDateISO, setExternalDateISO] = useState<string | undefined>(undefined);
 
-  function gotoToday() {
-    setSelectedDateISO(todayISO());
+  function openTodayFor(iso: string) {
+    setExternalDateISO(iso);
     setTab("today");
   }
 
   return (
     <AuthGate>
-      {/* Top bar */}
-      <div className="topbar">
-        <div
-          className="container"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            paddingTop: 10,
-            paddingBottom: 10,
-          }}
-        >
-          <div className="brand">
-            <span className="logo" />
-            Best You Blueprint
+      <div style={{ display: "grid", gap: 12, padding: 12, maxWidth: 1100, margin: "0 auto" }}>
+        {/* Top bar / nav */}
+        <div className="card" style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <strong>Best You Blueprint</strong>
+            <span className="muted">• build your ideal day</span>
           </div>
-          <nav className="tabs">
-            <button
-              className="tab"
-              aria-current={tab === "today" ? "page" : undefined}
-              onClick={gotoToday}
-            >
-              Today
-            </button>
-            <button
-              className="tab"
-              aria-current={tab === "goals" ? "page" : undefined}
-              onClick={() => setTab("goals")}
-            >
-              Goals
-            </button>
-            <button
-              className="tab"
-              aria-current={tab === "calendar" ? "page" : undefined}
-              onClick={() => setTab("calendar")}
-            >
-              Calendar
-            </button>
-            <button
-              className="tab"
-              aria-current={tab === "vision" ? "page" : undefined}
-              onClick={() => setTab("vision")}
-            >
-              Vision
-            </button>
-            <button
-              className="tab"
-              aria-current={tab === "alfred" ? "page" : undefined}
-              onClick={() => setTab("alfred")}
-            >
-              Alfred
-            </button>
-            <button
-              className="tab"
-              aria-current={tab === "gratitude" ? "page" : undefined}
-              onClick={() => setTab("gratitude")}
-            >
-              Gratitude
-            </button>
-            <button
-              className="tab"
-              aria-current={tab === "successes" ? "page" : undefined}
-              onClick={() => setTab("successes")}
-            >
-              Successes
-            </button>
+          <nav style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <NavBtn active={tab === "today"} onClick={() => { setExternalDateISO(undefined); setTab("today"); }} label="Today" />
+            <NavBtn active={tab === "calendar"} onClick={() => setTab("calendar")} label="Calendar" />
+            <NavBtn active={tab === "goals"} onClick={() => setTab("goals")} label="Goals" />
+            <NavBtn active={tab === "vision"} onClick={() => setTab("vision")} label="Vision" />
+            <NavBtn active={tab === "gratitude"} onClick={() => setTab("gratitude")} label="Gratitude" />
+            <NavBtn active={tab === "wins"} onClick={() => setTab("wins")} label="Successes" />
+            <NavBtn active={tab === "alfred"} onClick={() => setTab("alfred")} label="Alfred" />
+            <NavBtn active={tab === "confidence"} onClick={() => setTab("confidence")} label="Confidence" />
           </nav>
         </div>
-      </div>
 
-      {/* Screen container */}
-      <div className="container" style={{ paddingTop: 16 }}>
-        {tab === "today" && <TodayScreen externalDateISO={selectedDateISO} />}
-
-        {tab === "goals" && <GoalsScreen />}
+        {/* Screens */}
+        {tab === "today" && <TodayScreen externalDateISO={externalDateISO} />}
 
         {tab === "calendar" && (
           <CalendarScreen
-            onSelectDate={(iso) => {
-              setSelectedDateISO(iso);
-              setTab("today");
-            }}
+            onSelectDate={(iso) => openTodayFor(iso)} // click a day → jump to Today for that date
           />
         )}
 
-        {tab === "vision" && <VisionBoardScreen />}
+        {tab === "goals" && <GoalsScreen />}
 
-        {tab === "alfred" && <AlfredScreen />}
+        {tab === "vision" && <VisionBoardScreen />}
 
         {tab === "gratitude" && <GratitudeScreen />}
 
-        {tab === "successes" && <WinsScreen />}
+        {tab === "wins" && <WinsScreen />}
+
+        {tab === "alfred" && <AlfredScreen />}
+
+        {tab === "confidence" && <ConfidenceScreen />}
       </div>
     </AuthGate>
+  );
+}
+
+function NavBtn({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: "6px 10px",
+        borderRadius: 8,
+        border: "1px solid",
+        borderColor: active ? "#111" : "#ddd",
+        background: active ? "#111" : "#fff",
+        color: active ? "#fff" : "#111",
+      }}
+    >
+      {label}
+    </button>
   );
 }
