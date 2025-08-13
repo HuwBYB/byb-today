@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* ---------- Types ---------- */
@@ -32,12 +32,10 @@ type WSet = {
 
 /* ---------- Helpers ---------- */
 function toISO(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,"0"), dd=String(d.getDate()).padStart(2,"0");
   return `${y}-${m}-${dd}`;
 }
-function fromISO(s: string) { const [y,m,d] = s.split("-").map(Number); return new Date(y,(m??1)-1,d??1); }
+function fromISO(s: string) { const [y,m,d]=s.split("-").map(Number); return new Date(y,(m??1)-1,d??1); }
 function secondsToMMSS(sec?: number | null) {
   if (!sec || sec <= 0) return "00:00";
   const m = Math.floor(sec / 60);
@@ -59,14 +57,12 @@ export default function ExerciseDiaryScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [dateISO, setDateISO] = useState(() => toISO(new Date()));
 
-  // Current session for the day (we’ll show one editor; you can create multiple if you want)
   const [session, setSession] = useState<Session | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [setsByItem, setSetsByItem] = useState<Record<number, WSet[]>>({});
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // History list (recent sessions)
   const [recent, setRecent] = useState<Session[]>([]);
 
   useEffect(() => {
@@ -115,9 +111,7 @@ export default function ExerciseDiaryScreen() {
         .order("set_number", { ascending: true });
       if (se) { setErr(se.message); setSetsByItem({}); return; }
       const grouped: Record<number, WSet[]> = {};
-      for (const s of (sets as WSet[])) {
-        (grouped[s.item_id] ||= []).push(s);
-      }
+      for (const s of (sets as WSet[])) (grouped[s.item_id] ||= []).push(s);
       setSetsByItem(grouped);
     } else {
       setSetsByItem({});
@@ -151,7 +145,7 @@ export default function ExerciseDiaryScreen() {
       setSession(data as Session);
       await loadItems((data as Session).id);
       await loadRecent();
-    } catch (e: any) {
+    } catch (e:any) {
       setErr(e.message || String(e));
     } finally {
       setBusy(false);
@@ -169,13 +163,14 @@ export default function ExerciseDiaryScreen() {
   }
 
   /* ----- Item actions ----- */
-  async function addWeightsExercise(title = "New Exercise") {
+  async function addWeightsExercise(title = "Lat Pulldown") {
     if (!session || !userId) return;
     const order_index = items.length ? Math.max(...items.map(i => i.order_index)) + 1 : 0;
-    const { data, error } = await supabase
-      .from("workout_items").insert({
+    const { error } = await supabase
+      .from("workout_items")
+      .insert({
         session_id: session.id, user_id: userId, kind: "weights", title, order_index, metrics: {}
-      }).select().single();
+      });
     if (error) { setErr(error.message); return; }
     await loadItems(session.id);
   }
@@ -212,17 +207,17 @@ export default function ExerciseDiaryScreen() {
   async function addSet(itemId: number) {
     const current = setsByItem[itemId] || [];
     const nextNum = current.length ? Math.max(...current.map(s => s.set_number)) + 1 : 1;
-    const { data: u, error } = await supabase
+    const { data, error } = await supabase
       .from("workout_sets").insert({
         item_id: itemId, user_id: userId, set_number: nextNum, weight_kg: null, reps: null
       }).select().single();
     if (error) { setErr(error.message); return; }
-    setSetsByItem({ ...setsByItem, [itemId]: [...current, u as WSet] });
+    setSetsByItem({ ...setsByItem, [itemId]: [...current, data as WSet] });
   }
 
   async function updateSet(set: WSet, patch: Partial<WSet>) {
-    const { data, error } = await supabase
-      .from("workout_sets").update(patch).eq("id", set.id).select().single();
+    const { error } = await supabase
+      .from("workout_sets").update(patch).eq("id", set.id);
     if (error) { setErr(error.message); return; }
     const list = (setsByItem[set.item_id] || []).map(s => s.id === set.id ? { ...s, ...patch } as WSet : s);
     setSetsByItem({ ...setsByItem, [set.item_id]: list });
@@ -267,30 +262,23 @@ export default function ExerciseDiaryScreen() {
           <div className="muted">No session for this day yet. Click <b>Create session</b> to start logging.</div>
         ) : (
           <>
-            {/* Quick add row */}
             <QuickAddCard
               onAddWeights={() => addWeightsExercise("Lat Pulldown")}
               onAddCardio={(kind, title, km, mmss) => addCardio(kind, title, km, mmss)}
             />
 
-            {/* Items */}
             <div style={{ display:"grid", gap:10 }}>
               {items.length === 0 && <div className="muted">No items yet. Add your first exercise above.</div>}
               {items.map(it => (
                 <div key={it.id} style={{ border:"1px solid #eee", borderRadius:10, padding:10 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
                     <KindBadge kind={it.kind} />
-                    <input
-                      value={it.title}
-                      onChange={e=>renameItem(it, e.target.value)}
-                      style={{ flex:1 }}
-                    />
+                    <input value={it.title} onChange={e=>renameItem(it, e.target.value)} style={{ flex:1 }} />
                     <button onClick={()=>deleteItem(it.id)} title="Delete">×</button>
                   </div>
 
                   {it.kind === "weights" ? (
                     <WeightsEditor
-                      itemId={it.id}
                       sets={setsByItem[it.id] || []}
                       onAdd={()=>addSet(it.id)}
                       onChange={(set, patch)=>updateSet(set, patch)}
@@ -303,14 +291,9 @@ export default function ExerciseDiaryScreen() {
               ))}
             </div>
 
-            {/* Notes */}
             <div style={{ borderTop:"1px solid #eee", paddingTop:8 }}>
               <div className="section-title">Notes</div>
-              <textarea
-                rows={3}
-                value={session.notes || ""}
-                onChange={e=>saveSessionNotes(e.target.value)}
-              />
+              <textarea rows={3} value={session.notes || ""} onChange={e=>saveSessionNotes(e.target.value)} />
             </div>
           </>
         )}
@@ -348,8 +331,8 @@ function KindBadge({ kind }:{ kind: Item["kind"] }) {
 }
 
 function WeightsEditor({
-  itemId, sets, onAdd, onChange, onDelete
-}:{ itemId:number; sets:WSet[]; onAdd:()=>void; onChange:(s:WSet, patch:Partial<WSet>)=>void; onDelete:(s:WSet)=>void }) {
+  sets, onAdd, onChange, onDelete
+}:{ sets:WSet[]; onAdd:()=>void; onChange:(s:WSet, patch:Partial<WSet>)=>void; onDelete:(s:WSet)=>void }) {
   return (
     <div>
       <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:6 }}>
