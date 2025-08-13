@@ -259,3 +259,41 @@ img, video, canvas, svg { max-width: 100%; height: auto; display: block; }
 @media (max-width:480px){
   .gratitude-toolbar .muted{ max-width:100%; }      /* can wrap under row */
 }
+/* ===== Gratitude page: responsive layout & overflow fixes =============== */
+.page-gratitude { max-width:100%; overflow-x:hidden; }
+.page-gratitude * { box-sizing: border-box; }
+
+/* Two-column on desktop, stack on phones */
+.gratitude-layout{
+  display:grid;
+  grid-template-columns: minmax(0,1fr) 320px;
+  gap:12px;
+}
+.gratitude-layout > * { min-width:0; } /* allow shrinking */
+@media (max-width: 720px){
+  .gratitude-layout{ grid-template-columns: 1fr; }
+}
+
+/* Top controls row */
+.gratitude-toolbar{
+  display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+}
+.gratitude-toolbar > *{ min-width:0; }
+.gratitude-toolbar input[type="date"]{ flex:1 1 180px; min-width:0; }
+
+/* Right-side count text */
+.gratitude-count{
+  margin-left:auto; min-width:0;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  max-width:50%;
+}
+@media (max-width:480px){
+  .gratitude-count{ max-width:100%; }
+}
+
+/* Bottom action row (Export CSV) */
+.gratitude-actions{
+  display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px;
+}
+.gratitude-actions > *{ min-width:0; max-width:100%; }
+
