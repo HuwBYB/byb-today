@@ -137,7 +137,7 @@ export default function GratitudeScreen() {
         if (error) throw error;
         safeSet(setRowsByIdx, prev => ({ ...prev, [idx]: data as EntryRow } as any));
       }
-      // refresh history (async, ignore result)
+      // refresh history (async)
       loadHistory();
     } catch (e: any) {
       setErr(e.message || String(e));
@@ -161,77 +161,3 @@ export default function GratitudeScreen() {
       .from("gratitude_entries")
       .select("*")
       .eq("user_id", userId)
-      .order("entry_date", { ascending: true })
-      .order("item_index", { ascending: true });
-    if (error) { setErr(error.message); return; }
-    const rows = [["date", "item_index", "content"]];
-    for (const r of (data as EntryRow[])) rows.push([r.entry_date, String(r.item_index), (r.content || "").replace(/\r?\n/g, " ")]);
-    const csv = rows.map(r => r.map(x => `"${String(x).replace(/"/g, '""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "gratitude.csv"; a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 12 }}>
-      {/* Left: editor */}
-      <div className="card">
-        <h1>Gratitude Journal</h1>
-
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, marginBottom: 12 }}>
-          <button onClick={gotoToday}>Today</button>
-          <button onClick={gotoPrev}>←</button>
-          <input type="date" value={dateISO} onChange={e => setDateISO(e.target.value)} />
-          <button onClick={gotoNext}>→</button>
-          <div className="muted" style={{ marginLeft: "auto" }}>{countToday}/8 for this day</div>
-        </div>
-
-        <div style={{ display: "grid", gap: 10 }}>
-          {INDEXES.map((idx) => (
-            <div key={idx} style={{ display: "grid", gap: 6 }}>
-              <div className="section-title">Gratitude {idx}</div>
-              <input
-                type="text"
-                placeholder={PLACEHOLDERS[idx] || "I'm grateful for…"}
-                value={draft[idx] ?? ""} // controlled
-                onChange={(e) => setDraft(d => ({ ...d, [idx]: e.currentTarget.value }))}
-                onBlur={() => saveIdx(idx)}
-                disabled={loading || savingIdx === idx}
-              />
-              {savingIdx === idx && <span className="muted">Saving…</span>}
-            </div>
-          ))}
-        </div>
-
-        {err && <div style={{ color: "red", marginTop: 10 }}>{err}</div>}
-      </div>
-
-      {/* Right: history */}
-      <div className="card" style={{ display: "grid", gridTemplateRows: "auto 1fr auto", gap: 10 }}>
-        <h2 style={{ margin: 0 }}>Recent days</h2>
-        <div style={{ overflow: "auto", maxHeight: "60vh" }}>
-          <ul className="list">
-            {Object.keys(history).length === 0 && <li className="muted">No recent entries.</li>}
-            {Object.entries(history).map(([d, rows]) => (
-              <li key={d} className="item" style={{ alignItems: "center" }}>
-                <div>
-                  <div style={{ fontWeight: 600 }}>{d}</div>
-                  <div className="muted" style={{ marginTop: 4 }}>
-                    {(rows || []).map(r => r.content).slice(0, 2).join(" · ")}
-                    {rows.length > 2 ? " · …" : ""}
-                  </div>
-                </div>
-                <button onClick={() => setDateISO(d)}>Open</button>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button className="btn-primary" onClick={exportCSV}>Export CSV</button>
-        </div>
-      </div>
-    </div>
-  );
-}
