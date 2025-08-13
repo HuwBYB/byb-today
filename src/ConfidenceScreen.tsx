@@ -64,41 +64,43 @@ export default function ConfidenceScreen() {
   }
 
   return (
-    <div className="page-confidence" style={{ display: "grid", gap: 12 }}>
-      {/* Top bar */}
-      <div className="card">
-        <div
-          className="confidence-toolbar"
-          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}
-        >
-          <div>
-            <h1 style={{ margin: 0 }}>Confidence Moves</h1>
-            <div className="muted">A focused minute before your meeting or interview.</div>
-          </div>
+    <div className="page-confidence">
+      <div className="container" style={{ display: "grid", gap: 12 }}>
+        {/* Top bar */}
+        <div className="card">
+          <div
+            className="confidence-toolbar"
+            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}
+          >
+            <div>
+              <h1 style={{ margin: 0 }}>Confidence Moves</h1>
+              <div className="muted">A focused minute before your meeting or interview.</div>
+            </div>
 
-          <div className="confidence-toolbar" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button onClick={startOneMinute} className="btn-primary" style={{ borderRadius: 8 }}>
-              Start 1-minute
-            </button>
-            <button onClick={stop}>Pause</button>
-            <button onClick={reset}>Reset</button>
-            <div className="muted" style={{ width: 64, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-              {countdown}s
+            <div className="confidence-toolbar" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button onClick={startOneMinute} className="btn-primary" style={{ borderRadius: 8 }}>
+                Start 1-minute
+              </button>
+              <button onClick={stop}>Pause</button>
+              <button onClick={reset}>Reset</button>
+              <div className="muted" style={{ width: 64, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                {countdown}s
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Tabs */}
-      <div className="card" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <TabButton active={tab === "pose"} onClick={() => setTab("pose")} label="Power Pose" />
-        <TabButton active={tab === "breath"} onClick={() => setTab("breath")} label="Breathing" />
-        <TabButton active={tab === "affirm"} onClick={() => setTab("affirm")} label="Affirmation" />
-      </div>
+        {/* Tabs */}
+        <div className="card" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <TabButton active={tab === "pose"} onClick={() => setTab("pose")} label="Power Pose" />
+          <TabButton active={tab === "breath"} onClick={() => setTab("breath")} label="Breathing" />
+          <TabButton active={tab === "affirm"} onClick={() => setTab("affirm")} label="Affirmation" />
+        </div>
 
-      {tab === "pose" && <PowerPose />}
-      {tab === "breath" && <Breathing running={running} />}
-      {tab === "affirm" && <Affirmation running={running} />}
+        {tab === "pose" && <PowerPose />}
+        {tab === "breath" && <Breathing running={running} />}
+        {tab === "affirm" && <Affirmation running={running} />}
+      </div>
     </div>
   );
 }
