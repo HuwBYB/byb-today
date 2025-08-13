@@ -1,68 +1,128 @@
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+/* === BYB Pastel Theme & UI === */
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+:root{
+  --bg:            #f7fafc;            /* pastel page */
+  --card:          #ffffff;
+  --text:          #0f172a;
+  --muted:         #64748b;
+  --border:        #e5e7eb;
+  --ring:          #c7d2fe;            /* focus ring */
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  /* pastel accents */
+  --accent:        #c7d2fe;            /* indigo-200 */
+  --accent-strong: #93c5fd;            /* blue-300 */
+
+  /* tab bar */
+  --tabbar-height: 64px;
+  --safe-bottom:   env(safe-area-inset-bottom, 0px);
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+a { color: inherit; }
+img { display:block; max-width:100%; }
+
+input, select, textarea, button {
+  font: inherit; color: inherit;
+}
+
+input, select, textarea {
+  width:100%;
+  border:1px solid var(--border);
+  background:#fff; color:var(--text);
+  border-radius:10px; padding:10px 12px;
+  outline:none;
+}
+input:focus, select:focus, textarea:focus {
+  box-shadow: 0 0 0 3px var(--ring);
+  border-color: #cbd5e1;
 }
 
 button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
+  border:1px solid var(--border);
+  background:#fff; color:var(--text);
+  padding:8px 12px; border-radius:10px;
+  cursor:pointer;
 }
-button:hover {
-  border-color: #646cff;
+button:disabled { opacity:.6; cursor:not-allowed; }
+
+.btn-primary{
+  background: var(--accent);
+  border-color: transparent;
 }
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+.btn-primary:hover { filter: brightness(0.98); }
+.btn-ghost{
+  background: transparent;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:16px;
+  padding:12px;
+}
+
+.list{ margin:0; padding:0; list-style:none; }
+.item{ padding:6px 0; border-bottom:1px solid var(--border); }
+.item:last-child{ border-bottom:none; }
+
+.muted{ color:var(--muted); }
+.section-title{ font-weight:600; font-size:12px; color:var(--muted); }
+
+/* wrapper adds space so content isn't hidden behind mobile tab bar */
+.app-shell{
+  max-width:1100px; margin:0 auto; padding:12px;
+  padding-bottom: calc(var(--tabbar-height) + var(--safe-bottom) + 12px);
+}
+
+/* Desktop header shown >= 900px, hidden on mobile */
+.only-desktop { display:none; }
+@media (min-width: 900px){
+  .only-desktop { display:block; }
+}
+
+/* ===== Sticky bottom tab bar (mobile-first) ===== */
+.tabbar{
+  position:fixed; left:0; right:0; bottom:0;
+  height: calc(var(--tabbar-height) + var(--safe-bottom));
+  background: #ffffffd9; backdrop-filter: blur(10px);
+  border-top:1px solid var(--border);
+  padding-bottom: var(--safe-bottom);
+  z-index: 50;
+}
+.tabbar-inner{
+  height: var(--tabbar-height);
+  display:flex; gap:6px; align-items:center; justify-content:space-between;
+  padding:8px 10px;
+  overflow-x:auto;
+  -ms-overflow-style: none; scrollbar-width: none;
+}
+.tabbar-inner::-webkit-scrollbar{ display:none; }
+
+.tab-btn{
+  display:grid; gap:2px; place-items:center;
+  min-width:66px; padding:6px 8px;
+  border-radius:12px; border:1px solid transparent;
+  color:#1f2937; background: transparent;
+  white-space:nowrap;
+}
+.tab-btn .icon{ font-size:18px; line-height:1; }
+.tab-btn .label{ font-size:11px; color:#334155; }
+
+.tab-btn[data-active="true"]{
+  background:#eef2ff;                  /* soft indigo bubble */
+  border-color:#c7d2fe;
+}
+.tab-btn[data-active="true"] .label{ color:#1f2937; font-weight:700; }
+
+/* On wide screens, hide mobile tabbar; keep your desktop header/nav */
+@media (min-width: 900px){
+  .tabbar{ display:none; }
+  .app-shell{ padding-bottom: 12px; }
 }
