@@ -27,10 +27,19 @@ export default function CalendarScreen({
   });
   const [selectedISO, setSelectedISO] = useState<string>(todayISO);
 
-  const monthLabel = useMemo(() => cursor.toLocaleString(undefined, { month: "long", year: "numeric" }), [cursor]);
+  const monthLabel = useMemo(
+    () => cursor.toLocaleString(undefined, { month: "long", year: "numeric" }),
+    [cursor]
+  );
 
-  const firstDayOfMonth = useMemo(() => new Date(cursor.getFullYear(), cursor.getMonth(), 1), [cursor]);
-  const lastDayOfMonth = useMemo(() => new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0), [cursor]);
+  const firstDayOfMonth = useMemo(
+    () => new Date(cursor.getFullYear(), cursor.getMonth(), 1),
+    [cursor]
+  );
+  const lastDayOfMonth = useMemo(
+    () => new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0),
+    [cursor]
+  );
 
   const startGrid = useMemo(() => {
     const d = new Date(firstDayOfMonth);
@@ -39,6 +48,7 @@ export default function CalendarScreen({
     d.setDate(d.getDate() - dow);
     return d;
   }, [firstDayOfMonth]);
+
   const endGrid = useMemo(() => {
     const d = new Date(lastDayOfMonth);
     const dow = (d.getDay() + 6) % 7; // Mon=0 … Sun=6
@@ -63,7 +73,10 @@ export default function CalendarScreen({
   // auth
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
-      if (error) { setErr(error.message); return; }
+      if (error) {
+        setErr(error.message);
+        return;
+      }
       setUserId(data.user?.id ?? null);
     });
   }, []);
@@ -77,11 +90,14 @@ export default function CalendarScreen({
 
   async function loadMonthTasks() {
     if (!userId) return;
-    setErr(null); setLoading(true);
+    setErr(null);
+    setLoading(true);
     try {
       const { data, error } = await supabase
         .from("tasks")
-        .select("id,user_id,title,due_date,priority,category,category_color,completed_at,source")
+        .select(
+          "id,user_id,title,due_date,priority,category,category_color,completed_at,source"
+        )
         .eq("user_id", userId)
         .gte("due_date", toISO(firstDayOfMonth))
         .lte("due_date", toISO(lastDayOfMonth))
@@ -117,27 +133,46 @@ export default function CalendarScreen({
   function goToday() {
     const d = new Date();
     setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
-    setSelectedISO(toISO(d));
-    if (onSelectDate) onSelectDate(toISO(d));
+    const iso = toISO(d);
+    setSelectedISO(iso);
+    onSelectDate?.(iso);
   }
 
   function isSameMonth(iso: string) {
     const d = fromISO(iso);
-    return d.getMonth() === cursor.getMonth() && d.getFullYear() === cursor.getFullYear();
+    return (
+      d.getMonth() === cursor.getMonth() && d.getFullYear() === cursor.getFullYear()
+    );
   }
 
   const dayTasks = tasksByDay[selectedISO] || [];
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      <div className="card" style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
+      <div
+        className="card"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+        }}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <button onClick={goToday}>Today</button>
           <button onClick={prevMonth}>←</button>
           <strong>{monthLabel}</strong>
           <button onClick={nextMonth}>→</button>
         </div>
-        {loading ? <div className="muted">Loading…</div> : <div className="muted">{Object.values(tasksByDay).reduce((a, b) => a + b.length, 0)} tasks this month</div>}
+        {loading ? (
+          <div className="muted">Loading…</div>
+        ) : (
+          <div className="muted">
+            {Object.values(tasksByDay).reduce((a, b) => a + b.length, 0)} tasks
+            this month
+          </div>
+        )}
       </div>
 
       {/* Weekday header (Mon..Sun) */}
@@ -151,13 +186,15 @@ export default function CalendarScreen({
             color: "#64748b",
           }}
         >
-          {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d => (
-            <div key={d} style={{ textAlign: "center" }}>{d}</div>
+          {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
+            <div key={d} style={{ textAlign: "center" }}>
+              {d}
+            </div>
           ))}
         </div>
       </div>
 
-      {/* Month grid */}
+      {/* Month grid — cells show date + count only */}
       <div className="card" style={{ padding: 8 }}>
         <div
           style={{
@@ -168,33 +205,20 @@ export default function CalendarScreen({
         >
           {gridDays.map((iso) => {
             const inMonth = isSameMonth(iso);
-            const list = (tasksByDay[iso] || []).slice(0); // copy
-            // sort by priority asc, then incomplete first
-            list.sort((a, b) => {
-              const pa = a.priority ?? 9, pb = b.priority ?? 9;
-              if (pa !== pb) return pa - pb;
-              const ca = a.completed_at ? 1 : 0;
-              const cb = b.completed_at ? 1 : 0;
-              if (ca !== cb) return ca - cb;
-              return (a.id ?? 0) - (b.id ?? 0);
-            });
-
-            // mobile-friendly: show up to 2 pills + "+N"
-            const maxPills = 2;
-            const visible = list.slice(0, maxPills);
-            const extra = Math.max(0, list.length - visible.length);
-
+            const list = tasksByDay[iso] || [];
+            const count = list.length;
             const isSelected = iso === selectedISO;
+            const dayNum = fromISO(iso).getDate();
 
             return (
               <button
                 key={iso}
                 onClick={() => {
                   setSelectedISO(iso);
-                  if (onSelectDate) onSelectDate(iso);
+                  onSelectDate?.(iso);
                 }}
                 className="cal-day"
-                title={`${iso}${list.length ? ` • ${list.length} task(s)` : ""}`}
+                title={`${iso}${count ? ` • ${count} task(s)` : ""}`}
                 style={{
                   textAlign: "left",
                   padding: 8,
@@ -204,23 +228,26 @@ export default function CalendarScreen({
                   opacity: inMonth ? 1 : 0.5,
                 }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13 }}>{fromISO(iso).getDate()}</div>
-                  {!!list.length && <div className="muted" style={{ fontSize: 11 }}>{list.length}</div>}
-                </div>
-
-                {/* task pills */}
-                <div style={{ display: "grid", gap: 4 }}>
-                  {visible.map(t => (
-                    <div key={t.id} className="day-pill" style={{ borderColor: t.category_color || "#e5e7eb" }}>
-                      <span className="dot" style={{ background: t.category_color || "#e5e7eb" }} />
-                      <span className="txt">{t.title}</span>
-                    </div>
-                  ))}
-                  {extra > 0 && (
-                    <div className="day-pill more">
-                      <span className="txt">+{extra} more</span>
-                    </div>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "baseline",
+                  }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{dayNum}</div>
+                  {count > 0 && (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        padding: "2px 6px",
+                        borderRadius: 999,
+                        background: "#f1f5f9",
+                        border: "1px solid var(--border)",
+                      }}
+                    >
+                      {count}
+                    </span>
                   )}
                 </div>
               </button>
@@ -233,15 +260,28 @@ export default function CalendarScreen({
       <div className="card" style={{ display: "grid", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
           <h2 style={{ margin: 0 }}>{selectedISO}</h2>
-          <span className="muted">{dayTasks.length} task{dayTasks.length === 1 ? "" : "s"}</span>
+          <span className="muted">
+            {dayTasks.length} task{dayTasks.length === 1 ? "" : "s"}
+          </span>
         </div>
         {dayTasks.length === 0 && <div className="muted">Nothing scheduled.</div>}
         <ul className="list">
-          {dayTasks.map(t => (
+          {dayTasks.map((t) => (
             <li key={t.id} className="item">
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span title={t.category || ""} style={{ width: 10, height: 10, borderRadius: 999, background: t.category_color || "#e5e7eb", border: "1px solid #d1d5db" }} />
-                <div style={{ textDecoration: t.completed_at ? "line-through" : "none" }}>{t.title}</div>
+                <span
+                  title={t.category || ""}
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 999,
+                    background: t.category_color || "#e5e7eb",
+                    border: "1px solid #d1d5db",
+                  }}
+                />
+                <div style={{ textDecoration: t.completed_at ? "line-through" : "none" }}>
+                  {t.title}
+                </div>
               </div>
             </li>
           ))}
@@ -254,10 +294,12 @@ export default function CalendarScreen({
 
 /* ===== date utils ===== */
 function toISO(d: Date) {
-  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,"0"), dd=String(d.getDate()).padStart(2,"0");
+  const y = d.getFullYear(),
+    m = String(d.getMonth() + 1).padStart(2, "0"),
+    dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
 function fromISO(s: string) {
-  const [y,m,d] = s.split("-").map(Number);
-  return new Date(y,(m??1)-1,d??1);
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
