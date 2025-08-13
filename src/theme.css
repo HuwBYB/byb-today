@@ -232,3 +232,30 @@ img, video, canvas, svg { max-width: 100%; height: auto; display: block; }
 @media (max-width: 640px) {
   .two-col { display: block; }
 }
+/* Gratitude toolbar — wrap nicely on phones */
+.gratitude-toolbar{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:8px;
+}
+.gratitude-toolbar > *{ min-width:0; }             /* let children shrink */
+
+.gratitude-toolbar input[type="date"]{
+  flex:1 1 180px;                                   /* date grows/shrinks */
+  min-width:0;
+}
+
+/* Right-side hint text trims instead of pushing layout wide */
+.gratitude-toolbar .muted{
+  margin-left:auto;
+  min-width:0;
+  max-width:50%;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+@media (max-width:480px){
+  .gratitude-toolbar .muted{ max-width:100%; }      /* can wrap under row */
+}
