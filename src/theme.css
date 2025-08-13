@@ -41,7 +41,7 @@ body{
   margin:0;
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
   color: var(--text);
-  /* subtle pastel background wash */
+  /* subtle pastel background wash (base; stronger override at bottom) */
   background:
     radial-gradient(1000px 420px at 10% -10%, hsl(var(--pastel-hsl) / .35), transparent 60%),
     radial-gradient(680px 320px at 90% -10%,  hsl(var(--primary-hsl) / .18), transparent 60%),
@@ -195,109 +195,29 @@ input:focus, select:focus, textarea:focus{
 
 /* Small text */
 .muted{ color: var(--muted); font-size: 12px; }
-/* ---- Mobile overflow fixes (drop-in) ----------------------------------- */
 
-/* Safety net: never scroll sideways */
-html, body {
-  max-width: 100%;
-  overflow-x: hidden;
-}
-
-/* Let flex/grid children shrink so they don't push the page wider */
+/* ------------------------------------------------------------------------ */
+/* Mobile overflow safety (global)                                          */
+/* ------------------------------------------------------------------------ */
+/* never scroll sideways */
+html, body { max-width: 100%; overflow-x: hidden; }
+/* children can shrink */
 .card, .item, .tabs { min-width: 0; }
 .card > *, .item > *, .tabs > * { min-width: 0; }
-
-/* Wrap long words, emojis, or pasted links */
-p, li, .item, .gratitude-text, .heading, .section-title {
-  overflow-wrap: anywhere;   /* modern */
-  word-break: break-word;    /* fallback */
-}
-
-/* Inputs & textareas never exceed the viewport */
-input[type="text"], input[type="date"], input[type="number"], select, textarea {
-  max-width: 100%;
-}
-
-/* Media should scale down on mobile */
-img, video, canvas, svg { max-width: 100%; height: auto; display: block; }
-
-/* Tighten paddings a touch on very small screens */
-@media (max-width: 480px) {
-  .container { padding: 12px; }    /* keep within viewport */
-  .tab { padding: 8px 12px; }      /* reduce chance of overflow */
+/* wrap long words/links */
+p, li, .item, .heading, .section-title { overflow-wrap:anywhere; word-break:break-word; }
+/* inputs/media sizing */
+input[type="text"], input[type="date"], input[type="number"], select, textarea { max-width:100%; }
+img, video, canvas, svg { max-width:100%; height:auto; display:block; }
+@media (max-width: 480px){
+  .container { padding: 12px; }
+  .tab { padding: 8px 12px; }
   .item { padding: 10px; }
 }
 
-/* If the Gratitude page uses a two-column layout, stack it on phones */
-@media (max-width: 640px) {
-  .two-col { display: block; }
-}
-/* Gratitude toolbar — wrap nicely on phones */
-.gratitude-toolbar{
-  display:flex;
-  flex-wrap:wrap;
-  align-items:center;
-  gap:8px;
-}
-.gratitude-toolbar > *{ min-width:0; }             /* let children shrink */
-
-.gratitude-toolbar input[type="date"]{
-  flex:1 1 180px;                                   /* date grows/shrinks */
-  min-width:0;
-}
-
-/* Right-side hint text trims instead of pushing layout wide */
-.gratitude-toolbar .muted{
-  margin-left:auto;
-  min-width:0;
-  max-width:50%;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
-}
-
-@media (max-width:480px){
-  .gratitude-toolbar .muted{ max-width:100%; }      /* can wrap under row */
-}
-/* ===== Gratitude page: responsive layout & overflow fixes =============== */
-.page-gratitude { max-width:100%; overflow-x:hidden; }
-.page-gratitude * { box-sizing: border-box; }
-
-/* Two-column on desktop, stack on phones */
-.gratitude-layout{
-  display:grid;
-  grid-template-columns: minmax(0,1fr) 320px;
-  gap:12px;
-}
-.gratitude-layout > * { min-width:0; } /* allow shrinking */
-@media (max-width: 720px){
-  .gratitude-layout{ grid-template-columns: 1fr; }
-}
-
-/* Top controls row */
-.gratitude-toolbar{
-  display:flex; flex-wrap:wrap; align-items:center; gap:8px;
-}
-.gratitude-toolbar > *{ min-width:0; }
-.gratitude-toolbar input[type="date"]{ flex:1 1 180px; min-width:0; }
-
-/* Right-side count text */
-.gratitude-count{
-  margin-left:auto; min-width:0;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  max-width:50%;
-}
-@media (max-width:480px){
-  .gratitude-count{ max-width:100%; }
-}
-
-/* Bottom action row (Export CSV) */
-.gratitude-actions{
-  display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px;
-}
-.gratitude-actions > *{ min-width:0; max-width:100%; }
-
-/* ===== Gratitude page: responsive layout & overflow fixes =============== */
+/* ------------------------------------------------------------------------ */
+/* Gratitude page (scoped)                                                  */
+/* ------------------------------------------------------------------------ */
 .page-gratitude { max-width:100%; overflow-x:hidden; }
 .page-gratitude * { box-sizing: border-box; }
 
@@ -308,7 +228,7 @@ img, video, canvas, svg { max-width: 100%; height: auto; display: block; }
   gap:12px;
 }
 .gratitude-layout > * { min-width:0; }
-@media (max-width: 720px){
+@media (max-width:720px){
   .gratitude-layout{ grid-template-columns: 1fr; }
 }
 
@@ -319,14 +239,16 @@ img, video, canvas, svg { max-width: 100%; height: auto; display: block; }
 .gratitude-toolbar > *{ min-width:0; }
 .gratitude-toolbar input[type="date"]{ flex:1 1 180px; min-width:0; }
 
-/* Right-side count text */
-.gratitude-count{
+/* Right-side count/hint text */
+.gratitude-toolbar .gratitude-count,
+.gratitude-toolbar .muted{
   margin-left:auto; min-width:0;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   max-width:50%;
 }
 @media (max-width:480px){
-  .gratitude-count{ max-width:100%; }
+  .gratitude-toolbar .gratitude-count,
+  .gratitude-toolbar .muted{ max-width:100%; }
 }
 
 /* Bottom action row (Export CSV) */
@@ -334,81 +256,10 @@ img, video, canvas, svg { max-width: 100%; height: auto; display: block; }
   display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px;
 }
 .gratitude-actions > *{ min-width:0; max-width:100%; }
-/* === Pastel intensity: Medium+ ========================================== */
-body{
-  background:
-    radial-gradient(1000px 420px at 10% -10%, hsl(var(--pastel-hsl) / .55), transparent 60%),
-    radial-gradient(680px 320px at 90% -10%,  hsl(var(--primary-hsl) / .30), transparent 60%),
-    var(--bg);
-}
 
-.card--wash::after{
-  content:"";
-  position:absolute; inset:0; pointer-events:none;
-  background:
-    radial-gradient(520px 240px at -10% -20%, hsl(var(--pastel-hsl) / .32), transparent 60%),
-    radial-gradient(460px 200px at 110% -10%, hsl(var(--primary-hsl) / .22), transparent 60%);
-}
-
-.tab[aria-current="page"]{
-  background: hsl(var(--pastel-hsl) / .60);
-  border-color: hsl(var(--pastel-hsl) / .75);
-  color: var(--primary);
-}
-
-.heading-gradient{ filter: saturate(1.08); }
-.btn-soft{ filter: saturate(1.1); }
-/* ===== Confidence Moves: responsive & overflow fixes ==================== */
-.page-confidence { max-width:100%; overflow-x:hidden; }
-.page-confidence * { box-sizing: border-box; }
-
-/* If this page uses two columns, this grid stacks on phones */
-.page-confidence .confidence-layout{
-  display:grid;
-  grid-template-columns: minmax(0,1fr) 320px;  /* editor + sidebar (if any) */
-  gap:12px;
-}
-.page-confidence .confidence-layout > * { min-width:0; }
-@media (max-width:720px){
-  .page-confidence .confidence-layout{ grid-template-columns: 1fr; }
-}
-
-/* Top toolbar row (e.g., Today/←/date/→/counts/tips) */
-.page-confidence .confidence-toolbar{
-  display:flex; flex-wrap:wrap; align-items:center; gap:8px;
-}
-.page-confidence .confidence-toolbar > *{ min-width:0; max-width:100%; }
-.page-confidence .confidence-toolbar input[type="date"]{ flex:1 1 180px; min-width:0; }
-
-/* Right-aligned count/hint text trims instead of pushing wide */
-.page-confidence .confidence-toolbar .cm-count,
-.page-confidence .confidence-toolbar .cm-hint,
-.page-confidence .confidence-toolbar .muted{
-  margin-left:auto;
-  min-width:0;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  max-width:50%;
-}
-@media (max-width:480px){
-  .page-confidence .confidence-toolbar .cm-count,
-  .page-confidence .confidence-toolbar .cm-hint,
-  .page-confidence .confidence-toolbar .muted{ max-width:100%; }
-}
-
-/* Bottom actions row (e.g., Export, Save preset, etc.) */
-.page-confidence .confidence-actions{
-  display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px;
-}
-.page-confidence .confidence-actions > *{ min-width:0; max-width:100%; }
-
-/* Chip/badge rows often cause overflow — let them wrap */
-.page-confidence .cm-chips{ display:flex; flex-wrap:wrap; gap:8px; }
-.page-confidence .cm-chips > *{ min-width:0; }
-
-/* General safety: inputs/media never exceed viewport width */
-.page-confidence input, .page-confidence select, .page-confidence textarea, .page-confidence button{ max-width:100%; }
-.page-confidence img, .page-confidence video, .page-confidence canvas, .page-confidence svg{ max-width:100%; height:auto; display:block; }
-/* ===== Confidence Moves: responsive & overflow fixes ==================== */
+/* ------------------------------------------------------------------------ */
+/* Confidence Moves page (scoped)                                           */
+/* ------------------------------------------------------------------------ */
 .page-confidence { max-width:100%; overflow-x:hidden; }
 .page-confidence * { box-sizing: border-box; }
 
@@ -430,8 +281,30 @@ body{
 .page-confidence .confidence-toolbar > *{ min-width:0; max-width:100%; }
 .page-confidence .confidence-toolbar input[type="date"]{ flex:1 1 180px; min-width:0; }
 
-/* Bottom actions (if added later) */
+/* Bottom actions (if added) */
 .page-confidence .confidence-actions{
   display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px;
 }
 .page-confidence .confidence-actions > *{ min-width:0; max-width:100%; }
+
+/* ------------------------------------------------------------------------ */
+/* Pastel intensity override (make colours more visible)                    */
+/* ------------------------------------------------------------------------ */
+body{
+  background:
+    radial-gradient(1000px 420px at 10% -10%, hsl(var(--pastel-hsl) / .55), transparent 60%),
+    radial-gradient(680px 320px at 90% -10%,  hsl(var(--primary-hsl) / .30), transparent 60%),
+    var(--bg);
+}
+.card--wash::after{
+  background:
+    radial-gradient(520px 240px at -10% -20%, hsl(var(--pastel-hsl) / .32), transparent 60%),
+    radial-gradient(460px 200px at 110% -10%, hsl(var(--primary-hsl) / .22), transparent 60%);
+}
+.tab[aria-current="page"]{
+  background: hsl(var(--pastel-hsl) / .60);
+  border-color: hsl(var(--pastel-hsl) / .75);
+  color: var(--primary);
+}
+.heading-gradient{ filter: saturate(1.08); }
+.btn-soft{ filter: saturate(1.1); }
