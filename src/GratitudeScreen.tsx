@@ -5,7 +5,7 @@ type EntryRow = {
   id: number;
   user_id: string;
   entry_date: string; // 'YYYY-MM-DD'
-  item_index: number; // 1..3
+  item_index: number; // 1..8
   content: string;
   created_at: string;
   updated_at: string;
@@ -23,10 +23,30 @@ function fromISO(s: string) {
   return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
 
+type Idx = 1|2|3|4|5|6|7|8;
+const INDEXES: Idx[] = [1,2,3,4,5,6,7,8];
+
+function emptyMap(): Record<number, EntryRow | null> {
+  const m: Record<number, EntryRow | null> = {};
+  for (const i of INDEXES) m[i] = null;
+  return m;
+}
+
+const PLACEHOLDERS: Record<number, string> = {
+  1: "Something good that happened…",
+  2: "Someone I'm grateful for…",
+  3: "A small win today…",
+  4: "A comfort I enjoyed…",
+  5: "Progress I noticed…",
+  6: "A kindness (given/received)…",
+  7: "Something I learned…",
+  8: "Something I can let go of…",
+};
+
 export default function GratitudeScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [dateISO, setDateISO] = useState<string>(() => toISO(new Date()));
-  const [items, setItems] = useState<{ [k: number]: EntryRow | null }>({ 1: null, 2: null, 3: null });
+  const [items, setItems] = useState<Record<number, EntryRow | null>>(emptyMap());
   const [loading, setLoading] = useState(false);
   const [savingIdx, setSavingIdx] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -52,8 +72,8 @@ export default function GratitudeScreen() {
       .eq("entry_date", iso)
       .order("item_index", { ascending: true });
     setLoading(false);
-    if (error) { setErr(error.message); setItems({ 1: null, 2: null, 3: null }); return; }
-    const map: any = { 1: null, 2: null, 3: null };
+    if (error) { setErr(error.message); setItems(emptyMap()); return; }
+    const map = emptyMap();
     for (const r of (data as EntryRow[])) map[r.item_index] = r;
     setItems(map);
   }
@@ -80,8 +100,8 @@ export default function GratitudeScreen() {
 
   useEffect(() => { if (userId) { loadDay(dateISO); loadHistory(); } }, [userId, dateISO]);
 
-  // Save or delete one of the 1..3 lines
-  async function saveItem(idx: 1 | 2 | 3, content: string) {
+  // Save or delete one of the 1..8 lines
+  async function saveItem(idx: Idx, content: string) {
     if (!userId) return;
     const trimmed = content.trim();
     setSavingIdx(idx); setErr(null);
@@ -148,22 +168,18 @@ export default function GratitudeScreen() {
           <button onClick={gotoPrev}>←</button>
           <input type="date" value={dateISO} onChange={e => setDateISO(e.target.value)} />
           <button onClick={gotoNext}>→</button>
-          <div className="muted" style={{ marginLeft: "auto" }}>{countToday}/3 for this day</div>
+          <div className="muted" style={{ marginLeft: "auto" }}>{countToday}/8 for this day</div>
         </div>
 
         <div style={{ display: "grid", gap: 10 }}>
-          {[1,2,3].map((idx) => (
+          {INDEXES.map((idx) => (
             <label key={idx} style={{ display: "grid", gap: 6 }}>
               <div className="section-title">Gratitude {idx}</div>
               <input
                 type="text"
-                placeholder={
-                  idx === 1 ? "Something good that happened…" :
-                  idx === 2 ? "Someone I'm grateful for…" :
-                               "A small win today…"
-                }
-                defaultValue={items[idx as 1|2|3]?.content ?? ""}
-                onBlur={(e) => saveItem(idx as 1|2|3, e.currentTarget.value)}
+                placeholder={PLACEHOLDERS[idx] || "I'm grateful for…"}
+                defaultValue={items[idx]?.content ?? ""}
+                onBlur={(e) => saveItem(idx, e.currentTarget.value)}
                 disabled={loading || savingIdx === idx}
               />
               {savingIdx === idx && <span className="muted">Saving…</span>}
