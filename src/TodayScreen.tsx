@@ -1,11 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-type ItemType = "task" | "daily_action";
-type RecurFreq = "daily" | "weekly" | "monthly" | "yearly";
-type DailyMode = "7days" | "monfri";
+type Task = {
+  id: number;
+  user_id: string;
+  title: string;
+  due_date: string | null;     // 'YYYY-MM-DD'
+  status: "pending" | "done" | string;
+  priority: number | null;     // >=2 = Top 3 Focus
+  source: string | null;
+  category: string | null;
+  category_color: string | null;
+  completed_at: string | null; // ISO timestamp
+};
 
-type Props = { externalDateISO?: string };
+type Props = {
+  /** When provided, Today screen shows this date (YYYY-MM-DD). */
+  externalDateISO?: string;
+};
 
 function todayISO() {
   const d = new Date();
@@ -15,81 +27,25 @@ function todayISO() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-// ---- recurrence helpers (local time) ----
-function fromISO(s: string) {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, (m ?? 1) - 1, d ?? 1);
-}
-function toISO(d: Date) {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-function addDaysISO(iso: string, days: number) {
-  const d = fromISO(iso);
-  d.setDate(d.getDate() + days);
-  return toISO(d);
-}
-function lastDayOfMonth(year: number, month0: number) {
-  return new Date(year, month0 + 1, 0).getDate();
-}
-function addMonthsClampedISO(iso: string, months: number) {
-  const d = fromISO(iso);
-  const anchor = d.getDate();
-  const y = d.getFullYear();
-  const m = d.getMonth() + months;
-  const first = new Date(y, m, 1);
-  const ld = lastDayOfMonth(first.getFullYear(), first.getMonth());
-  const day = Math.min(anchor, ld);
-  return toISO(new Date(first.getFullYear(), first.getMonth(), day));
-}
-function nextDue(iso: string, freq: RecurFreq, weekdayOnly?: boolean) {
-  switch (freq) {
-    case "daily": {
-      let next = addDaysISO(iso, 1);
-      if (weekdayOnly) {
-        while (true) {
-          const d = fromISO(next).getDay(); // 0=Sun..6=Sat
-          if (d === 0) next = addDaysISO(next, 1);       // Sun -> Mon
-          else if (d === 6) next = addDaysISO(next, 2);  // Sat -> Mon
-          else break; // Mon–Fri
-        }
-      }
-      return next;
-    }
-    case "weekly": return addDaysISO(iso, 7);
-    case "monthly": return addMonthsClampedISO(iso, 1);
-    case "yearly": return addMonthsClampedISO(iso, 12);
-    default: return iso;
-  }
-}
-
 export default function TodayScreen({ externalDateISO }: Props) {
   const [userId, setUserId] = useState<string | null>(null);
-  const [dateISO, setDateISO] = useState<string>(todayISO());
-  const [items, setItems] = useState<any[]>([]);
-  const [affirmation, setAffirmation] = useState<any>(null);
-  const [affirmationText, setAffirmationText] = useState<string>("");
-  const [loading, setLoading] = useState<boolean>(true);
+  const [dateISO, setDateISO] = useState<string>(externalDateISO || todayISO());
+
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Add Task form
-  const [newTask, setNewTask] = useState<string>("");
-  const [newTaskDate, setNewTaskDate] = useState<string>(todayISO());
-  const [isRecurring, setIsRecurring] = useState<boolean>(false);
-  const [recurFreq, setRecurFreq] = useState<RecurFreq>("daily");
-  const [dailyMode, setDailyMode] = useState<DailyMode>("7days");
+  // Add form
+  const [newTitle, setNewTitle] = useState("");
+  const [newTop, setNewTop] = useState(false);
+  const [adding, setAdding] = useState(false);
 
-  // pick up date from Calendar when provided
+  // Sync when parent changes selected date
   useEffect(() => {
-    if (externalDateISO) {
-      setDateISO(externalDateISO);
-      setNewTaskDate(externalDateISO);
-    }
+    if (externalDateISO) setDateISO(externalDateISO);
   }, [externalDateISO]);
 
-  // get signed-in user id
+  // Get current user id
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -97,262 +53,193 @@ export default function TodayScreen({ externalDateISO }: Props) {
     });
   }, []);
 
-  // load today items + current affirmation
-  async function refresh() {
+  async function load() {
     if (!userId) return;
-    setLoading(true);
-    setErr(null);
+    setLoading(true); setErr(null);
     try {
-      const [{ data: list, error: e1 }, { data: aff, error: e2 }] = await Promise.all([
-        supabase.from("daily_items_v").select("*")
-          .eq("user_id", userId)
-          .eq("item_date", dateISO)
-          .order("priority", { ascending: false })
-          .order("created_at", { ascending: true }),
-        supabase.from("affirmations").select("*")
-          .eq("user_id", userId)
-          .eq("is_active", true)
-          .order("created_at", { ascending: false })
-          .limit(1).maybeSingle(),
-      ]);
-      if (e1) throw e1;
-      if (e2) throw e2;
-      setItems(list || []);
-      setAffirmation(aff || null);
-      setAffirmationText("");
+      const { data, error } = await supabase
+        .from("tasks")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("due_date", dateISO)
+        .order("priority", { ascending: false })
+        .order("id", { ascending: true });
+      if (error) throw error;
+      setTasks((data as Task[]) || []);
     } catch (e: any) {
       setErr(e.message || String(e));
+      setTasks([]);
     } finally {
       setLoading(false);
     }
   }
-  useEffect(() => { if (userId) refresh(); }, [userId, dateISO]);
 
-  const topPriority = useMemo(() => items.filter(i => i.priority === 2), [items]);
-  const others = useMemo(() => items.filter(i => i.priority !== 2), [items]);
+  useEffect(() => { if (userId && dateISO) load(); }, [userId, dateISO]);
 
-  async function addTask() {
-    if (!newTask.trim() || !userId) return;
-    const payload: any = {
-      user_id: userId,
-      title: newTask.trim(),
-      due_date: newTaskDate,
-      source: "manual",
-    };
-    if (isRecurring) {
-      payload.is_recurring = true;
-      payload.recur_freq = recurFreq;
-      payload.weekday_only = recurFreq === "daily" ? (dailyMode === "monfri") : false;
-    }
-    const { error } = await supabase.from("tasks").insert(payload);
-    if (error) { setErr(error.message); return; }
-    setNewTask("");
-    setIsRecurring(false);
-    setRecurFreq("daily");
-    setDailyMode("7days");
-    setNewTaskDate(dateISO);
-    refresh();
-  }
+  const top = tasks.filter(t => (t.priority ?? 0) >= 2);
+  const rest = tasks.filter(t => (t.priority ?? 0) < 2);
 
-  // mark item complete; if recurring task, spawn the next occurrence
-  async function completeItem(itemType: ItemType, id: number) {
-    if (itemType !== "task") {
-      const { error } = await supabase.from("daily_actions").update({ status: "done" }).eq("id", id);
-      if (error) { setErr(error.message); return; }
-      refresh();
-      return;
-    }
-
+  async function toggleDone(t: Task) {
     try {
-      const { data: row, error: selErr } = await supabase
+      const markDone = t.status !== "done";
+      const { error } = await supabase
         .from("tasks")
-        .select("id,user_id,title,priority,source,due_date,is_recurring,recur_freq,recur_until,weekday_only")
-        .eq("id", id)
-        .single();
-      if (selErr) throw selErr;
-
-      const { error: upErr } = await supabase.from("tasks").update({ status: "done" }).eq("id", id);
-      if (upErr) throw upErr;
-
-      if (row?.is_recurring && row.recur_freq && row.due_date) {
-        const next = nextDue(row.due_date as string, row.recur_freq as RecurFreq, !!row.weekday_only);
-        const until = row.recur_until as string | null;
-        if (!until || next <= until) {
-          const { error: insErr } = await supabase.from("tasks").insert({
-            user_id: row.user_id,
-            title: row.title,
-            due_date: next,
-            source: row.source || "manual",
-            priority: row.priority ?? 0,
-            is_recurring: true,
-            recur_freq: row.recur_freq as RecurFreq,
-            recur_until: until || null,
-            weekday_only: !!row.weekday_only,
-          });
-          if (insErr) throw insErr;
-        }
-      }
-      refresh();
+        .update({
+          status: markDone ? "done" : "pending",
+          completed_at: markDone ? new Date().toISOString() : null, // important for Wins
+        })
+        .eq("id", t.id);
+      if (error) throw error;
+      await load();
     } catch (e: any) {
       setErr(e.message || String(e));
     }
   }
 
-  async function setFocus(itemType: ItemType, id: number, isFocus: boolean) {
-    const table = itemType === "task" ? "tasks" : "daily_actions";
-    const { error } = await supabase.from(table).update({ priority: isFocus ? 2 : 0 }).eq("id", id);
-    if (error) { setErr(error.message); return; }
-    refresh();
+  async function addTask() {
+    const title = newTitle.trim();
+    if (!userId || !title) return;
+    setAdding(true); setErr(null);
+    try {
+      const { error } = await supabase.from("tasks").insert({
+        user_id: userId,
+        title,
+        due_date: dateISO,
+        status: "pending",
+        priority: newTop ? 2 : 0,
+        source: "manual",
+      });
+      if (error) throw error;
+      setNewTitle("");
+      setNewTop(false);
+      await load();
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setAdding(false);
+    }
   }
 
-  async function saveAffirmation() {
-    if (!userId) return;
-    const text = affirmationText.trim();
-    if (!text) return;
-    const { error } = await supabase.from("affirmations").insert({
-      user_id: userId,
-      text,
-      is_active: true,
-      generated_by: "user"
-    });
-    if (error) { setErr(error.message); return; }
-    refresh();
+  function Section({ title, children }: { title: string; children: any }) {
+    return (
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>{title}</h2>
+          <button onClick={load} disabled={loading}>{loading ? "Refreshing…" : "Refresh"}</button>
+        </div>
+        {children}
+      </div>
+    );
   }
 
   return (
-    <div style={{ padding: 16, maxWidth: 800, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 8 }}>
-        Day view — {dateISO}
-      </h1>
-      <input type="date" value={dateISO} onChange={e => setDateISO(e.target.value)} />
-
-      {/* Affirmation viewer + builder */}
-      <div style={{ marginTop: 12, padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
-        <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>Affirmation</div>
-        {affirmation ? (
-          <div style={{ fontSize: 18, marginBottom: 8 }}>{affirmation.text}</div>
-        ) : (
-          <div style={{ color: "#666", marginBottom: 8 }}>No active affirmation yet.</div>
-        )}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <input
-            placeholder="Write a new affirmation…"
-            value={affirmationText}
-            onChange={e => setAffirmationText(e.target.value)}
-            style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6, flex: 1, minWidth: 200 }}
-          />
-          <button onClick={saveAffirmation} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 6 }}>
-            Save new affirmation
-          </button>
+    <div style={{ display: "grid", gap: 12 }}>
+      {/* Header */}
+      <div className="card" style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between" }}>
+        <div>
+          <h1 style={{ margin: 0 }}>Today</h1>
+          <div className="muted">{dateISO}</div>
         </div>
-      </div>
-
-      <div style={{ marginTop: 16, padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <h2 style={{ fontSize: 18 }}>Top Priority</h2>
-          <button onClick={() => refresh()}>Refresh</button>
-        </div>
-        {loading ? <div>Loading…</div> :
-         topPriority.length === 0 ? <div style={{ color: "#666" }}>No top-priority items yet.</div> :
-         <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-           {topPriority.map(i => (
-             <li key={`${i.item_type}-${i.item_id}`} style={{ display: "flex", justifyContent: "space-between", border: "1px solid #eee", borderRadius: 8, padding: 8, marginBottom: 8 }}>
-               <div>
-                 <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                   {i.category_color && <span style={{ width:10, height:10, borderRadius:999, background:i.category_color, border:"1px solid #ccc" }} />}
-                   <div style={{ fontWeight: 600 }}>{i.title}</div>
-                 </div>
-                 <div style={{ fontSize: 12, color: "#666" }}>{i.item_type === "daily_action" ? "Big Goal step" : i.source}</div>
-               </div>
-               <div>
-                 <button onClick={() => setFocus(i.item_type, i.item_id, false)} style={{ marginRight: 8 }}>Unfocus</button>
-                 <button onClick={() => completeItem(i.item_type, i.item_id)}>Done</button>
-               </div>
-             </li>
-           ))}
-         </ul>}
-      </div>
-
-      <div style={{ marginTop: 16, padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
-        <h2 style={{ fontSize: 18, marginBottom: 8 }}>Everything Else</h2>
-        {loading ? <div>Loading…</div> :
-         others.length === 0 ? <div style={{ color: "#666" }}>Nothing else scheduled.</div> :
-         <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-           {others.map(i => (
-             <li key={`${i.item_type}-${i.item_id}`} style={{ display: "flex", justifyContent: "space-between", border: "1px solid #eee", borderRadius: 8, padding: 8, marginBottom: 8 }}>
-               <div>
-                 <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                   {i.category_color && <span style={{ width:10, height:10, borderRadius:999, background:i.category_color, border:"1px solid #ccc" }} />}
-                   <div style={{ fontWeight: 600 }}>{i.title}</div>
-                 </div>
-                 <div style={{ fontSize: 12, color: "#666" }}>{i.item_type === "daily_action" ? "Big Goal step" : i.source}</div>
-               </div>
-               <div>
-                 <button onClick={() => setFocus(i.item_type, i.item_id, true)} style={{ marginRight: 8 }}>Make Top</button>
-                 <button onClick={() => completeItem(i.item_type, i.item_id)}>Done</button>
-               </div>
-             </li>
-           ))}
-         </ul>}
-      </div>
-
-      <div style={{ marginTop: 16, padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
-        <h2 style={{ fontSize: 18, marginBottom: 8 }}>Add Task</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, alignItems: "center" }}>
-          <input
-            placeholder="Task title (e.g., Buy gift for Carys)"
-            value={newTask}
-            onChange={e => setNewTask(e.target.value)}
-            style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6 }}
-          />
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input
             type="date"
-            value={newTaskDate}
-            onChange={e => setNewTaskDate(e.target.value)}
-            style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6 }}
+            value={dateISO}
+            onChange={e => setDateISO(e.target.value)}
+            title="Change date"
           />
-          <button onClick={addTask} style={{ padding: "8px 12px", border: "1px solid #333", borderRadius: 6 }}>Add</button>
-        </div>
-
-        <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <input type="checkbox" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} />
-            Repeat
-          </label>
-
-          <select
-            disabled={!isRecurring}
-            value={recurFreq}
-            onChange={e => setRecurFreq(e.target.value as RecurFreq)}
-            style={{ padding: 8, border: "1px solid " + (isRecurring ? "#ccc" : "#eee"), borderRadius: 6 }}
-          >
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="monthly">Monthly</option>
-            <option value="yearly">Yearly</option>
-          </select>
-
-          {isRecurring && recurFreq === "daily" && (
-            <select
-              value={dailyMode}
-              onChange={e => setDailyMode(e.target.value as DailyMode)}
-              style={{ padding: 8, border: "1px solid #ccc", borderRadius: 6 }}
-              title="Choose 7 days or weekdays only"
-            >
-              <option value="7days">7 days</option>
-              <option value="monfri">Mon–Fri</option>
-            </select>
-          )}
-
-          {isRecurring && (
-            <span style={{ fontSize: 12, color: "#666" }}>
-              Next one auto-creates when you mark it Done.
-            </span>
-          )}
+          <button onClick={() => setDateISO(todayISO())}>Today</button>
         </div>
       </div>
 
-      {err && <div style={{ color: "red", marginTop: 12 }}>{err}</div>}
+      {/* Top 3 Focus */}
+      <Section title="Top 3 Focus">
+        {top.length === 0 ? (
+          <div className="muted">Nothing marked top priority for this day.</div>
+        ) : (
+          <ul className="list">
+            {top.map(t => (
+              <li key={t.id} className="item">
+                <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1 }}>
+                  <input
+                    type="checkbox"
+                    checked={t.status === "done"}
+                    onChange={() => toggleDone(t)}
+                    title={t.status === "done" ? "Mark as not done" : "Mark as done"}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600 }}>
+                      {(t.source?.startsWith("big_goal") ? "BIG GOAL — " : "")}{t.title}
+                    </div>
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      {t.category ? `${t.category}` : ""}{t.source ? ` · ${t.source}` : ""}
+                    </div>
+                  </div>
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+
+      {/* Everything Else */}
+      <Section title="Everything Else">
+        {rest.length === 0 ? (
+          <div className="muted">Nothing else scheduled.</div>
+        ) : (
+          <ul className="list">
+            {rest.map(t => (
+              <li key={t.id} className="item">
+                <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1 }}>
+                  <input
+                    type="checkbox"
+                    checked={t.status === "done"}
+                    onChange={() => toggleDone(t)}
+                    title={t.status === "done" ? "Mark as not done" : "Mark as done"}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: (t.priority ?? 0) >= 2 ? 600 : 400 }}>
+                      {(t.source?.startsWith("big_goal") ? "BIG GOAL — " : "")}{t.title}
+                    </div>
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      {t.category ? `${t.category}` : ""}{t.source ? ` · ${t.source}` : ""}
+                    </div>
+                  </div>
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+
+      {/* Add Task */}
+      <div className="card" style={{ display: "grid", gap: 8 }}>
+        <h2 style={{ margin: 0 }}>Add Task</h2>
+        <label style={{ display: "grid", gap: 6 }}>
+          <div className="section-title">Task title</div>
+          <input
+            type="text"
+            placeholder="e.g., Buy gift for Carys"
+            value={newTitle}
+            onChange={e => setNewTitle(e.target.value)}
+          />
+        </label>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <input type="checkbox" checked={newTop} onChange={(e) => setNewTop(e.target.checked)} />
+            Mark as Top Priority
+          </label>
+          <div className="muted">Will be created for {dateISO}</div>
+          <button
+            onClick={addTask}
+            disabled={!newTitle.trim() || adding}
+            className="btn-primary"
+            style={{ marginLeft: "auto", borderRadius: 8 }}
+          >
+            {adding ? "Adding…" : "Add"}
+          </button>
+        </div>
+        {err && <div style={{ color: "red" }}>{err}</div>}
+      </div>
     </div>
   );
 }
