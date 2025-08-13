@@ -22,13 +22,8 @@ function toISO(d: Date) {
   const dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
-function fromISO(s: string) {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, (m ?? 1) - 1, d ?? 1);
-}
 function startOfMonthGrid(d: Date) {
   const first = new Date(d.getFullYear(), d.getMonth(), 1);
-  // Monday-start weeks
   const wd = (first.getDay() + 6) % 7; // Mon=0..Sun=6
   const gridStart = new Date(first);
   gridStart.setDate(first.getDate() - wd);
@@ -42,8 +37,7 @@ function endOfMonthGrid(d: Date) {
   return gridEnd;
 }
 function formatTime(t: string | null) {
-  if (!t) return ""; // all-day
-  // Expect 'HH:MM:SS' (or 'HH:MM')
+  if (!t) return "";
   const [hhStr, mmStr] = t.split(":");
   const hh = Number(hhStr);
   const mm = Number(mmStr || "0");
@@ -59,7 +53,6 @@ export default function CalendarScreen({ onSelectDate }: Props) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // auth
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -81,7 +74,7 @@ export default function CalendarScreen({ onSelectDate }: Props) {
         .gte("due_date", toISO(gridStart))
         .lte("due_date", toISO(gridEnd))
         .order("due_date", { ascending: true })
-        .order("due_time", { ascending: true }); // times first, nulls last automatically
+        .order("due_time", { ascending: true });
       if (error) throw error;
 
       const map: Record<string, Task[]> = {};
@@ -90,10 +83,8 @@ export default function CalendarScreen({ onSelectDate }: Props) {
         if (!key) continue;
         (map[key] ||= []).push(t);
       }
-      // Optional: sort by priority within same time
       Object.values(map).forEach(list => {
         list.sort((a, b) => {
-          // earlier time first; if times equal/empty, higher priority first; then id
           const ta = a.due_time || "99:99:99";
           const tb = b.due_time || "99:99:99";
           if (ta < tb) return -1;
@@ -128,12 +119,10 @@ export default function CalendarScreen({ onSelectDate }: Props) {
 
   function gotoToday() { setCursor(new Date()); }
   function gotoPrevMonth() {
-    const d = new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1);
-    setCursor(d);
+    setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1));
   }
   function gotoNextMonth() {
-    const d = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
-    setCursor(d);
+    setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1));
   }
 
   // Build 6 weeks grid
@@ -239,7 +228,6 @@ export default function CalendarScreen({ onSelectDate }: Props) {
                         textDecoration: t.status === "done" ? "line-through" : "none",
                       }}
                     >
-                      {/* category dot */}
                       <span
                         style={{
                           width: 6,
@@ -249,11 +237,9 @@ export default function CalendarScreen({ onSelectDate }: Props) {
                           flex: "0 0 auto",
                         }}
                       />
-                      {/* time (if any) */}
                       <span style={{ minWidth: 40, textAlign: "right", color: "#6b7280" }}>
                         {formatTime(t.due_time) || ""}
                       </span>
-                      {/* title */}
                       <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {t.title}
                       </span>
