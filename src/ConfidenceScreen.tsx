@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 /** ----- tiny helpers ----- */
 function clamp(n: number, min: number, max: number) { return Math.max(min, Math.min(max, n)); }
-function toISO(d: Date) { const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,"0"), dd=String(d.getDate()).padStart(2,"0"); return `${y}-${m}-${dd}`; }
 
 /** Breathing patterns (seconds per phase) */
 type BreathPatternKey = "box" | "478" | "coherent";
@@ -15,10 +14,10 @@ const PATTERNS: Record<BreathPatternKey, Pattern> = {
 
 export default function ConfidenceScreen() {
   const [tab, setTab] = useState<"pose"|"breath"|"affirm">("pose");
-  const [countdown, setCountdown] = useState(60);           // seconds remaining
+  const [countdown, setCountdown] = useState(60);
   const [running, setRunning] = useState(false);
 
-  // --- Timer engine (shared across tabs) ---
+  // Timer
   useEffect(() => {
     if (!running) return;
     const id = setInterval(() => setCountdown(s => clamp(s-1, 0, 60)), 1000);
@@ -48,14 +47,12 @@ export default function ConfidenceScreen() {
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="card" style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
         <TabButton active={tab==="pose"} onClick={()=>setTab("pose")} label="Power Pose" />
         <TabButton active={tab==="breath"} onClick={()=>setTab("breath")} label="Breathing" />
         <TabButton active={tab==="affirm"} onClick={()=>setTab("affirm")} label="Affirmation" />
       </div>
 
-      {/* Content */}
       {tab==="pose"   && <PowerPose running={running} />}
       {tab==="breath" && <Breathing running={running} />}
       {tab==="affirm" && <Affirmation running={running} />}
@@ -85,21 +82,16 @@ function PowerPose({ running }: { running:boolean }) {
       <style>{CSS_POSE}</style>
       <div style={{ display:"grid", placeItems:"center", minHeight:260 }}>
         <svg viewBox="0 0 200 240" className="hero">
-          {/* shadow */}
           <ellipse cx="100" cy="225" rx="40" ry="8" className="shadow" />
-          {/* body (simple stylised silhouette) */}
           <g className="body">
             <circle cx="100" cy="48" r="18" />
             <rect x="84" y="66" width="32" height="42" rx="8" />
-            {/* arms akimbo */}
             <rect x="52" y="74" width="32" height="10" rx="5" transform="rotate(20 52 74)" />
             <rect x="116" y="74" width="32" height="10" rx="5" transform="rotate(-20 148 74)" />
-            {/* hips/legs */}
             <rect x="88" y="110" width="24" height="22" rx="6" />
             <rect x="78" y="132" width="12" height="46" rx="6" />
             <rect x="110" y="132" width="12" height="46" rx="6" />
           </g>
-          {/* cape (waving) */}
           <path className={"cape"+(running?" cape-run":"")}
             d="M100 74 C 65 84, 40 110, 36 144 C 60 138, 92 156, 118 170 C 126 160, 128 144, 124 130 C 122 120, 116 110, 108 100 Z"
           />
@@ -143,7 +135,6 @@ function Breathing({ running }: { running:boolean }) {
   const [phaseIdx, setPhaseIdx] = useState(0);
   const [phaseLeft, setPhaseLeft] = useState(pattern.phases[0].secs);
 
-  // restart when pattern changes
   useEffect(() => {
     setPhaseIdx(0);
     setPhaseLeft(pattern.phases[0].secs);
@@ -154,7 +145,6 @@ function Breathing({ running }: { running:boolean }) {
     const id = setInterval(() => {
       setPhaseLeft((s) => {
         if (s > 1) return s - 1;
-        // next phase
         setPhaseIdx((i) => (i + 1) % pattern.phases.length);
         return pattern.phases[(phaseIdx + 1) % pattern.phases.length].secs;
       });
@@ -166,7 +156,6 @@ function Breathing({ running }: { running:boolean }) {
   const size = 180;
   const scale = useMemo(() => {
     const label = pattern.phases[phaseIdx].label.toLowerCase();
-    // expand on inhale, shrink on exhale; holds stay as-is
     if (label === "inhale") return 1.0;
     if (label === "exhale") return 0.65;
     return 0.82;
@@ -225,14 +214,10 @@ function Affirmation({ running }: { running:boolean }) {
   const [text, setText] = useState<string>(() => localStorage.getItem(LS_KEY) || "I follow through on what matters today.");
   const [speak, setSpeak] = useState<boolean>(false);
 
-  // Persist changes
   useEffect(() => { localStorage.setItem(LS_KEY, text); }, [text]);
 
-  // Speak loop while running
-  const spokenRef = useRef(false);
   useEffect(() => {
-    if (!running || !speak) { spokenRef.current = false; return; }
-    // Speak once every ~6 seconds while running
+    if (!running || !speak) return;
     const say = () => {
       try {
         const utter = new SpeechSynthesisUtterance(text);
