@@ -164,3 +164,19 @@ html, body { overflow-x: hidden; }
 
 /* Keep the tab bar above everything, everywhere */
 .tabbar { z-index: 9999; }
+/* === Calendar month grid: fit 7 columns on mobile === */
+@media (max-width: 899px){
+  /* Any inline 7-col grids (our month grid & weekday header) */
+  [style*="grid-template-columns: repeat(7, 1fr)"] {
+    grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+    width: 100% !important;
+  }
+
+  /* Make sure day cells can shrink and don't force overflow */
+  [style*="grid-template-columns: repeat(7, 1fr)"] > * {
+    min-width: 0 !important;
+  }
+}
+
+
+
