@@ -126,3 +126,13 @@ button:disabled { opacity:.6; cursor:not-allowed; }
   .tabbar{ display:none; }
   .app-shell{ padding-bottom: 12px; }
 }
+
+/* --- Fix checkbox/radio sizing on task rows (prevents stretched checkboxes) --- */
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+  height: auto;
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0;
+}
