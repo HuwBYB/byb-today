@@ -65,7 +65,7 @@ export default function WinsScreen() {
     });
   }, []);
 
-  // Load recent completions (last 365 days) + all-time count
+  // Load recent completions (last 365 days)
   async function load() {
     if (!userId) return;
     setLoading(true); setErr(null);
@@ -98,23 +98,21 @@ export default function WinsScreen() {
       if (!map.has(d)) map.set(d, []);
       map.get(d)!.push(t);
     }
-    // sort tasks per day by priority desc then time desc
-    for (const [k, arr] of map) {
+    // sort tasks per day by priority desc
+    for (const arr of map.values()) {
       arr.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
     }
     return map;
   }, [doneTasks]);
 
   const today = new Date();
-  const todayISO = toISO(today);
 
   // Streaks (current & best): days with >=1 completion
   const { currentStreak, bestStreak } = useMemo(() => {
-    // Make a set of dates that had at least one completion
     const dates = new Set<string>([...byDay.keys()]);
-    // Current streak: count consecutive days ending today
+    // Current streak: consecutive days ending today
     let cur = 0;
-    let probe = new Date(today);
+    const probe = new Date(today);
     while (dates.has(toISO(probe))) {
       cur++;
       probe.setDate(probe.getDate() - 1);
@@ -124,8 +122,7 @@ export default function WinsScreen() {
     const scan = new Date(today);
     for (let i = 0; i < 365; i++) {
       if (dates.has(toISO(scan))) {
-        run++;
-        best = Math.max(best, run);
+        run++; best = Math.max(best, run);
       } else {
         run = 0;
       }
@@ -252,10 +249,12 @@ export default function WinsScreen() {
         </div>
       </div>
 
-      {/* Right: filters & refresh */}
+      {/* Right: options & refresh */}
       <div className="card" style={{ display: "grid", gap: 10, height: "fit-content" }}>
         <h2 style={{ margin: 0 }}>Options</h2>
-        <div className="muted">Wins are counted when a task’s status becomes <b>done</b>. We track the timestamp as <code>completed_at</code>.</div>
+        <div className="muted">
+          Wins are counted when a task’s status becomes <b>done</b>. We track the timestamp as <code>completed_at</code>.
+        </div>
         <button onClick={load} disabled={loading} className="btn-primary" style={{ borderRadius: 8 }}>
           {loading ? "Refreshing…" : "Refresh data"}
         </button>
