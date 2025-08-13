@@ -4,33 +4,22 @@ import { supabase } from "./lib/supabaseClient";
 type EntryRow = {
   id: number;
   user_id: string;
-  entry_date: string; // 'YYYY-MM-DD'
+  entry_date: string; // YYYY-MM-DD
   item_index: number; // 1..8
   content: string;
   created_at: string;
   updated_at: string;
 };
 
-// --- date helpers (local) ---
+// --- dates (local) ---
 function toISO(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,"0"), dd=String(d.getDate()).padStart(2,"0");
   return `${y}-${m}-${dd}`;
 }
-function fromISO(s: string) {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, (m ?? 1) - 1, d ?? 1);
-}
+function fromISO(s: string) { const [y,m,d]=s.split("-").map(Number); return new Date(y,(m??1)-1,d??1); }
 
 type Idx = 1|2|3|4|5|6|7|8;
 const INDEXES: Idx[] = [1,2,3,4,5,6,7,8];
-
-function emptyMap(): Record<number, EntryRow | null> {
-  const m: Record<number, EntryRow | null> = {};
-  for (const i of INDEXES) m[i] = null;
-  return m;
-}
 
 const PLACEHOLDERS: Record<number, string> = {
   1: "Something good that happened…",
@@ -46,13 +35,24 @@ const PLACEHOLDERS: Record<number, string> = {
 export default function GratitudeScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [dateISO, setDateISO] = useState<string>(() => toISO(new Date()));
-  const [items, setItems] = useState<Record<number, EntryRow | null>>(emptyMap());
-  const [loading, setLoading] = useState(false);
+  const [rowsByIdx, setRowsByIdx] = useState<Record<number, EntryRow | null>>({});
+  const [draft, setDraft] = useState<Record<number, string>>({});
   const [savingIdx, setSavingIdx] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // history list (last ~30 days)
+  // history (last 30 days)
   const [history, setHistory] = useState<Record<string, EntryRow[]>>({});
+
+  // init maps
+  function resetMaps(withRows: EntryRow[]) {
+    const rb: Record<number, EntryRow | null> = {};
+    const dr: Record<number, string> = {};
+    for (const i of INDEXES) { rb[i] = null; dr[i] = ""; }
+    for (const r of withRows) { rb[r.item_index] = r; dr[r.item_index] = r.content; }
+    setRowsByIdx(rb);
+    setDraft(dr);
+  }
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
@@ -61,7 +61,7 @@ export default function GratitudeScreen() {
     });
   }, []);
 
-  // Load entries for the selected day
+  // load one day
   async function loadDay(iso: string) {
     if (!userId) return;
     setLoading(true); setErr(null);
@@ -72,13 +72,11 @@ export default function GratitudeScreen() {
       .eq("entry_date", iso)
       .order("item_index", { ascending: true });
     setLoading(false);
-    if (error) { setErr(error.message); setItems(emptyMap()); return; }
-    const map = emptyMap();
-    for (const r of (data as EntryRow[])) map[r.item_index] = r;
-    setItems(map);
+    if (error) { setErr(error.message); resetMaps([]); return; }
+    resetMaps((data as EntryRow[]) || []);
   }
 
-  // Load recent history for sidebar (last 30 days)
+  // load recent history
   async function loadHistory() {
     if (!userId) return;
     const since = new Date(); since.setDate(since.getDate() - 30);
@@ -92,39 +90,39 @@ export default function GratitudeScreen() {
     if (error) { setErr(error.message); setHistory({}); return; }
     const grouped: Record<string, EntryRow[]> = {};
     for (const r of (data as EntryRow[])) {
-      if (!grouped[r.entry_date]) grouped[r.entry_date] = [];
-      grouped[r.entry_date].push(r);
+      (grouped[r.entry_date] ||= []).push(r);
     }
     setHistory(grouped);
   }
 
   useEffect(() => { if (userId) { loadDay(dateISO); loadHistory(); } }, [userId, dateISO]);
 
-  // Save or delete one of the 1..8 lines
-  async function saveItem(idx: Idx, content: string) {
+  // save one line (upsert/delete), keep draft in sync
+  async function saveIdx(idx: Idx) {
     if (!userId) return;
-    const trimmed = content.trim();
+    const content = (draft[idx] || "").trim();
     setSavingIdx(idx); setErr(null);
     try {
-      const existing = items[idx];
-      if (!trimmed) {
-        // delete if exists
+      const existing = rowsByIdx[idx];
+      if (!content) {
         if (existing) {
-          const { error } = await supabase.from("gratitude_entries")
-            .delete()
-            .eq("id", existing.id);
+          const { error } = await supabase.from("gratitude_entries").delete().eq("id", existing.id);
           if (error) throw error;
         }
+        // reflect local
+        setRowsByIdx(prev => ({ ...prev, [idx]: null }));
       } else {
-        // upsert (unique on user_id+date+index)
-        const payload = { user_id: userId, entry_date: dateISO, item_index: idx, content: trimmed };
-        const { error } = await supabase
+        const payload = { user_id: userId, entry_date: dateISO, item_index: idx, content };
+        const { data, error } = await supabase
           .from("gratitude_entries")
-          .upsert(payload as any, { onConflict: "user_id,entry_date,item_index" });
+          .upsert(payload as any, { onConflict: "user_id,entry_date,item_index" })
+          .select()
+          .single();
         if (error) throw error;
+        setRowsByIdx(prev => ({ ...prev, [idx]: data as EntryRow }));
       }
-      await loadDay(dateISO);
-      await loadHistory();
+      // refresh history sidebar but avoid flicker on inputs
+      loadHistory();
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -133,10 +131,10 @@ export default function GratitudeScreen() {
   }
 
   function gotoToday() { setDateISO(toISO(new Date())); }
-  function gotoPrev() { const d = fromISO(dateISO); d.setDate(d.getDate() - 1); setDateISO(toISO(d)); }
-  function gotoNext() { const d = fromISO(dateISO); d.setDate(d.getDate() + 1); setDateISO(toISO(d)); }
+  function gotoPrev()  { const d = fromISO(dateISO); d.setDate(d.getDate()-1); setDateISO(toISO(d)); }
+  function gotoNext()  { const d = fromISO(dateISO); d.setDate(d.getDate()+1); setDateISO(toISO(d)); }
 
-  const countToday = useMemo(() => Object.values(items).filter(Boolean).length, [items]);
+  const countToday = useMemo(() => INDEXES.reduce((n,i)=> n + (rowsByIdx[i] ? 1 : 0), 0), [rowsByIdx]);
 
   async function exportCSV() {
     if (!userId) return;
@@ -178,8 +176,9 @@ export default function GratitudeScreen() {
               <input
                 type="text"
                 placeholder={PLACEHOLDERS[idx] || "I'm grateful for…"}
-                defaultValue={items[idx]?.content ?? ""}
-                onBlur={(e) => saveItem(idx, e.currentTarget.value)}
+                value={draft[idx] ?? ""}                   // CONTROLLED
+                onChange={(e) => setDraft(d => ({ ...d, [idx]: e.currentTarget.value }))}
+                onBlur={() => saveIdx(idx)}                // save on blur
                 disabled={loading || savingIdx === idx}
               />
               {savingIdx === idx && <span className="muted">Saving…</span>}
