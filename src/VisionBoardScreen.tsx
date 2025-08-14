@@ -21,7 +21,7 @@ export default function VisionBoardScreen() {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Inline viewer state (no overlay)
+  // Inline viewer (no overlay text)
   const [currentIdx, setCurrentIdx] = useState<number>(0);
   const [playing, setPlaying] = useState<boolean>(false);
   const playTimerRef = useRef<number | null>(null);
@@ -81,8 +81,7 @@ export default function VisionBoardScreen() {
       if (insErr) throw insErr;
 
       await loadItems();
-      // jump to the newly added image
-      setCurrentIdx(items.length);
+      setCurrentIdx(items.length); // jump to new image
       viewerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (e: any) {
       setErr(e.message || String(e));
@@ -91,7 +90,7 @@ export default function VisionBoardScreen() {
     }
   }
 
-  /* ---- caption update ---- */
+  /* ---- caption update (kept in grid only) ---- */
   async function saveCaption(it: VisionItem, caption: string) {
     const { error } = await supabase.from("vision_items").update({ caption }).eq("id", it.id);
     if (error) { setErr(error.message); return; }
@@ -108,21 +107,14 @@ export default function VisionBoardScreen() {
       if (storErr) setErr(`Removed from board, but not storage: ${storErr.message}`);
     }
     await loadItems();
-    // keep viewer in range
     setCurrentIdx(i => Math.min(i, Math.max(0, items.length - 2)));
   }
 
   /* ---- inline viewer nav ---- */
-  function next() {
-    if (!items.length) return;
-    setCurrentIdx(i => (i + 1) % items.length);
-  }
-  function prev() {
-    if (!items.length) return;
-    setCurrentIdx(i => (i - 1 + items.length) % items.length);
-  }
+  function next() { if (items.length) setCurrentIdx(i => (i + 1) % items.length); }
+  function prev() { if (items.length) setCurrentIdx(i => (i - 1 + items.length) % items.length); }
 
-  // Keyboard support for viewer
+  // Keyboard support (no overlay text)
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!items.length) return;
@@ -146,7 +138,6 @@ export default function VisionBoardScreen() {
     };
   }, [playing, items.length]);
 
-  // When clicking a tile, show it in the viewer (and scroll to viewer)
   function showAt(i: number) {
     setCurrentIdx(i);
     viewerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -177,7 +168,7 @@ export default function VisionBoardScreen() {
         </div>
       </div>
 
-      {/* Inline viewer */}
+      {/* Inline viewer (no text overlays) */}
       {items.length > 0 && (
         <div className="card card--wash" ref={viewerRef}>
           <div className="vb-inline">
@@ -190,10 +181,6 @@ export default function VisionBoardScreen() {
                 alt={items[currentIdx].caption || "Vision"}
                 className="vb-img"
               />
-              <div className="vb-meta">
-                <div className="vb-cap">{items[currentIdx].caption || ""}</div>
-                <div className="vb-count muted">{currentIdx + 1} / {items.length}</div>
-              </div>
             </div>
 
             <button className="vb-arrow vb-right" onClick={next} aria-label="Next">→</button>
@@ -207,7 +194,7 @@ export default function VisionBoardScreen() {
         </div>
       )}
 
-      {/* Grid of tiles (click to show in viewer). No reordering arrows anymore. */}
+      {/* Grid of tiles (captions kept here only) */}
       <div className="card" style={{ padding: 12 }}>
         {items.length === 0 && <div className="muted">No images yet. Upload your first vision image.</div>}
 
@@ -249,7 +236,7 @@ export default function VisionBoardScreen() {
   );
 }
 
-/* --- inline viewer styles --- */
+/* --- inline viewer styles (no text overlays) --- */
 const CSS_VIEWER = `
 .vb-inline{
   display: grid;
@@ -274,22 +261,6 @@ const CSS_VIEWER = `
   display: block;
   background: #f8f9fa;
 }
-.vb-meta{
-  position: absolute;
-  left: 8px; right: 8px; bottom: 8px;
-  display: flex; justify-content: space-between; align-items: center;
-  gap: 8px;
-}
-.vb-cap{ 
-  background: rgba(255,255,255,.85);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 4px 8px;
-  max-width: 70%;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.vb-count{ background: rgba(255,255,255,.85); border-radius: 8px; padding: 2px 8px; }
-
 .vb-arrow{
   height: 40px; width: 40px;
   border-radius: 999px;
