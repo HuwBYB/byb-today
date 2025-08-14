@@ -133,4 +133,204 @@ export default function WinsScreen() {
           .select("id,session_date")
           .in("id", sessionIds);
         if (sErr) throw sErr;
-        (sData || []).forEach((s: any) => { idToDate[s.id] = s.sessio
+        (sData || []).forEach((s: any) => { idToDate[s.id] = s.session_date; });
+      }
+      const wItems: WorkoutItemRow[] = ((iData as any[]) || []).map(i => ({
+        id: i.id,
+        user_id: i.user_id,
+        session_id: i.session_id,
+        kind: i.kind,
+        title: i.title,
+        metrics: i.metrics || {},
+        session_date: idToDate[i.session_id] || ""
+      }));
+
+      // 3) gratitudes
+      const { data: gdata, error: gerror } = await supabase
+        .from("gratitude_entries")
+        .select("id,user_id,entry_date,item_index,content")
+        .eq("user_id", userId)
+        .order("entry_date", { ascending: false })
+        .order("item_index", { ascending: true });
+      if (gerror) throw gerror;
+
+      setDoneTasks((tdata as TaskRow[]) || []);
+      setWorkoutItems(wItems);
+      setGrats((gdata as GratRow[]) || []);
+    } catch (e: any) {
+      setErr(e.message || String(e));
+      setDoneTasks([]); setWorkoutItems([]); setGrats([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /* Buckets & counts */
+  const bigGoalTasks = useMemo(() => doneTasks.filter(isBigGoal), [doneTasks]);
+  const exerciseTasks = useMemo(() => doneTasks.filter(isExerciseTask), [doneTasks]);
+  const generalTasks = useMemo(
+    () => doneTasks.filter(t => !isBigGoal(t) && !isExerciseTask(t)),
+    [doneTasks]
+  );
+
+  const counts = {
+    general: generalTasks.length,
+    big: bigGoalTasks.length,
+    exercise: exerciseTasks.length + workoutItems.length, // include diary items
+    gratitude: grats.length,
+    all: generalTasks.length + bigGoalTasks.length + exerciseTasks.length + workoutItems.length + grats.length,
+  };
+
+  /* Labels & details */
+  function labelWorkout(i: WorkoutItemRow) {
+    const d = i.metrics?.["distance_km"] as number | undefined;
+    const sec = i.metrics?.["duration_sec"] as number | undefined;
+    const parts: string[] = [];
+    parts.push(i.title || i.kind);
+    if (d) parts.push(`${d} km`);
+    if (sec) parts.push(secondsToMMSS(sec));
+    if (d && sec) parts.push(paceStr(d, sec));
+    return parts.join(" • ");
+  }
+
+  function listFor(k: BucketKey): Detail[] {
+    if (k === "general") {
+      return generalTasks.map(t => ({
+        id: `task-${t.id}`,
+        label: t.title,
+        date: dateOnlyLocal(t.completed_at) || ""
+      }));
+    }
+    if (k === "big") {
+      return bigGoalTasks.map(t => ({
+        id: `task-${t.id}`,
+        label: t.title,
+        date: dateOnlyLocal(t.completed_at) || ""
+      }));
+    }
+    if (k === "exercise") {
+      const a = exerciseTasks.map(t => ({
+        id: `task-${t.id}`,
+        label: t.title,
+        date: dateOnlyLocal(t.completed_at) || "",
+        kind: "Task"
+      }));
+      const b = workoutItems.map(i => ({
+        id: `workout-${i.id}`,
+        label: labelWorkout(i),
+        date: i.session_date || "",
+        kind: "Diary"
+      }));
+      return [...a, ...b].sort((x, y) => y.date.localeCompare(x.date));
+    }
+    if (k === "gratitude") {
+      return grats.map(g => ({
+        id: `grat-${g.id}`,
+        label: g.content || "(empty)",
+        date: g.entry_date
+      }));
+    }
+    // all
+    const a = generalTasks.map(t => ({
+      id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "General"
+    }));
+    const b = bigGoalTasks.map(t => ({
+      id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "Big goal"
+    }));
+    const c1 = exerciseTasks.map(t => ({
+      id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "Exercise"
+    }));
+    const c2 = workoutItems.map(i => ({
+      id: `workout-${i.id}`, label: labelWorkout(i), date: i.session_date || "", kind: "Exercise"
+    }));
+    const d = grats.map(g => ({
+      id: `grat-${g.id}`, label: g.content || "(empty)", date: g.entry_date, kind: "Gratitude"
+    }));
+    return [...a, ...b, ...c1, ...c2, ...d].sort((x, y) => y.date.localeCompare(x.date));
+  }
+
+  const details = useMemo(() => listFor(active), [active, doneTasks, workoutItems, grats]);
+
+  /* Render */
+  return (
+    <div className="page-wins">
+      <div className="container" style={{ display: "grid", gap: 12 }}>
+        {/* Header */}
+        <div className="card">
+          <h1>Your Wins</h1>
+          <div className="muted">“Exercise” includes items from the Exercise Diary.</div>
+        </div>
+
+        {/* KPI cards */}
+        <div className="wins-kpis">
+          <KpiCard title="Everything"     count={counts.all}       active={active === "all"}       onClick={() => setActive("all")} />
+          <KpiCard title="General tasks"  count={counts.general}   active={active === "general"}   onClick={() => setActive("general")} />
+          <KpiCard title="Big goal tasks" count={counts.big}       active={active === "big"}       onClick={() => setActive("big")} />
+          <KpiCard title="Exercise"       count={counts.exercise}  active={active === "exercise"}  onClick={() => setActive("exercise")} />
+          <KpiCard title="Gratitudes"     count={counts.gratitude} active={active === "gratitude"} onClick={() => setActive("gratitude")} />
+        </div>
+
+        {/* Details */}
+        <div className="card" style={{ display: "grid", gap: 10 }}>
+          <h2 style={{ margin: 0 }}>
+            {active === "all" ? "All wins" :
+             active === "general" ? "General tasks" :
+             active === "big" ? "Big goal tasks" :
+             active === "exercise" ? "Exercise" :
+             "Gratitudes"}
+          </h2>
+
+          {details.length === 0 ? (
+            <div className="muted">Nothing here yet.</div>
+          ) : (
+            <ul className="list">
+              {details.slice(0, 80).map(item => (
+                <li key={item.id} className="item" style={{ alignItems: "center" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {item.kind ? `[${item.kind}] ` : ""}{item.label}
+                    </div>
+                    <div className="muted" style={{ marginTop: 4 }}>{item.date}</div>
+                  </div>
+                </li>
+              ))}
+              {details.length > 80 && (
+                <li className="muted">…and {details.length - 80} more</li>
+              )}
+            </ul>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="card" style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button onClick={loadAll} disabled={loading} className="btn-primary" style={{ borderRadius: 8 }}>
+            {loading ? "Refreshing…" : "Refresh data"}
+          </button>
+        </div>
+
+        {err && <div style={{ color: "red" }}>{err}</div>}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Tiny component ---------- */
+function KpiCard({ title, count, onClick, active }:{
+  title: string; count: number; onClick: ()=>void; active: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="card"
+      style={{
+        textAlign: "left",
+        cursor: "pointer",
+        borderColor: active ? "hsl(var(--pastel-hsl))" : "var(--border)",
+        boxShadow: active ? "0 8px 22px rgba(0,0,0,.06)" : "var(--shadow)",
+      }}
+    >
+      <div className="section-title">{title}</div>
+      <div style={{ fontSize: 28, fontWeight: 700 }}>{count}</div>
+    </button>
+  );
+}
