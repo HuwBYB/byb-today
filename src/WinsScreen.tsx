@@ -30,10 +30,6 @@ function toISO(d: Date) {
   const dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
-function fromISO(s: string) {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, (m ?? 1) - 1, d ?? 1);
-}
 function dateOnlyLocal(ts: string | null): string | null {
   if (!ts) return null;
   const d = new Date(ts);
