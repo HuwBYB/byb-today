@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-/** ---------- Types ---------- */
+/* ---------- Types ---------- */
 type TaskRow = {
   id: number;
   user_id: string;
@@ -42,7 +42,7 @@ type Detail = {
   kind?: string;
 };
 
-/** ---------- Helpers ---------- */
+/* ---------- Helpers ---------- */
 function toISO(d: Date) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -65,7 +65,7 @@ function paceStr(distanceKm?: number, durSec?: number) {
   return `${secondsToMMSS(secPerKm)}/km`;
 }
 
-/* Task classifiers */
+/* ---------- Classifiers (tasks table) ---------- */
 function isBigGoal(t: TaskRow) {
   const cat = (t.category || "").toLowerCase();
   const src = (t.source || "").toLowerCase();
@@ -81,7 +81,8 @@ function isExerciseTask(t: TaskRow) {
   return /\b(run|walk|jog|gym|workout|exercise|yoga|swim|cycle|cycling|ride|lift|weights|pilates|stretch)\b/.test(title);
 }
 
-/** ---------- Component ---------- */
+/* ======================================================================= */
+
 export default function WinsScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [doneTasks, setDoneTasks] = useState<TaskRow[]>([]);
@@ -91,7 +92,7 @@ export default function WinsScreen() {
   const [loading, setLoading] = useState(false);
   const [active, setActive] = useState<BucketKey>("all");
 
-  // auth
+  /* Auth */
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -99,7 +100,7 @@ export default function WinsScreen() {
     });
   }, []);
 
-  // load data
+  /* Load data */
   useEffect(() => { if (userId) loadAll(); }, [userId]);
 
   async function loadAll() {
@@ -115,7 +116,7 @@ export default function WinsScreen() {
         .order("completed_at", { ascending: false });
       if (terror) throw terror;
 
-      // 2) workout items + their session dates
+      // 2) workout items
       const { data: iData, error: iErr } = await supabase
         .from("workout_items")
         .select("id,user_id,session_id,kind,title,metrics")
@@ -123,6 +124,7 @@ export default function WinsScreen() {
         .order("id", { ascending: false });
       if (iErr) throw iErr;
 
+      // join to sessions to get the date
       const sessionIds = Array.from(new Set((iData || []).map((i: any) => i.session_id)));
       let idToDate: Record<number, string> = {};
       if (sessionIds.length) {
@@ -131,90 +133,4 @@ export default function WinsScreen() {
           .select("id,session_date")
           .in("id", sessionIds);
         if (sErr) throw sErr;
-        (sData || []).forEach((s: any) => { idToDate[s.id] = s.session_date; });
-      }
-      const wItems: WorkoutItemRow[] = (iData as any[] || []).map(i => ({
-        id: i.id,
-        user_id: i.user_id,
-        session_id: i.session_id,
-        kind: i.kind,
-        title: i.title,
-        metrics: i.metrics || {},
-        session_date: idToDate[i.session_id] || ""
-      }));
-
-      // 3) gratitudes
-      const { data: gdata, error: gerror } = await supabase
-        .from("gratitude_entries")
-        .select("id,user_id,entry_date,item_index,content")
-        .eq("user_id", userId)
-        .order("entry_date", { ascending: false })
-        .order("item_index", { ascending: true });
-      if (gerror) throw gerror;
-
-      setDoneTasks((tdata as TaskRow[]) || []);
-      setWorkoutItems(wItems);
-      setGrats((gdata as GratRow[]) || []);
-    } catch (e: any) {
-      setErr(e.message || String(e));
-      setDoneTasks([]); setWorkoutItems([]); setGrats([]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  /* ----- buckets & counts ----- */
-  const bigGoalTasks = useMemo(() => doneTasks.filter(isBigGoal), [doneTasks]);
-  const exerciseTasks = useMemo(() => doneTasks.filter(isExerciseTask), [doneTasks]);
-  const generalTasks = useMemo(() => doneTasks.filter(t => !isBigGoal(t) && !isExerciseTask(t)), [doneTasks]);
-
-  const counts = {
-    general: generalTasks.length,
-    big: bigGoalTasks.length,
-    exercise: exerciseTasks.length + workoutItems.length, // include diary items
-    gratitude: grats.length,
-    all: generalTasks.length + bigGoalTasks.length + exerciseTasks.length + workoutItems.length + grats.length,
-  };
-
-  function labelWorkout(i: WorkoutItemRow) {
-    const d = (i.metrics?.distance_km as number | undefined);
-    const sec = (i.metrics?.duration_sec as number | undefined);
-    const parts: string[] = [];
-    parts.push(i.title || i.kind);
-    if (d) parts.push(`${d} km`);
-    if (sec) parts.push(secondsToMMSS(sec));
-    if (d && sec) parts.push(paceStr(d, sec));
-    return parts.join(" • ");
-  }
-
-  function listFor(k: BucketKey): Detail[] {
-    switch (k) {
-      case "general":
-        return generalTasks.map(t => ({
-          id: `task-${t.id}`,
-          label: t.title,
-          date: dateOnlyLocal(t.completed_at) || ""
-        }));
-      case "big":
-        return bigGoalTasks.map(t => ({
-          id: `task-${t.id}`,
-          label: t.title,
-          date: dateOnlyLocal(t.completed_at) || ""
-        }));
-      case "exercise": {
-        const a = exerciseTasks.map(t => ({
-          id: `task-${t.id}`,
-          label: t.title,
-          date: dateOnlyLocal(t.completed_at) || "",
-          kind: "Task"
-        }));
-        const b = workoutItems.map(i => ({
-          id: `workout-${i.id}`,
-          label: labelWorkout(i),
-          date: i.session_date || "",
-          kind: "Diary"
-        }));
-        return [...a, ...b].sort((x, y) => y.date.localeCompare(x.date));
-      }
-      case "gratitude":
-        return grats.ma
+        (sData || []).forEach((s: any) => { idToDate[s.id] = s.sessio
