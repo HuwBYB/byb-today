@@ -12,6 +12,7 @@ type VisionItem = {
 };
 
 const MAX_ITEMS = 6;
+const SLIDESHOW_MS = 30000; // 30 seconds per image
 
 export default function VisionBoardScreen() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -22,6 +23,8 @@ export default function VisionBoardScreen() {
 
   // Lightbox viewer state
   const [viewIdx, setViewIdx] = useState<number | null>(null);
+  const [playing, setPlaying] = useState<boolean>(false);
+  const playTimerRef = useRef<number | null>(null);
 
   /* ---- auth ---- */
   useEffect(() => {
@@ -110,44 +113,25 @@ export default function VisionBoardScreen() {
     }
     // Adjust viewer index if open
     if (viewIdx !== null) {
-      if (items.length <= 1) setViewIdx(null);
-      else setViewIdx((prev) => {
-        if (prev == null) return null;
-        const removedAt = items.findIndex(x => x.id === it.id);
-        const next = Math.max(0, Math.min(prev, items.length - 2));
-        return removedAt === prev ? next : prev > removedAt ? prev - 1 : prev;
-      });
+      if (items.length <= 1) { setViewIdx(null); setPlaying(false); }
+      else {
+        setViewIdx(prev => {
+          if (prev == null) return null;
+          const removedAt = items.findIndex(x => x.id === it.id);
+          const next = Math.max(0, Math.min(prev, items.length - 2));
+          return removedAt === prev ? next : prev > removedAt ? prev - 1 : prev;
+        });
+      }
     }
     await loadItems();
   }
 
-  /* ---- reorder (swap neighbors in list order) ---- */
-  function canMoveLeft(index: number) { return index > 0; }
-  function canMoveRight(index: number) { return index < items.length - 1; }
-
-  async function move(index: number, dir: -1 | 1) {
-    const j = index + dir;
-    if (j < 0 || j >= items.length) return;
-    const newItems = [...items];
-    [newItems[index], newItems[j]] = [newItems[j], newItems[index]];
-    // renumber sort_order by array position
-    const updates = newItems.map((it, idx) => ({ id: it.id, sort_order: idx }));
-    setItems(newItems);
-    // Persist (small table: update all)
-    await Promise.all(updates.map(u =>
-      supabase.from("vision_items").update({ sort_order: u.sort_order }).eq("id", u.id)
-    ));
-    // If viewer is open, keep it tracking the same image id
-    if (viewIdx !== null) {
-      const viewedId = items[viewIdx]?.id;
-      const newIndex = newItems.findIndex(x => x.id === viewedId);
-      if (newIndex !== -1) setViewIdx(newIndex);
-    }
-  }
-
   /* ---- viewer (lightbox) helpers ---- */
   function openViewer(i: number) { setViewIdx(i); }
-  function closeViewer() { setViewIdx(null); }
+  function closeViewer() {
+    setViewIdx(null);
+    setPlaying(false);
+  }
   function next() {
     if (viewIdx == null || items.length === 0) return;
     setViewIdx((viewIdx + 1) % items.length);
@@ -164,10 +148,38 @@ export default function VisionBoardScreen() {
       if (e.key === "Escape") { e.preventDefault(); closeViewer(); }
       if (e.key === "ArrowRight") { e.preventDefault(); next(); }
       if (e.key === "ArrowLeft") { e.preventDefault(); prev(); }
+      if (e.key === " " || e.key === "Spacebar") { e.preventDefault(); setPlaying(p => !p); }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [viewIdx, items.length]);
+
+  // Slideshow timer
+  useEffect(() => {
+    if (!playing || viewIdx == null || items.length < 2) {
+      if (playTimerRef.current) {
+        window.clearInterval(playTimerRef.current);
+        playTimerRef.current = null;
+      }
+      return;
+    }
+    playTimerRef.current = window.setInterval(() => {
+      setViewIdx(i => (i == null ? 0 : (i + 1) % items.length));
+    }, SLIDESHOW_MS);
+    return () => {
+      if (playTimerRef.current) {
+        window.clearInterval(playTimerRef.current);
+        playTimerRef.current = null;
+      }
+    };
+  }, [playing, viewIdx, items.length]);
+
+  // If items change while viewing, keep index in range
+  useEffect(() => {
+    if (viewIdx != null && viewIdx >= items.length) {
+      setViewIdx(items.length ? items.length - 1 : null);
+    }
+  }, [items.length, viewIdx]);
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
@@ -177,7 +189,9 @@ export default function VisionBoardScreen() {
       <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <h1 style={{ margin: 0 }}>Vision Board</h1>
-          <div className="muted">Up to {MAX_ITEMS} images. Click to view; use arrows to navigate. Reorder with ←/→ on each tile.</div>
+          <div className="muted">
+            Up to {MAX_ITEMS} images. Click to view; use arrows (or keys) to cycle. Start a 30s slideshow from the viewer.
+          </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -224,10 +238,16 @@ export default function VisionBoardScreen() {
                 <div style={{ position: "absolute", top: 6, right: 6, display: "flex", gap: 6 }}>
                   <button onClick={(e) => { e.stopPropagation(); removeItem(it); }} title="Delete" style={{ padding: "4px 8px" }}>×</button>
                 </div>
-                {/* reorder */}
+                {/* nav (no reorder any more) */}
                 <div style={{ position: "absolute", bottom: 6, left: 6, display: "flex", gap: 6 }}>
-                  <button onClick={(e) => { e.stopPropagation(); move(idx, -1); }} disabled={!canMoveLeft(idx)} title="Move left">←</button>
-                  <button onClick={(e) => { e.stopPropagation(); move(idx, +1); }} disabled={!canMoveRight(idx)} title="Move right">→</button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setViewIdx((idx - 1 + items.length) % items.length); }}
+                    title="Previous"
+                  >←</button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setViewIdx((idx + 1) % items.length); }}
+                    title="Next"
+                  >→</button>
                 </div>
               </div>
 
@@ -262,13 +282,17 @@ export default function VisionBoardScreen() {
             />
             {items[viewIdx].caption && <div className="vb-cap">{items[viewIdx].caption}</div>}
 
+            <div className="vb-controls">
+              <button onClick={prev} aria-label="Previous">← Prev</button>
+              {items.length > 1 && (
+                <button onClick={() => setPlaying(p => !p)} aria-label={playing ? "Pause slideshow" : "Play slideshow"}>
+                  {playing ? "Pause" : "Play 30s"}
+                </button>
+              )}
+              <button onClick={next} aria-label="Next">Next →</button>
+            </div>
+
             <button className="vb-close" onClick={closeViewer} aria-label="Close">×</button>
-            {items.length > 1 && (
-              <>
-                <button className="vb-nav vb-prev" onClick={prev} aria-label="Previous">←</button>
-                <button className="vb-nav vb-next" onClick={next} aria-label="Next">→</button>
-              </>
-            )}
           </div>
         </div>
       )}
@@ -296,7 +320,7 @@ const CSS_LIGHTBOX = `
 }
 .vb-img{
   width: 100%; height: auto; display: block;
-  max-height: calc(80vh - 80px);
+  max-height: calc(80vh - 100px);
   object-fit: contain;
   border-radius: 8px;
   background: #f8f9fa;
@@ -310,14 +334,12 @@ const CSS_LIGHTBOX = `
   position: absolute; top: 8px; right: 8px;
   padding: 4px 10px; border-radius: 8px;
 }
-.vb-nav{
-  position: absolute; top: 50%; transform: translateY(-50%);
-  padding: 8px 12px; border-radius: 8px;
+.vb-controls{
+  margin-top: 10px;
+  display: flex; gap: 8px; justify-content: center; align-items: center;
 }
-.vb-prev{ left: 8px; }
-.vb-next{ right: 8px; }
 @media (max-width: 520px){
   .vb-sheet{ padding: 10px; }
-  .vb-img{ max-height: calc(80vh - 60px); }
+  .vb-img{ max-height: calc(80vh - 80px); }
 }
 `;
