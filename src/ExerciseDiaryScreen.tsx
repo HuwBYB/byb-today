@@ -236,85 +236,98 @@ export default function ExerciseDiaryScreen() {
   function nextDay() { const d = fromISO(dateISO); d.setDate(d.getDate()+1); setDateISO(toISO(d)); }
 
   return (
-    <div style={{ display:"grid", gridTemplateColumns:"1fr 320px", gap:12 }}>
-      {/* Left: editor */}
-      <div className="card" style={{ display:"grid", gap:12 }}>
-        <h1 style={{ margin:0 }}>Exercise Diary</h1>
+    <div className="page-exercise">
+      <div className="container">
+        <div className="exercise-layout">
+          {/* Left: editor */}
+          <div className="card" style={{ display:"grid", gap:12 }}>
+            <h1 style={{ margin:0 }}>Exercise Diary</h1>
 
-        {/* Date bar */}
-        <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-          <button onClick={gotoToday}>Today</button>
-          <button onClick={prevDay}>←</button>
-          <input type="date" value={dateISO} onChange={e=>setDateISO(e.target.value)} />
-          <button onClick={nextDay}>→</button>
-          <div style={{ marginLeft:"auto" }}>
+            {/* Date bar */}
+            <div className="exercise-toolbar" style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+              <button onClick={gotoToday}>Today</button>
+              <button onClick={prevDay}>←</button>
+              <input
+                type="date"
+                value={dateISO}
+                onChange={e=>setDateISO(e.target.value)}
+                style={{ flex:"1 1 180px", minWidth:0 }}
+              />
+              <button onClick={nextDay}>→</button>
+              <div style={{ marginLeft:"auto" }}>
+                {!session ? (
+                  <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius:8 }}>
+                    {busy ? "Creating…" : "Create session"}
+                  </button>
+                ) : (
+                  <span className="muted">Session #{session.id}</span>
+                )}
+              </div>
+            </div>
+
             {!session ? (
-              <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius:8 }}>
-                {busy ? "Creating…" : "Create session"}
-              </button>
+              <div className="muted">No session for this day yet. Click <b>Create session</b> to start logging.</div>
             ) : (
-              <span className="muted">Session #{session.id}</span>
-            )}
-          </div>
-        </div>
+              <>
+                <QuickAddCard
+                  onAddWeights={() => addWeightsExercise("Lat Pulldown")}
+                  onAddCardio={(kind, title, km, mmss) => addCardio(kind, title, km, mmss)}
+                />
 
-        {!session ? (
-          <div className="muted">No session for this day yet. Click <b>Create session</b> to start logging.</div>
-        ) : (
-          <>
-            <QuickAddCard
-              onAddWeights={() => addWeightsExercise("Lat Pulldown")}
-              onAddCardio={(kind, title, km, mmss) => addCardio(kind, title, km, mmss)}
-            />
+                <div style={{ display:"grid", gap:10 }}>
+                  {items.length === 0 && <div className="muted">No items yet. Add your first exercise above.</div>}
+                  {items.map(it => (
+                    <div key={it.id} style={{ border:"1px solid #eee", borderRadius:10, padding:10 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+                        <KindBadge kind={it.kind} />
+                        <input
+                          value={it.title}
+                          onChange={e=>renameItem(it, e.target.value)}
+                          style={{ flex:1, minWidth:0 }}
+                        />
+                        <button onClick={()=>deleteItem(it.id)} title="Delete">×</button>
+                      </div>
 
-            <div style={{ display:"grid", gap:10 }}>
-              {items.length === 0 && <div className="muted">No items yet. Add your first exercise above.</div>}
-              {items.map(it => (
-                <div key={it.id} style={{ border:"1px solid #eee", borderRadius:10, padding:10 }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
-                    <KindBadge kind={it.kind} />
-                    <input value={it.title} onChange={e=>renameItem(it, e.target.value)} style={{ flex:1 }} />
-                    <button onClick={()=>deleteItem(it.id)} title="Delete">×</button>
-                  </div>
-
-                  {it.kind === "weights" ? (
-                    <WeightsEditor
-                      sets={setsByItem[it.id] || []}
-                      onAdd={()=>addSet(it.id)}
-                      onChange={(set, patch)=>updateSet(set, patch)}
-                      onDelete={(set)=>deleteSet(set)}
-                    />
-                  ) : (
-                    <CardioSummary item={it} />
-                  )}
+                      {it.kind === "weights" ? (
+                        <WeightsEditor
+                          sets={setsByItem[it.id] || []}
+                          onAdd={()=>addSet(it.id)}
+                          onChange={(set, patch)=>updateSet(set, patch)}
+                          onDelete={(set)=>deleteSet(set)}
+                        />
+                      ) : (
+                        <CardioSummary item={it} />
+                      )}
+                    </div>
+                  ))}
                 </div>
+
+                <div style={{ borderTop:"1px solid #eee", paddingTop:8 }}>
+                  <div className="section-title">Notes</div>
+                  <textarea rows={3} value={session.notes || ""} onChange={e=>saveSessionNotes(e.target.value)} />
+                </div>
+              </>
+            )}
+
+            {err && <div style={{ color:"red" }}>{err}</div>}
+          </div>
+
+          {/* Right: recent sessions */}
+          <aside className="card" style={{ display:"grid", gridTemplateRows:"auto 1fr", minWidth:0 }}>
+            <h2 style={{ margin:0 }}>Recent</h2>
+            <ul className="list" style={{ overflow:"auto", maxHeight:"60vh" }}>
+              {recent.length === 0 && <li className="muted">No recent sessions.</li>}
+              {recent.map(s => (
+                <li key={s.id} className="item">
+                  <button onClick={()=>{ setDateISO(s.session_date); }} style={{ textAlign:"left", width:"100%" }}>
+                    <div style={{ fontWeight:600 }}>{s.session_date}</div>
+                    {s.notes && <div className="muted" style={{ marginTop:4, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{s.notes}</div>}
+                  </button>
+                </li>
               ))}
-            </div>
-
-            <div style={{ borderTop:"1px solid #eee", paddingTop:8 }}>
-              <div className="section-title">Notes</div>
-              <textarea rows={3} value={session.notes || ""} onChange={e=>saveSessionNotes(e.target.value)} />
-            </div>
-          </>
-        )}
-
-        {err && <div style={{ color:"red" }}>{err}</div>}
-      </div>
-
-      {/* Right: recent sessions */}
-      <div className="card" style={{ display:"grid", gridTemplateRows:"auto 1fr" }}>
-        <h2 style={{ margin:0 }}>Recent</h2>
-        <ul className="list" style={{ overflow:"auto", maxHeight:"60vh" }}>
-          {recent.length === 0 && <li className="muted">No recent sessions.</li>}
-          {recent.map(s => (
-            <li key={s.id} className="item">
-              <button onClick={()=>{ setDateISO(s.session_date); }} style={{ textAlign:"left", width:"100%" }}>
-                <div style={{ fontWeight:600 }}>{s.session_date}</div>
-                {s.notes && <div className="muted" style={{ marginTop:4, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{s.notes}</div>}
-              </button>
-            </li>
-          ))}
-        </ul>
+            </ul>
+          </aside>
+        </div>
       </div>
     </div>
   );
@@ -335,14 +348,21 @@ function WeightsEditor({
 }:{ sets:WSet[]; onAdd:()=>void; onChange:(s:WSet, patch:Partial<WSet>)=>void; onDelete:(s:WSet)=>void }) {
   return (
     <div>
-      <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:6 }}>
+      <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:6, flexWrap:"wrap" }}>
         <div style={{ fontWeight:600 }}>Sets</div>
         <button onClick={onAdd}>+ Add set</button>
       </div>
       <div style={{ display:"grid", gap:6 }}>
         {sets.length === 0 && <div className="muted">No sets yet.</div>}
         {sets.map(s => (
-          <div key={s.id} style={{ display:"grid", gridTemplateColumns:"60px 1fr 1fr 32px", gap:6, alignItems:"center" }}>
+          <div
+            key={s.id}
+            style={{
+              display:"grid",
+              gridTemplateColumns:"68px minmax(0,1fr) minmax(0,1fr) 32px",
+              gap:6, alignItems:"center"
+            }}
+          >
             <div className="muted">Set {s.set_number}</div>
             <input
               type="number" inputMode="decimal" step="0.5" placeholder="kg"
