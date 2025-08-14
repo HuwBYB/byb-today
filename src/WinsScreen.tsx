@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-/** Minimal shape pulled from tasks */
+/** ---------- Types ---------- */
 type TaskRow = {
   id: number;
   user_id: string;
   title: string;
-  status: "pending" | "done" | "archived" | string;
-  completed_at: string | null;  // ISO timestamp
-  due_date: string | null;      // 'YYYY-MM-DD'
+  status: string;              // "done", "pending", ...
+  completed_at: string | null; // ISO timestamp
+  due_date: string | null;
   priority: number | null;
-  source: string | null;        // e.g., 'big_goal_daily'
-  category: string | null;      // e.g., 'today','big_goal','exercise'
+  source: string | null;       // e.g., 'big_goal_daily'
+  category: string | null;     // e.g., 'today','big_goal','exercise'
   category_color: string | null;
 };
 
@@ -29,24 +29,35 @@ type WorkoutItemRow = {
   session_id: number;
   kind: string;
   title: string;
-  metrics: any;           // {distance_km?:number, duration_sec?:number}
-  session_date: string;   // joined from workout_sessions
+  metrics: Record<string, unknown>;
+  session_date: string; // joined from workout_sessions
 };
 
-/* ----- small helpers ----- */
+type BucketKey = "all" | "general" | "big" | "exercise" | "gratitude";
+
+type Detail = {
+  id: string;
+  label: string;
+  date: string;
+  kind?: string;
+};
+
+/** ---------- Helpers ---------- */
 function toISO(d: Date) {
-  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,"0"), dd = String(d.getDate()).padStart(2,"0");
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
 function dateOnlyLocal(ts: string | null): string | null {
   if (!ts) return null;
-  const d = new Date(ts);
-  return toISO(d);
+  return toISO(new Date(ts));
 }
 function secondsToMMSS(sec?: number | null) {
   if (!sec || sec <= 0) return "00:00";
-  const m = Math.floor(sec / 60), s = sec % 60;
-  return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 function paceStr(distanceKm?: number, durSec?: number) {
   if (!distanceKm || !durSec || distanceKm <= 0) return "";
@@ -54,7 +65,7 @@ function paceStr(distanceKm?: number, durSec?: number) {
   return `${secondsToMMSS(secPerKm)}/km`;
 }
 
-/* ----- categorisers for tasks table ----- */
+/* Task classifiers */
 function isBigGoal(t: TaskRow) {
   const cat = (t.category || "").toLowerCase();
   const src = (t.source || "").toLowerCase();
@@ -70,8 +81,7 @@ function isExerciseTask(t: TaskRow) {
   return /\b(run|walk|jog|gym|workout|exercise|yoga|swim|cycle|cycling|ride|lift|weights|pilates|stretch)\b/.test(title);
 }
 
-type BucketKey = "all" | "general" | "big" | "exercise" | "gratitude";
-
+/** ---------- Component ---------- */
 export default function WinsScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [doneTasks, setDoneTasks] = useState<TaskRow[]>([]);
@@ -89,12 +99,14 @@ export default function WinsScreen() {
     });
   }, []);
 
-  // Load tasks (done), workout items (+session dates), and gratitudes
-  async function load() {
+  // load data
+  useEffect(() => { if (userId) loadAll(); }, [userId]);
+
+  async function loadAll() {
     if (!userId) return;
     setLoading(true); setErr(null);
     try {
-      // 1) tasks
+      // 1) done tasks
       const { data: tdata, error: terror } = await supabase
         .from("tasks")
         .select("id,user_id,title,status,completed_at,due_date,priority,source,category,category_color")
@@ -103,7 +115,7 @@ export default function WinsScreen() {
         .order("completed_at", { ascending: false });
       if (terror) throw terror;
 
-      // 2) workout items + join to sessions to get session_date
+      // 2) workout items + their session dates
       const { data: iData, error: iErr } = await supabase
         .from("workout_items")
         .select("id,user_id,session_id,kind,title,metrics")
@@ -111,7 +123,7 @@ export default function WinsScreen() {
         .order("id", { ascending: false });
       if (iErr) throw iErr;
 
-      const sessionIds = Array.from(new Set((iData || []).map((i:any) => i.session_id)));
+      const sessionIds = Array.from(new Set((iData || []).map((i: any) => i.session_id)));
       let idToDate: Record<number, string> = {};
       if (sessionIds.length) {
         const { data: sData, error: sErr } = await supabase
@@ -119,12 +131,15 @@ export default function WinsScreen() {
           .select("id,session_date")
           .in("id", sessionIds);
         if (sErr) throw sErr;
-        (sData || []).forEach((s:any) => { idToDate[s.id] = s.session_date; });
+        (sData || []).forEach((s: any) => { idToDate[s.id] = s.session_date; });
       }
-
       const wItems: WorkoutItemRow[] = (iData as any[] || []).map(i => ({
-        id: i.id, user_id: i.user_id, session_id: i.session_id,
-        kind: i.kind, title: i.title, metrics: i.metrics || {},
+        id: i.id,
+        user_id: i.user_id,
+        session_id: i.session_id,
+        kind: i.kind,
+        title: i.title,
+        metrics: i.metrics || {},
         session_date: idToDate[i.session_id] || ""
       }));
 
@@ -147,47 +162,59 @@ export default function WinsScreen() {
       setLoading(false);
     }
   }
-  useEffect(() => { if (userId) load(); }, [userId]);
 
   /* ----- buckets & counts ----- */
   const bigGoalTasks = useMemo(() => doneTasks.filter(isBigGoal), [doneTasks]);
   const exerciseTasks = useMemo(() => doneTasks.filter(isExerciseTask), [doneTasks]);
-  const generalTasks = useMemo(
-    () => doneTasks.filter(t => !isBigGoal(t) && !isExerciseTask(t)),
-    [doneTasks]
-  );
+  const generalTasks = useMemo(() => doneTasks.filter(t => !isBigGoal(t) && !isExerciseTask(t)), [doneTasks]);
 
   const counts = {
     general: generalTasks.length,
     big: bigGoalTasks.length,
-    // Exercise = tasks flagged as exercise + ALL workout items from the diary
-    exercise: exerciseTasks.length + workoutItems.length,
+    exercise: exerciseTasks.length + workoutItems.length, // include diary items
     gratitude: grats.length,
-    all: generalTasks.length + bigGoalTasks.length + (exerciseTasks.length + workoutItems.length) + grats.length,
+    all: generalTasks.length + bigGoalTasks.length + exerciseTasks.length + workoutItems.length + grats.length,
   };
 
-  // Format diary workout item to a nice label
   function labelWorkout(i: WorkoutItemRow) {
-    const d = i.metrics?.distance_km as number | undefined;
-    const sec = i.metrics?.duration_sec as number | undefined;
-    const bits = [
-      i.title || i.kind,
-      d ? `${d} km` : null,
-      sec ? secondsToMMSS(sec) : null,
-      d && sec ? paceStr(d, sec) : null,
-    ].filter(Boolean);
-    return bits.join(" • ");
+    const d = (i.metrics?.distance_km as number | undefined);
+    const sec = (i.metrics?.duration_sec as number | undefined);
+    const parts: string[] = [];
+    parts.push(i.title || i.kind);
+    if (d) parts.push(`${d} km`);
+    if (sec) parts.push(secondsToMMSS(sec));
+    if (d && sec) parts.push(paceStr(d, sec));
+    return parts.join(" • ");
   }
 
-  // Details for the active bucket
-  type Detail = { id: string; label: string; date: string; kind?: string };
-  const listFor = (k: BucketKey): Detail[] => {
+  function listFor(k: BucketKey): Detail[] {
     switch (k) {
-      case "general": return generalTasks.map(t => ({ id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "" }));
-      case "big":     return bigGoalTasks.map(t => ({ id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "" }));
+      case "general":
+        return generalTasks.map(t => ({
+          id: `task-${t.id}`,
+          label: t.title,
+          date: dateOnlyLocal(t.completed_at) || ""
+        }));
+      case "big":
+        return bigGoalTasks.map(t => ({
+          id: `task-${t.id}`,
+          label: t.title,
+          date: dateOnlyLocal(t.completed_at) || ""
+        }));
       case "exercise": {
-        const a = exerciseTasks.map(t => ({ id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "Task" }));
-        const b = workoutItems.map(i => ({ id: `workout-${i.id}`, label: labelWorkout(i), date: i.session_date || "", kind: "Diary" }));
-        return [...a, ...b].sort((x, y) => (y.date > x.date ? 1 : -1));
+        const a = exerciseTasks.map(t => ({
+          id: `task-${t.id}`,
+          label: t.title,
+          date: dateOnlyLocal(t.completed_at) || "",
+          kind: "Task"
+        }));
+        const b = workoutItems.map(i => ({
+          id: `workout-${i.id}`,
+          label: labelWorkout(i),
+          date: i.session_date || "",
+          kind: "Diary"
+        }));
+        return [...a, ...b].sort((x, y) => y.date.localeCompare(x.date));
       }
-      case "gratitude": return grats.map(g => ({ id: `grat-${g.
+      case "gratitude":
+        return grats.ma
