@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 import BigGoalWizard from "./BigGoalWizard";
 
-/* ---------- Categories + colours ---------- */
+/* ---------- Categories + colours (match DB constraint) ---------- */
 const CATS = [
   { key: "personal",  label: "Personal",  color: "#a855f7" },
   { key: "health",    label: "Health",    color: "#22c55e" },
-  { key: "business",  label: "Business",  color: "#3b82f6" },
-  { key: "finance",   label: "Finance",   color: "#f59e0b" },
+  { key: "career",    label: "Business",  color: "#3b82f6" },   // stored as 'career'
+  { key: "financial", label: "Finance",   color: "#f59e0b" },   // stored as 'financial'
   { key: "other",     label: "Other",     color: "#6b7280" },
 ] as const;
 type CatKey = typeof CATS[number]["key"];
@@ -23,6 +23,8 @@ type Goal = {
   start_date: string | null;
   target_date: string | null;
   status: string | null;
+  halfway_date?: string | null;    // may exist in your schema
+  halfway_note?: string | null;    // may exist in your schema
 };
 
 type Step = {
@@ -33,6 +35,32 @@ type Step = {
   description: string;
   active: boolean;
 };
+
+/* ---------- Date helpers ---------- */
+function toISO(d: Date) {
+  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,"0"), dd = String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${dd}`;
+}
+function fromISO(s: string) {
+  const [y,m,d] = s.split("-").map(Number);
+  return new Date(y,(m??1)-1,(d??1));
+}
+function clampDay(d: Date) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function lastDayOfMonth(y:number,m0:number){ return new Date(y,m0+1,0).getDate(); }
+function addMonthsClamped(base: Date, months: number, anchorDay?: number) {
+  const anchor = anchorDay ?? base.getDate();
+  const y = base.getFullYear(), m = base.getMonth() + months;
+  const first = new Date(y, m, 1);
+  const ld = lastDayOfMonth(first.getFullYear(), first.getMonth());
+  return new Date(first.getFullYear(), first.getMonth(), Math.min(anchor, ld));
+}
+/* Normalize any legacy keys to DB-allowed set */
+function normalizeCat(x: string | null | undefined): CatKey {
+  const s = (x || "").toLowerCase();
+  if (s === "business") return "career";
+  if (s === "finance")  return "financial";
+  return (["personal","health","career","financial","other"] as const).includes(s as any) ? (s as CatKey) : "other";
+}
 
 export default function GoalsScreen() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -71,7 +99,7 @@ export default function GoalsScreen() {
     if (!userId) return;
     const { data, error } = await supabase
       .from("goals")
-      .select("id,user_id,title,category,category_color,start_date,target_date,status")
+      .select("id,user_id,title,category,category_color,start_date,target_date,status,halfway_date,halfway_note")
       .eq("user_id", userId)
       .order("created_at", { ascending: false });
     if (error) { setErr(error.message); setGoals([]); return; }
@@ -94,11 +122,128 @@ export default function GoalsScreen() {
     setDaily(rows.filter(r => r.cadence === "daily").map(r => r.description));
 
     // prime category editor
-    const k = (g.category || "other") as CatKey;
-    setEditCat(CATS.some(c => c.key === k) ? k : "other");
+    setEditCat(normalizeCat(g.category));
   }
 
-  /* ----- save steps (and reseed) ----- */
+  /* ----- client-side reseed if RPC fails ----- */
+  async function clientReseedTasksForGoal(goalId: number) {
+    if (!userId) return;
+
+    // 1) fetch goal + its active steps
+    const { data: g, error: ge } = await supabase
+      .from("goals")
+      .select("id,user_id,title,category,category_color,start_date,target_date,halfway_date,halfway_note")
+      .eq("id", goalId)
+      .single();
+    if (ge) throw ge;
+    const goal = g as Goal;
+
+    const startISO = goal.start_date || toISO(new Date());
+    const endISO   = goal.target_date || startISO;
+    const start = fromISO(startISO);
+    const end   = fromISO(endISO);
+    if (end < start) throw new Error("Target date is before start date.");
+
+    const { data: steps, error: se } = await supabase
+      .from("big_goal_steps")
+      .select("*")
+      .eq("goal_id", goalId)
+      .eq("active", true);
+    if (se) throw se;
+
+    const cat: CatKey = normalizeCat(goal.category);
+    const col = goal.category_color || colorOf(cat);
+
+    // 2) delete FUTURE tasks for this goal (avoid duplicates)
+    const today = toISO(new Date());
+    await supabase
+      .from("tasks")
+      .delete()
+      .eq("user_id", userId)
+      .eq("goal_id", goalId)
+      .in("source", ["big_goal_monthly","big_goal_weekly","big_goal_daily"])
+      .gte("due_date", today);
+
+    // 3) rebuild tasks from steps
+    const queue: any[] = [];
+
+    // monthly
+    const monthSteps = (steps as Step[]).filter(s => s.cadence === "monthly");
+    if (monthSteps.length) {
+      let d = addMonthsClamped(start, 1, start.getDate());
+      while (d <= end) {
+        const due = toISO(d);
+        for (const s of monthSteps) {
+          queue.push({
+            user_id: userId,
+            goal_id: goalId,
+            title: `BIG GOAL — Monthly: ${s.description}`,
+            due_date: due,
+            source: "big_goal_monthly",
+            priority: 2,
+            category: cat,
+            category_color: col,
+          });
+        }
+        d = addMonthsClamped(d, 1, start.getDate());
+      }
+    }
+
+    // weekly
+    const weekSteps = (steps as Step[]).filter(s => s.cadence === "weekly");
+    if (weekSteps.length) {
+      let d = new Date(start); d.setDate(d.getDate() + 7);
+      while (d <= end) {
+        const due = toISO(d);
+        for (const s of weekSteps) {
+          queue.push({
+            user_id: userId,
+            goal_id: goalId,
+            title: `BIG GOAL — Weekly: ${s.description}`,
+            due_date: due,
+            source: "big_goal_weekly",
+            priority: 2,
+            category: cat,
+            category_color: col,
+          });
+        }
+        d.setDate(d.getDate() + 7);
+      }
+    }
+
+    // daily
+    const daySteps = (steps as Step[]).filter(s => s.cadence === "daily");
+    if (daySteps.length) {
+      let d = clampDay(new Date(Math.max(Date.now(), start.getTime())));
+      while (d <= end) {
+        const due = toISO(d);
+        for (const s of daySteps) {
+          queue.push({
+            user_id: userId,
+            goal_id: goalId,
+            title: `BIG GOAL — Daily: ${s.description}`,
+            due_date: due,
+            source: "big_goal_daily",
+            priority: 2,
+            category: cat,
+            category_color: col,
+          });
+        }
+        d.setDate(d.getDate() + 1);
+      }
+    }
+
+    // 4) bulk insert in chunks
+    for (let i = 0; i < queue.length; i += 500) {
+      const slice = queue.slice(i, i + 500);
+      const { error: terr } = await supabase.from("tasks").insert(slice);
+      if (terr) throw terr;
+    }
+
+    return queue.length;
+  }
+
+  /* ----- save steps (and reseed tasks) ----- */
   async function saveSteps() {
     if (!userId || !selected) return;
     setBusy(true); setErr(null);
@@ -115,14 +260,20 @@ export default function GoalsScreen() {
       for (const s of monthly.map(x=>x.trim()).filter(Boolean)) rows.push({ user_id:userId, goal_id:selected.id, cadence:"monthly", description:s, active:true });
       for (const s of weekly.map(x=>x.trim()).filter(Boolean))  rows.push({ user_id:userId, goal_id:selected.id, cadence:"weekly",  description:s, active:true });
       for (const s of daily.map(x=>x.trim()).filter(Boolean))   rows.push({ user_id:userId, goal_id:selected.id, cadence:"daily",   description:s, active:true });
-
       if (rows.length) {
         const { error: ie } = await supabase.from("big_goal_steps").insert(rows);
         if (ie) throw ie;
       }
 
-      await supabase.rpc("reseed_big_goal_steps", { p_goal_id: selected.id });
-      alert("Steps saved and future tasks updated.");
+      // Try server RPC first
+      const { error: rerr } = await supabase.rpc("reseed_big_goal_steps", { p_goal_id: selected.id });
+      if (rerr) {
+        // Fallback: do it client-side
+        const n = await clientReseedTasksForGoal(selected.id);
+        alert(`Steps saved. ${n ?? 0} task(s) reseeded for this goal.`);
+      } else {
+        alert("Steps saved and future tasks updated.");
+      }
     } catch (e:any) {
       setErr(e.message || String(e));
     } finally {
@@ -163,13 +314,14 @@ export default function GoalsScreen() {
     if (!selected) return;
     setBusy(true); setErr(null);
     try {
-      const catColor = colorOf(editCat);
+      const cat = editCat;
+      const catColor = colorOf(cat);
       const { error } = await supabase
         .from("goals")
-        .update({ category: editCat, category_color: catColor })
+        .update({ category: cat, category_color: catColor })
         .eq("id", selected.id);
       if (error) throw error;
-      setSelected({ ...selected, category: editCat, category_color: catColor });
+      setSelected({ ...selected, category: cat, category_color: catColor });
       await loadGoals();
     } catch (e:any) {
       setErr(e.message || String(e));
