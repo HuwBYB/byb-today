@@ -48,8 +48,8 @@ export default function GratitudeScreen() {
     return () => { alive.current = false; };
   }, []);
 
-  // helper that also supports functional updates safely
-  function safeSet<S>(setter: React.Dispatch<React.SetStateAction<S>>, val: React.SetStateAction<S>) {
+  // Non-generic, inference-proof setter wrapper
+  function safeSet(setter: any, val: any) {
     if (alive.current) setter(val);
   }
 
@@ -117,7 +117,7 @@ export default function GratitudeScreen() {
           const { error } = await supabase.from("gratitude_entries").delete().eq("id", existing.id);
           if (error) throw error;
         }
-        safeSet(setRowsByIdx, prev => ({ ...prev, [idx]: null } as any));
+        safeSet(setRowsByIdx, (prev: any) => ({ ...prev, [idx]: null } as any));
       } else {
         const payload = { user_id: userId, entry_date: dateISO, item_index: idx, content };
         const { data, error } = await supabase
@@ -126,7 +126,7 @@ export default function GratitudeScreen() {
           .select()
           .single();
         if (error) throw error;
-        safeSet(setRowsByIdx, prev => ({ ...prev, [idx]: data as EntryRow } as any));
+        safeSet(setRowsByIdx, (prev: any) => ({ ...prev, [idx]: data as EntryRow } as any));
       }
       // refresh history (async, fire-and-forget)
       loadHistory();
@@ -191,10 +191,10 @@ export default function GratitudeScreen() {
                   inputMode="text"
                   autoComplete="off"
                   placeholder={SIMPLE_PLACEHOLDER}
-                  value={draft[idx] ?? ""} // controlled
+                  value={draft[idx] ?? ""}
                   onChange={(e) => {
-                    const v = e.currentTarget.value; // grab first to avoid any event timing issues
-                    safeSet(setDraft, (d) => ({ ...d, [idx]: v }));
+                    const v = e.currentTarget.value; // avoid any event pooling issues
+                    safeSet(setDraft, (d: any) => ({ ...d, [idx]: v }));
                   }}
                   onBlur={() => saveIdx(idx)}
                   disabled={loading || savingIdx === idx}
