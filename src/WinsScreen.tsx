@@ -11,8 +11,16 @@ type TaskRow = {
   due_date: string | null;      // 'YYYY-MM-DD'
   priority: number | null;      // we treat >=2 as "Top"
   source: string | null;        // e.g., 'alfred', 'big_goal_daily'
-  category: string | null;
+  category: string | null;      // e.g., 'today','big_goal','exercise'
   category_color: string | null;
+};
+
+type GratRow = {
+  id: number;
+  user_id: string;
+  entry_date: string;   // 'YYYY-MM-DD'
+  item_index: number;   // 1..8
+  content: string;
 };
 
 /* ----- date helpers (local time) ----- */
@@ -26,38 +34,44 @@ function fromISO(s: string) {
   const [y, m, d] = s.split("-").map(Number);
   return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
-function startOfWeekMonday(d: Date) {
-  const tmp = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const day = tmp.getDay(); // 0 Sun..6 Sat
-  const diff = (day + 6) % 7; // Mon=0
-  tmp.setDate(tmp.getDate() - diff);
-  return tmp;
-}
-function endOfWeekMonday(d: Date) {
-  const s = startOfWeekMonday(d);
-  const e = new Date(s);
-  e.setDate(s.getDate() + 6);
-  return e;
-}
-function isSameDay(a: Date, b: Date) {
-  return a.getFullYear() === b.getFullYear()
-    && a.getMonth() === b.getMonth()
-    && a.getDate() === b.getDate();
-}
-
-/** Map timestamp -> local date string 'YYYY-MM-DD' */
 function dateOnlyLocal(ts: string | null): string | null {
   if (!ts) return null;
   const d = new Date(ts);
   return toISO(d);
 }
 
+/* ----- categorisers ----- */
+function isBigGoal(t: TaskRow) {
+  const cat = (t.category || "").toLowerCase();
+  const src = (t.source || "").toLowerCase();
+  const title = (t.title || "").toLowerCase();
+  return (
+    src.startsWith("big_goal") ||
+    cat === "big_goal" ||
+    cat === "goal" ||
+    title.includes("big goal")
+  );
+}
+function isExercise(t: TaskRow) {
+  const cat = (t.category || "").toLowerCase();
+  const src = (t.source || "").toLowerCase();
+  const title = (t.title || "").toLowerCase();
+  if (cat.includes("exercise") || cat.includes("workout") || cat.includes("fitness")) return true;
+  if (src.includes("exercise") || src.includes("workout")) return true;
+  return /\b(run|walk|jog|gym|workout|exercise|yoga|swim|cycle|cycling|ride|lift|weights|pilates|stretch)\b/.test(title);
+}
+
+type BucketKey = "all" | "general" | "big" | "exercise" | "gratitude";
+
 export default function WinsScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [doneTasks, setDoneTasks] = useState<TaskRow[]>([]);
+  const [grats, setGrats] = useState<GratRow[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [active, setActive] = useState<BucketKey>("all");
 
+  // auth
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -65,203 +79,179 @@ export default function WinsScreen() {
     });
   }, []);
 
-  // Load recent completions (last 365 days)
+  // Load all completed tasks + all gratitudes
   async function load() {
     if (!userId) return;
     setLoading(true); setErr(null);
     try {
-      const since = new Date(); since.setDate(since.getDate() - 365);
-      const { data, error } = await supabase
+      // tasks (status=done, all-time)
+      const { data: tdata, error: terror } = await supabase
         .from("tasks")
         .select("id,user_id,title,status,completed_at,due_date,priority,source,category,category_color")
         .eq("user_id", userId)
         .eq("status", "done")
-        .gte("completed_at", since.toISOString())
         .order("completed_at", { ascending: false });
-      if (error) throw error;
-      setDoneTasks((data as TaskRow[]) || []);
+      if (terror) throw terror;
+
+      // gratitudes (all-time)
+      const { data: gdata, error: gerror } = await supabase
+        .from("gratitude_entries")
+        .select("id,user_id,entry_date,item_index,content")
+        .eq("user_id", userId)
+        .order("entry_date", { ascending: false })
+        .order("item_index", { ascending: true });
+      if (gerror) throw gerror;
+
+      setDoneTasks((tdata as TaskRow[]) || []);
+      setGrats((gdata as GratRow[]) || []);
     } catch (e: any) {
       setErr(e.message || String(e));
-      setDoneTasks([]);
+      setDoneTasks([]); setGrats([]);
     } finally {
       setLoading(false);
     }
   }
   useEffect(() => { if (userId) load(); }, [userId]);
 
-  // Group by completion date (local)
-  const byDay = useMemo(() => {
-    const map = new Map<string, TaskRow[]>();
-    for (const t of doneTasks) {
-      const d = dateOnlyLocal(t.completed_at);
-      if (!d) continue;
-      if (!map.has(d)) map.set(d, []);
-      map.get(d)!.push(t);
-    }
-    // sort tasks per day by priority desc
-    for (const arr of map.values()) {
-      arr.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
-    }
-    return map;
-  }, [doneTasks]);
+  /* ----- buckets & counts ----- */
+  const bigGoalTasks = useMemo(() => doneTasks.filter(isBigGoal), [doneTasks]);
+  const exerciseTasks = useMemo(() => doneTasks.filter(isExercise), [doneTasks]);
+  const generalTasks = useMemo(
+    () => doneTasks.filter(t => !isBigGoal(t) && !isExercise(t)),
+    [doneTasks]
+  );
 
-  const today = new Date();
+  const counts = {
+    general: generalTasks.length,
+    big: bigGoalTasks.length,
+    exercise: exerciseTasks.length,
+    gratitude: grats.length,
+    all: generalTasks.length + bigGoalTasks.length + exerciseTasks.length + grats.length,
+  };
 
-  // Streaks (current & best): days with >=1 completion
-  const { currentStreak, bestStreak } = useMemo(() => {
-    const dates = new Set<string>([...byDay.keys()]);
-    // Current streak: consecutive days ending today
-    let cur = 0;
-    const probe = new Date(today);
-    while (dates.has(toISO(probe))) {
-      cur++;
-      probe.setDate(probe.getDate() - 1);
-    }
-    // Best streak: scan last 365 days
-    let best = 0, run = 0;
-    const scan = new Date(today);
-    for (let i = 0; i < 365; i++) {
-      if (dates.has(toISO(scan))) {
-        run++; best = Math.max(best, run);
-      } else {
-        run = 0;
-      }
-      scan.setDate(scan.getDate() - 1);
-    }
-    return { currentStreak: cur, bestStreak: best };
-  }, [byDay]);
-
-  // Totals
-  const totals = useMemo(() => {
-    let todayCount = 0;
-    let weekCount = 0;
-    let monthCount = 0;
-    let allCount = doneTasks.length;
-    let topToday = 0;
-    let topWeek = 0;
-    let topMonth = 0;
-
-    const startW = startOfWeekMonday(today);
-    const endW = endOfWeekMonday(today);
-    const startM = new Date(today.getFullYear(), today.getMonth(), 1);
-    const endM = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-
-    for (const t of doneTasks) {
-      const iso = dateOnlyLocal(t.completed_at);
-      if (!iso) continue;
-      const d = fromISO(iso);
-      const isTop = (t.priority ?? 0) >= 2;
-
-      if (isSameDay(d, today)) {
-        todayCount++; if (isTop) topToday++;
-      }
-      if (d >= startW && d <= endW) {
-        weekCount++; if (isTop) topWeek++;
-      }
-      if (d >= startM && d <= endM) {
-        monthCount++; if (isTop) topMonth++;
+  // Details for the active bucket
+  const listFor = (k: BucketKey) => {
+    switch (k) {
+      case "general": return generalTasks.map(t => ({ id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "" }));
+      case "big":     return bigGoalTasks.map(t => ({ id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "" }));
+      case "exercise":return exerciseTasks.map(t => ({ id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "" }));
+      case "gratitude": return grats.map(g => ({ id: `grat-${g.id}`, label: g.content || "(empty)", date: g.entry_date }));
+      case "all": default: {
+        const a = generalTasks.map(t => ({ id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "General" as const }));
+        const b = bigGoalTasks.map(t => ({ id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "Big goal" as const }));
+        const c = exerciseTasks.map(t => ({ id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "Exercise" as const }));
+        const d = grats.map(g => ({ id: `grat-${g.id}`, label: g.content || "(empty)", date: g.entry_date, kind: "Gratitude" as const }));
+        return [...a, ...b, ...c, ...d].sort((x, y) => (y.date > x.date ? 1 : -1));
       }
     }
-    return { todayCount, weekCount, monthCount, allCount, topToday, topWeek, topMonth };
-  }, [doneTasks]);
+  };
 
-  // Recent 7 days list
-  const last7 = useMemo(() => {
-    const out: { dateISO: string; tasks: TaskRow[] }[] = [];
-    const d = new Date(today);
-    for (let i = 0; i < 7; i++) {
-      const iso = toISO(d);
-      out.push({ dateISO: iso, tasks: byDay.get(iso) || [] });
-      d.setDate(d.getDate() - 1);
-    }
-    return out;
-  }, [byDay]);
+  const details = useMemo(() => listFor(active), [active, doneTasks, grats]);
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 12 }}>
-      {/* Left: stats + recent days */}
-      <div style={{ display: "grid", gap: 12 }}>
+    <div className="page-wins">
+      <div className="container" style={{ display: "grid", gap: 12 }}>
+        {/* Header */}
         <div className="card">
-          <h1>Your Successes</h1>
-          <div className="muted">Every completed task counts. Top-priority items are highlighted.</div>
+          <h1>Your Wins</h1>
+          <div className="muted">Tap a card to see the items behind the count.</div>
         </div>
 
         {/* KPI cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
-          <div className="card">
-            <div className="section-title">Today</div>
-            <div style={{ fontSize: 28, fontWeight: 600 }}>{totals.todayCount}</div>
-            <div className="muted">Top-priority: {totals.topToday}</div>
-          </div>
-          <div className="card">
-            <div className="section-title">This week</div>
-            <div style={{ fontSize: 28, fontWeight: 600 }}>{totals.weekCount}</div>
-            <div className="muted">Top-priority: {totals.topWeek}</div>
-          </div>
-          <div className="card">
-            <div className="section-title">This month</div>
-            <div style={{ fontSize: 28, fontWeight: 600 }}>{totals.monthCount}</div>
-            <div className="muted">Top-priority: {totals.topMonth}</div>
-          </div>
-          <div className="card">
-            <div className="section-title">All time</div>
-            <div style={{ fontSize: 28, fontWeight: 600 }}>{totals.allCount}</div>
-            <div className="muted">Keep going!</div>
-          </div>
-          <div className="card">
-            <div className="section-title">Current streak</div>
-            <div style={{ fontSize: 28, fontWeight: 600 }}>{currentStreak} day{currentStreak === 1 ? "" : "s"}</div>
-            <div className="muted">Best: {bestStreak}</div>
-          </div>
+        <div className="wins-kpis">
+          <KpiCard
+            title="Everything"
+            count={counts.all}
+            active={active === "all"}
+            onClick={() => setActive("all")}
+          />
+          <KpiCard
+            title="General tasks"
+            count={counts.general}
+            active={active === "general"}
+            onClick={() => setActive("general")}
+          />
+          <KpiCard
+            title="Big goal tasks"
+            count={counts.big}
+            active={active === "big"}
+            onClick={() => setActive("big")}
+          />
+          <KpiCard
+            title="Exercise"
+            count={counts.exercise}
+            active={active === "exercise"}
+            onClick={() => setActive("exercise")}
+          />
+          <KpiCard
+            title="Gratitudes"
+            count={counts.gratitude}
+            active={active === "gratitude"}
+            onClick={() => setActive("gratitude")}
+          />
         </div>
 
-        {/* Last 7 days breakdown */}
-        <div className="card">
-          <h2 style={{ margin: 0 }}>Last 7 days</h2>
-          <ul className="list" style={{ marginTop: 8 }}>
-            {last7.map(({ dateISO, tasks }) => (
-              <li key={dateISO} className="item">
-                <div style={{ width: 110 }}>
-                  <div style={{ fontWeight: 600 }}>{dateISO}</div>
-                  <div className="muted">{tasks.length} done</div>
-                </div>
-                <div style={{ flex: 1 }}>
-                  {tasks.length === 0 ? (
-                    <span className="muted">No completions</span>
-                  ) : (
-                    <ul className="list">
-                      {tasks.slice(0, 5).map(t => (
-                        <li key={t.id} style={{ marginBottom: 6 }}>
-                          <span style={{ fontWeight: (t.priority ?? 0) >= 2 ? 600 : 400 }}>
-                            {(t.priority ?? 0) >= 2 ? "★ " : ""}
-                            {t.title}
-                          </span>
-                          {t.source?.startsWith("big_goal") && <span className="muted"> · big goal</span>}
-                        </li>
-                      ))}
-                      {tasks.length > 5 && <li className="muted">…and {tasks.length - 5} more</li>}
-                    </ul>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
+        {/* Details for selected bucket */}
+        <div className="card" style={{ display: "grid", gap: 10 }}>
+          <h2 style={{ margin: 0 }}>
+            {active === "all" ? "All wins" :
+             active === "general" ? "General tasks" :
+             active === "big" ? "Big goal tasks" :
+             active === "exercise" ? "Exercise" :
+             "Gratitudes"}
+          </h2>
+
+          {details.length === 0 ? (
+            <div className="muted">Nothing here yet.</div>
+          ) : (
+            <ul className="list">
+              {details.slice(0, 60).map(item => (
+                <li key={item.id} className="item" style={{ alignItems: "center" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {"kind" in item ? `[${item.kind}] ` : ""}{item.label}
+                    </div>
+                    <div className="muted" style={{ marginTop: 4 }}>{item.date}</div>
+                  </div>
+                </li>
+              ))}
+              {details.length > 60 && (
+                <li className="muted">…and {details.length - 60} more</li>
+              )}
+            </ul>
+          )}
         </div>
+
+        {/* Actions */}
+        <div className="card" style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button onClick={load} disabled={loading} className="btn-primary" style={{ borderRadius: 8 }}>
+            {loading ? "Refreshing…" : "Refresh data"}
+          </button>
+        </div>
+
+        {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
-
-      {/* Right: options & refresh */}
-      <div className="card" style={{ display: "grid", gap: 10, height: "fit-content" }}>
-        <h2 style={{ margin: 0 }}>Options</h2>
-        <div className="muted">
-          Wins are counted when a task’s status becomes <b>done</b>. We track the timestamp as <code>completed_at</code>.
-        </div>
-        <button onClick={load} disabled={loading} className="btn-primary" style={{ borderRadius: 8 }}>
-          {loading ? "Refreshing…" : "Refresh data"}
-        </button>
-        <div className="muted">Tip: mark big-goal tasks as done to power your streak.</div>
-      </div>
-
-      {err && <div style={{ color: "red" }}>{err}</div>}
     </div>
+  );
+}
+
+/* ---- tiny components ---- */
+function KpiCard({ title, count, onClick, active }:{
+  title: string; count: number; onClick: ()=>void; active: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="card"
+      style={{
+        textAlign: "left",
+        cursor: "pointer",
+        borderColor: active ? "hsl(var(--pastel-hsl))" : "var(--border)",
+        boxShadow: active ? "0 8px 22px rgba(0,0,0,.06)" : "var(--shadow)",
+      }}
+    >
+      <div className="section-title">{title}</div>
+      <div style={{ fontSize: 28, fontWeight: 700 }}>{count}</div>
+    </button>
   );
 }
