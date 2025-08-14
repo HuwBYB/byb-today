@@ -26,16 +26,8 @@ function fromISO(s: string) {
 type Idx = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 const INDEXES: Idx[] = [1, 2, 3, 4, 5, 6, 7, 8];
 
-const PLACEHOLDERS: Record<number, string> = {
-  1: "Something good that happened…",
-  2: "Someone I'm grateful for…",
-  3: "A small win today…",
-  4: "A comfort I enjoyed…",
-  5: "Progress I noticed…",
-  6: "A kindness (given/received)…",
-  7: "Something I learned…",
-  8: "Something I can let go of…",
-};
+// Single, simple placeholder (per your request)
+const SIMPLE_PLACEHOLDER = "Today I’m grateful for…";
 
 export default function GratitudeScreen() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -53,12 +45,11 @@ export default function GratitudeScreen() {
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
-    return () => {
-      alive.current = false;
-    };
+    return () => { alive.current = false; };
   }, []);
 
-  function safeSet<T>(setter: (v: T) => void, val: T) {
+  // helper that also supports functional updates safely
+  function safeSet<S>(setter: React.Dispatch<React.SetStateAction<S>>, val: React.SetStateAction<S>) {
     if (alive.current) setter(val);
   }
 
@@ -66,14 +57,8 @@ export default function GratitudeScreen() {
   function resetMaps(withRows: EntryRow[]) {
     const rb: Record<number, EntryRow | null> = {};
     const dr: Record<number, string> = {};
-    for (const i of INDEXES) {
-      rb[i] = null;
-      dr[i] = "";
-    }
-    for (const r of withRows) {
-      rb[r.item_index] = r;
-      dr[r.item_index] = r.content ?? "";
-    }
+    for (const i of INDEXES) { rb[i] = null; dr[i] = ""; }
+    for (const r of withRows) { rb[r.item_index] = r; dr[r.item_index] = r.content ?? ""; }
     safeSet(setRowsByIdx, rb);
     safeSet(setDraft, dr);
   }
@@ -81,10 +66,7 @@ export default function GratitudeScreen() {
   // auth
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
-      if (error) {
-        setErr(error.message);
-        return;
-      }
+      if (error) { setErr(error.message); return; }
       safeSet(setUserId, data.user?.id ?? null);
     });
   }, []);
@@ -92,8 +74,7 @@ export default function GratitudeScreen() {
   // load one day
   async function loadDay(iso: string) {
     if (!userId) return;
-    safeSet(setLoading, true);
-    setErr(null);
+    safeSet(setLoading, true); setErr(null);
     const { data, error } = await supabase
       .from("gratitude_entries")
       .select("*")
@@ -101,19 +82,14 @@ export default function GratitudeScreen() {
       .eq("entry_date", iso)
       .order("item_index", { ascending: true });
     safeSet(setLoading, false);
-    if (error) {
-      setErr(error.message);
-      resetMaps([]);
-      return;
-    }
+    if (error) { setErr(error.message); resetMaps([]); return; }
     resetMaps((data as EntryRow[]) || []);
   }
 
   // load recent history
   async function loadHistory() {
     if (!userId) return;
-    const since = new Date();
-    since.setDate(since.getDate() - 30);
+    const since = new Date(); since.setDate(since.getDate() - 30);
     const { data, error } = await supabase
       .from("gratitude_entries")
       .select("*")
@@ -121,31 +97,19 @@ export default function GratitudeScreen() {
       .gte("entry_date", toISO(since))
       .order("entry_date", { ascending: false })
       .order("item_index", { ascending: true });
-    if (error) {
-      setErr(error.message);
-      safeSet(setHistory, {});
-      return;
-    }
+    if (error) { setErr(error.message); safeSet(setHistory, {}); return; }
     const grouped: Record<string, EntryRow[]> = {};
-    for (const r of data as EntryRow[]) {
-      (grouped[r.entry_date] ||= []).push(r);
-    }
+    for (const r of (data as EntryRow[])) (grouped[r.entry_date] ||= []).push(r);
     safeSet(setHistory, grouped);
   }
 
-  useEffect(() => {
-    if (userId) {
-      loadDay(dateISO);
-      loadHistory();
-    }
-  }, [userId, dateISO]);
+  useEffect(() => { if (userId) { loadDay(dateISO); loadHistory(); } }, [userId, dateISO]);
 
   // save one line (upsert/delete)
   async function saveIdx(idx: Idx) {
     if (!userId) return;
     const content = (draft[idx] || "").trim();
-    safeSet(setSavingIdx, idx);
-    setErr(null);
+    safeSet(setSavingIdx, idx); setErr(null);
     try {
       const existing = rowsByIdx[idx];
       if (!content) {
@@ -153,7 +117,7 @@ export default function GratitudeScreen() {
           const { error } = await supabase.from("gratitude_entries").delete().eq("id", existing.id);
           if (error) throw error;
         }
-        safeSet(setRowsByIdx, (prev) => ({ ...prev, [idx]: null } as any));
+        safeSet(setRowsByIdx, prev => ({ ...prev, [idx]: null } as any));
       } else {
         const payload = { user_id: userId, entry_date: dateISO, item_index: idx, content };
         const { data, error } = await supabase
@@ -162,30 +126,21 @@ export default function GratitudeScreen() {
           .select()
           .single();
         if (error) throw error;
-        safeSet(setRowsByIdx, (prev) => ({ ...prev, [idx]: data as EntryRow } as any));
+        safeSet(setRowsByIdx, prev => ({ ...prev, [idx]: data as EntryRow } as any));
       }
-      // refresh history (async)
+      // refresh history (async, fire-and-forget)
       loadHistory();
     } catch (e: any) {
+      console.error(e);
       setErr(e.message || String(e));
     } finally {
       safeSet(setSavingIdx, null);
     }
   }
 
-  function gotoToday() {
-    setDateISO(toISO(new Date()));
-  }
-  function gotoPrev() {
-    const d = fromISO(dateISO);
-    d.setDate(d.getDate() - 1);
-    setDateISO(toISO(d));
-  }
-  function gotoNext() {
-    const d = fromISO(dateISO);
-    d.setDate(d.getDate() + 1);
-    setDateISO(toISO(d));
-  }
+  function gotoToday() { setDateISO(toISO(new Date())); }
+  function gotoPrev()  { const d = fromISO(dateISO); d.setDate(d.getDate() - 1); setDateISO(toISO(d)); }
+  function gotoNext()  { const d = fromISO(dateISO); d.setDate(d.getDate() + 1); setDateISO(toISO(d)); }
 
   const countToday = useMemo(
     () => INDEXES.reduce((n, i) => n + (rowsByIdx[i] ? 1 : 0), 0),
@@ -200,21 +155,14 @@ export default function GratitudeScreen() {
       .eq("user_id", userId)
       .order("entry_date", { ascending: true })
       .order("item_index", { ascending: true });
-    if (error) {
-      setErr(error.message);
-      return;
-    }
+    if (error) { setErr(error.message); return; }
     const rows = [["date", "item_index", "content"]];
-    for (const r of data as EntryRow[]) {
-      rows.push([r.entry_date, String(r.item_index), (r.content || "").replace(/\r?\n/g, " ")]);
-    }
-    const csv = rows.map((r) => r.map((x) => `"${String(x).replace(/"/g, '""')}"`).join(",")).join("\n");
+    for (const r of (data as EntryRow[])) rows.push([r.entry_date, String(r.item_index), (r.content || "").replace(/\r?\n/g, " ")]);
+    const csv = rows.map(r => r.map(x => `"${String(x).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = "gratitude.csv";
-    a.click();
+    a.href = url; a.download = "gratitude.csv"; a.click();
     URL.revokeObjectURL(url);
   }
 
@@ -229,7 +177,7 @@ export default function GratitudeScreen() {
           <div className="gratitude-toolbar" style={{ marginTop: 8, marginBottom: 12 }}>
             <button onClick={gotoToday}>Today</button>
             <button onClick={gotoPrev}>←</button>
-            <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} />
+            <input type="date" value={dateISO} onChange={e => setDateISO(e.target.value)} />
             <button onClick={gotoNext}>→</button>
             <div className="gratitude-count muted">{countToday}/8 for this day</div>
           </div>
@@ -240,11 +188,17 @@ export default function GratitudeScreen() {
                 <div className="section-title">Gratitude {idx}</div>
                 <input
                   type="text"
-                  placeholder={PLACEHOLDERS[idx] || "I'm grateful for…"}
-                  value={draft[idx] ?? ""}
-                  onChange={(e) => setDraft((d) => ({ ...d, [idx]: e.currentTarget.value }))}
+                  inputMode="text"
+                  autoComplete="off"
+                  placeholder={SIMPLE_PLACEHOLDER}
+                  value={draft[idx] ?? ""} // controlled
+                  onChange={(e) => {
+                    const v = e.currentTarget.value; // grab first to avoid any event timing issues
+                    safeSet(setDraft, (d) => ({ ...d, [idx]: v }));
+                  }}
                   onBlur={() => saveIdx(idx)}
                   disabled={loading || savingIdx === idx}
+                  aria-label={`Gratitude ${idx}`}
                 />
                 {savingIdx === idx && <span className="muted">Saving…</span>}
               </div>
@@ -265,7 +219,7 @@ export default function GratitudeScreen() {
                   <div>
                     <div style={{ fontWeight: 600 }}>{d}</div>
                     <div className="muted" style={{ marginTop: 4 }}>
-                      {(rows || []).map((r) => r.content).slice(0, 2).join(" · ")}
+                      {(rows || []).map(r => r.content).slice(0, 2).join(" · ")}
                       {rows.length > 2 ? " · …" : ""}
                     </div>
                   </div>
@@ -277,13 +231,10 @@ export default function GratitudeScreen() {
 
           {/* actions */}
           <div className="gratitude-actions">
-            <button className="btn-primary" onClick={exportCSV}>
-              Export CSV
-            </button>
+            <button className="btn-primary" onClick={exportCSV}>Export CSV</button>
           </div>
         </aside>
       </div>
     </div>
   );
 }
-
