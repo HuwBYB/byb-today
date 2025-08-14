@@ -12,7 +12,7 @@ type VisionItem = {
 };
 
 const MAX_ITEMS = 6;
-const SLIDESHOW_MS = 30000; // 30 seconds per image
+const SLIDESHOW_MS = 30000; // 30s per image
 
 export default function VisionBoardScreen() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -21,10 +21,11 @@ export default function VisionBoardScreen() {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Lightbox viewer state
-  const [viewIdx, setViewIdx] = useState<number | null>(null);
+  // Inline viewer state (no overlay)
+  const [currentIdx, setCurrentIdx] = useState<number>(0);
   const [playing, setPlaying] = useState<boolean>(false);
   const playTimerRef = useRef<number | null>(null);
+  const viewerRef = useRef<HTMLDivElement | null>(null);
 
   /* ---- auth ---- */
   useEffect(() => {
@@ -47,13 +48,14 @@ export default function VisionBoardScreen() {
       .order("sort_order", { ascending: true })
       .order("id", { ascending: true });
     if (error) { setErr(error.message); setItems([]); return; }
-    setItems((data as VisionItem[]) || []);
+    const list = (data as VisionItem[]) || [];
+    setItems(list);
+    if (list.length) setCurrentIdx(i => Math.min(i, list.length - 1));
+    else { setCurrentIdx(0); setPlaying(false); }
   }
 
   /* ---- upload ---- */
-  function triggerFile() {
-    fileInputRef.current?.click();
-  }
+  function triggerFile() { fileInputRef.current?.click(); }
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -75,16 +77,13 @@ export default function VisionBoardScreen() {
       const nextOrder = items.length ? Math.max(...items.map(i => i.sort_order ?? 0)) + 1 : 0;
       const { error: insErr } = await supabase
         .from("vision_items")
-        .insert({
-          user_id: userId,
-          image_url,
-          storage_path: path,
-          caption: null,
-          sort_order: nextOrder
-        });
+        .insert({ user_id: userId, image_url, storage_path: path, caption: null, sort_order: nextOrder });
       if (insErr) throw insErr;
 
       await loadItems();
+      // jump to the newly added image
+      setCurrentIdx(items.length);
+      viewerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -94,10 +93,7 @@ export default function VisionBoardScreen() {
 
   /* ---- caption update ---- */
   async function saveCaption(it: VisionItem, caption: string) {
-    const { error } = await supabase
-      .from("vision_items")
-      .update({ caption })
-      .eq("id", it.id);
+    const { error } = await supabase.from("vision_items").update({ caption }).eq("id", it.id);
     if (error) { setErr(error.message); return; }
     setItems(items.map(x => x.id === it.id ? { ...x, caption } : x));
   }
@@ -111,96 +107,64 @@ export default function VisionBoardScreen() {
       const { error: storErr } = await supabase.storage.from("vision").remove([it.storage_path]);
       if (storErr) setErr(`Removed from board, but not storage: ${storErr.message}`);
     }
-    // Adjust viewer index if open
-    if (viewIdx !== null) {
-      if (items.length <= 1) { setViewIdx(null); setPlaying(false); }
-      else {
-        setViewIdx(prev => {
-          if (prev == null) return null;
-          const removedAt = items.findIndex(x => x.id === it.id);
-          const next = Math.max(0, Math.min(prev, items.length - 2));
-          return removedAt === prev ? next : prev > removedAt ? prev - 1 : prev;
-        });
-      }
-    }
     await loadItems();
+    // keep viewer in range
+    setCurrentIdx(i => Math.min(i, Math.max(0, items.length - 2)));
   }
 
-  /* ---- viewer (lightbox) helpers ---- */
-  function openViewer(i: number) { setViewIdx(i); }
-  function closeViewer() {
-    setViewIdx(null);
-    setPlaying(false);
-  }
+  /* ---- inline viewer nav ---- */
   function next() {
-    if (viewIdx == null || items.length === 0) return;
-    setViewIdx((viewIdx + 1) % items.length);
+    if (!items.length) return;
+    setCurrentIdx(i => (i + 1) % items.length);
   }
   function prev() {
-    if (viewIdx == null || items.length === 0) return;
-    setViewIdx((viewIdx - 1 + items.length) % items.length);
+    if (!items.length) return;
+    setCurrentIdx(i => (i - 1 + items.length) % items.length);
   }
 
   // Keyboard support for viewer
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (viewIdx == null) return;
-      if (e.key === "Escape") { e.preventDefault(); closeViewer(); }
+      if (!items.length) return;
       if (e.key === "ArrowRight") { e.preventDefault(); next(); }
-      if (e.key === "ArrowLeft") { e.preventDefault(); prev(); }
+      if (e.key === "ArrowLeft")  { e.preventDefault(); prev(); }
       if (e.key === " " || e.key === "Spacebar") { e.preventDefault(); setPlaying(p => !p); }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [viewIdx, items.length]);
+  }, [items.length]);
 
   // Slideshow timer
   useEffect(() => {
-    if (!playing || viewIdx == null || items.length < 2) {
-      if (playTimerRef.current) {
-        window.clearInterval(playTimerRef.current);
-        playTimerRef.current = null;
-      }
+    if (!playing || !items.length) {
+      if (playTimerRef.current) { window.clearInterval(playTimerRef.current); playTimerRef.current = null; }
       return;
     }
-    playTimerRef.current = window.setInterval(() => {
-      setViewIdx(i => (i == null ? 0 : (i + 1) % items.length));
-    }, SLIDESHOW_MS);
+    playTimerRef.current = window.setInterval(() => setCurrentIdx(i => (i + 1) % items.length), SLIDESHOW_MS);
     return () => {
-      if (playTimerRef.current) {
-        window.clearInterval(playTimerRef.current);
-        playTimerRef.current = null;
-      }
+      if (playTimerRef.current) { window.clearInterval(playTimerRef.current); playTimerRef.current = null; }
     };
-  }, [playing, viewIdx, items.length]);
+  }, [playing, items.length]);
 
-  // If items change while viewing, keep index in range
-  useEffect(() => {
-    if (viewIdx != null && viewIdx >= items.length) {
-      setViewIdx(items.length ? items.length - 1 : null);
-    }
-  }, [items.length, viewIdx]);
+  // When clicking a tile, show it in the viewer (and scroll to viewer)
+  function showAt(i: number) {
+    setCurrentIdx(i);
+    viewerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      {/* page styles for lightbox */}
-      <style>{CSS_LIGHTBOX}</style>
+      <style>{CSS_VIEWER}</style>
 
       <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <h1 style={{ margin: 0 }}>Vision Board</h1>
           <div className="muted">
-            Up to {MAX_ITEMS} images. Click to view; use arrows (or keys) to cycle. Start a 30s slideshow from the viewer.
+            Up to {MAX_ITEMS} images. View on-page, cycle with arrows (or keys), or play a 30s slideshow.
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleFile}
-            style={{ display: "none" }}
-          />
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
           <button
             className="btn-primary"
             onClick={triggerFile}
@@ -213,41 +177,52 @@ export default function VisionBoardScreen() {
         </div>
       </div>
 
-      {/* Grid */}
+      {/* Inline viewer */}
+      {items.length > 0 && (
+        <div className="card card--wash" ref={viewerRef}>
+          <div className="vb-inline">
+            <button className="vb-arrow vb-left" onClick={prev} aria-label="Previous">←</button>
+
+            <div className="vb-stage">
+              <img
+                key={items[currentIdx].id}
+                src={items[currentIdx].image_url}
+                alt={items[currentIdx].caption || "Vision"}
+                className="vb-img"
+              />
+              <div className="vb-meta">
+                <div className="vb-cap">{items[currentIdx].caption || ""}</div>
+                <div className="vb-count muted">{currentIdx + 1} / {items.length}</div>
+              </div>
+            </div>
+
+            <button className="vb-arrow vb-right" onClick={next} aria-label="Next">→</button>
+          </div>
+
+          <div className="vb-controls">
+            <button onClick={() => setPlaying(p => !p)} aria-label={playing ? "Pause slideshow" : "Play slideshow"}>
+              {playing ? "Pause" : "Play 30s"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Grid of tiles (click to show in viewer). No reordering arrows anymore. */}
       <div className="card" style={{ padding: 12 }}>
         {items.length === 0 && <div className="muted">No images yet. Upload your first vision image.</div>}
 
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-          gap: 12
-        }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
           {items.map((it, idx) => (
             <div key={it.id} style={{ border: "1px solid #eee", borderRadius: 12, overflow: "hidden", display: "grid", gridTemplateRows: "auto auto", background: "#fff" }}>
               <div
-                style={{ position: "relative", aspectRatio: "4/3", background: "#f8f9fa", cursor: "zoom-in" }}
-                onClick={() => openViewer(idx)}
-                title="Click to view"
+                style={{ position: "relative", aspectRatio: "4/3", background: "#f8f9fa", cursor: "pointer" }}
+                onClick={() => showAt(idx)}
+                title="View"
               >
-                <img
-                  src={it.image_url}
-                  alt={it.caption || "Vision"}
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
+                <img src={it.image_url} alt={it.caption || "Vision"} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                 {/* delete */}
                 <div style={{ position: "absolute", top: 6, right: 6, display: "flex", gap: 6 }}>
                   <button onClick={(e) => { e.stopPropagation(); removeItem(it); }} title="Delete" style={{ padding: "4px 8px" }}>×</button>
-                </div>
-                {/* nav (no reorder any more) */}
-                <div style={{ position: "absolute", bottom: 6, left: 6, display: "flex", gap: 6 }}>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setViewIdx((idx - 1 + items.length) % items.length); }}
-                    title="Previous"
-                  >←</button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setViewIdx((idx + 1) % items.length); }}
-                    title="Next"
-                  >→</button>
                 </div>
               </div>
 
@@ -270,76 +245,64 @@ export default function VisionBoardScreen() {
 
         {err && <div style={{ color: "red", marginTop: 12 }}>{err}</div>}
       </div>
-
-      {/* Lightbox viewer */}
-      {viewIdx !== null && items[viewIdx] && (
-        <div className="vb-lightbox" onClick={closeViewer} role="dialog" aria-modal="true">
-          <div className="vb-sheet" onClick={(e) => e.stopPropagation()}>
-            <img
-              src={items[viewIdx].image_url}
-              alt={items[viewIdx].caption || "Vision"}
-              className="vb-img"
-            />
-            {items[viewIdx].caption && <div className="vb-cap">{items[viewIdx].caption}</div>}
-
-            <div className="vb-controls">
-              <button onClick={prev} aria-label="Previous">← Prev</button>
-              {items.length > 1 && (
-                <button onClick={() => setPlaying(p => !p)} aria-label={playing ? "Pause slideshow" : "Play slideshow"}>
-                  {playing ? "Pause" : "Play 30s"}
-                </button>
-              )}
-              <button onClick={next} aria-label="Next">Next →</button>
-            </div>
-
-            <button className="vb-close" onClick={closeViewer} aria-label="Close">×</button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-/* --- simple lightbox styles (uses your theme vars) --- */
-const CSS_LIGHTBOX = `
-.vb-lightbox{
-  position: fixed; inset: 0; z-index: 60;
-  background: rgba(0,0,0,.6);
-  display: grid; place-items: center;
-  padding: 24px;
+/* --- inline viewer styles --- */
+const CSS_VIEWER = `
+.vb-inline{
+  display: grid;
+  grid-template-columns: 40px 1fr 40px;
+  gap: 8px;
+  align-items: center;
 }
-.vb-sheet{
+.vb-stage{
   position: relative;
-  background: var(--card);
+  background: #f8f9fa;
   border: 1px solid var(--border);
   border-radius: 12px;
-  max-width: min(100%, 960px);
-  width: 100%;
-  box-shadow: var(--shadow);
-  padding: 16px;
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  display: grid;
+  place-items: center;
 }
 .vb-img{
-  width: 100%; height: auto; display: block;
-  max-height: calc(80vh - 100px);
+  width: 100%;
+  height: 100%;
   object-fit: contain;
-  border-radius: 8px;
+  display: block;
   background: #f8f9fa;
 }
-.vb-cap{
-  margin-top: 8px;
-  text-align: center;
-  color: var(--muted);
+.vb-meta{
+  position: absolute;
+  left: 8px; right: 8px; bottom: 8px;
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 8px;
 }
-.vb-close{
-  position: absolute; top: 8px; right: 8px;
-  padding: 4px 10px; border-radius: 8px;
+.vb-cap{ 
+  background: rgba(255,255,255,.85);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 8px;
+  max-width: 70%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.vb-count{ background: rgba(255,255,255,.85); border-radius: 8px; padding: 2px 8px; }
+
+.vb-arrow{
+  height: 40px; width: 40px;
+  border-radius: 999px;
+}
+.vb-left{ justify-self: start; }
+.vb-right{ justify-self: end; }
+
 .vb-controls{
-  margin-top: 10px;
-  display: flex; gap: 8px; justify-content: center; align-items: center;
+  display: flex; justify-content: center; gap: 8px; margin-top: 8px;
 }
+
 @media (max-width: 520px){
-  .vb-sheet{ padding: 10px; }
-  .vb-img{ max-height: calc(80vh - 80px); }
+  .vb-inline{ grid-template-columns: 32px 1fr 32px; }
+  .vb-arrow{ height: 32px; width: 32px; }
 }
 `;
