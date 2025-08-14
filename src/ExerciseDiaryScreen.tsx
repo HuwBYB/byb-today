@@ -30,6 +30,11 @@ type WSet = {
   duration_sec: number | null;
 };
 
+type PrevEntry = {
+  date: string; // YYYY-MM-DD
+  sets: Array<{ weight_kg: number | null; reps: number | null; duration_sec: number | null }>;
+};
+
 /* ---------- Helpers ---------- */
 function toISO(d: Date) {
   const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,"0"), dd=String(d.getDate()).padStart(2,"0");
@@ -64,6 +69,18 @@ export default function ExerciseDiaryScreen() {
   const [busy, setBusy] = useState(false);
 
   const [recent, setRecent] = useState<Session[]>([]);
+
+  // per-exercise history state (quick preview)
+  const [openHistoryFor, setOpenHistoryFor] = useState<Record<number, boolean>>({});
+  const [loadingPrevFor, setLoadingPrevFor] = useState<Record<number, boolean>>({});
+  const [prevByItem, setPrevByItem] = useState<Record<number, PrevEntry[]>>({});
+
+  // modal (full history for a title)
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalTitle, setModalTitle] = useState("");
+  const [modalForItemId, setModalForItemId] = useState<number | null>(null);
+  const [modalEntries, setModalEntries] = useState<PrevEntry[]>([]);
+  const [modalLoading, setModalLoading] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
@@ -205,6 +222,7 @@ export default function ExerciseDiaryScreen() {
 
   /* ----- Set actions (weights) ----- */
   async function addSet(itemId: number) {
+    if (!userId) return;
     const current = setsByItem[itemId] || [];
     const nextNum = current.length ? Math.max(...current.map(s => s.set_number)) + 1 : 1;
     const { data, error } = await supabase
@@ -213,6 +231,23 @@ export default function ExerciseDiaryScreen() {
       }).select().single();
     if (error) { setErr(error.message); return; }
     setSetsByItem({ ...setsByItem, [itemId]: [...current, data as WSet] });
+  }
+
+  async function addSetsBulk(itemId: number, payloads: Array<{weight_kg:number|null; reps:number|null; duration_sec:number|null}>) {
+    if (!userId || payloads.length === 0) return;
+    const current = setsByItem[itemId] || [];
+    const baseNum = current.length ? Math.max(...current.map(s => s.set_number)) : 0;
+    const rows = payloads.map((p, idx) => ({
+      item_id: itemId,
+      user_id: userId,
+      set_number: baseNum + idx + 1,
+      weight_kg: p.weight_kg ?? null,
+      reps: p.reps ?? null,
+      duration_sec: p.duration_sec ?? null,
+    }));
+    const { data, error } = await supabase.from("workout_sets").insert(rows).select();
+    if (error) { setErr(error.message); return; }
+    setSetsByItem({ ...setsByItem, [itemId]: [...current, ...((data as WSet[]) || [])] });
   }
 
   async function updateSet(set: WSet, patch: Partial<WSet>) {
@@ -228,6 +263,165 @@ export default function ExerciseDiaryScreen() {
     if (error) { setErr(error.message); return; }
     const list = (setsByItem[set.item_id] || []).filter(s => s.id !== set.id);
     setSetsByItem({ ...setsByItem, [set.item_id]: list });
+  }
+
+  /* ----- Quick preview history (per weights exercise) ----- */
+  async function loadPrevForItem(it: Item, limit = 4) {
+    if (!userId) return;
+    setLoadingPrevFor(prev => ({ ...prev, [it.id]: true }));
+    try {
+      // previous items with same title (case-insensitive), weights kind, excluding this item
+      const { data: itemsRows, error: iErr } = await supabase
+        .from("workout_items")
+        .select("id, session_id, title, kind")
+        .eq("user_id", userId)
+        .eq("kind", "weights")
+        .ilike("title", it.title) // case-insensitive "equal" (no wildcards)
+        .neq("id", it.id)
+        .order("id", { ascending: false })
+        .limit(limit * 4);
+      if (iErr) throw iErr;
+
+      const prevItems = (itemsRows as Array<{id:number;session_id:number;title:string;kind:string}>) || [];
+      if (prevItems.length === 0) {
+        setPrevByItem(prev => ({ ...prev, [it.id]: [] }));
+        return;
+      }
+
+      const itemIds = Array.from(new Set(prevItems.map(r => r.id)));
+      const sessionIds = Array.from(new Set(prevItems.map(r => r.session_id)));
+
+      const { data: setsRows, error: sErr } = await supabase
+        .from("workout_sets")
+        .select("item_id, set_number, weight_kg, reps, duration_sec")
+        .in("item_id", itemIds)
+        .order("set_number", { ascending: true });
+      if (sErr) throw sErr;
+
+      const { data: sessRows, error: dErr } = await supabase
+        .from("workout_sessions")
+        .select("id, session_date")
+        .in("id", sessionIds);
+      if (dErr) throw dErr;
+
+      const idToDate: Record<number, string> = {};
+      (sessRows || []).forEach((s:any) => { idToDate[s.id] = s.session_date; });
+
+      const idToSets: Record<number, Array<{weight_kg:number|null; reps:number|null; duration_sec:number|null}>> = {};
+      (setsRows as any[] || []).forEach(s => {
+        (idToSets[s.item_id] ||= []).push({
+          weight_kg: s.weight_kg ?? null,
+          reps: s.reps ?? null,
+          duration_sec: s.duration_sec ?? null,
+        });
+      });
+
+      const entries: PrevEntry[] = prevItems
+        .map(pi => ({ date: idToDate[pi.session_id] || "", sets: idToSets[pi.id] || [] }))
+        .filter(e => !!e.date && e.sets.length > 0)
+        .sort((a,b) => b.date.localeCompare(a.date))
+        .slice(0, limit);
+
+      setPrevByItem(prev => ({ ...prev, [it.id]: entries }));
+    } catch (e:any) {
+      setErr(e.message || String(e));
+    } finally {
+      setLoadingPrevFor(prev => ({ ...prev, [it.id]: false }));
+    }
+  }
+
+  function toggleHistory(it: Item) {
+    setOpenHistoryFor(prev => {
+      const nextOpen = !prev[it.id];
+      if (nextOpen && !prevByItem[it.id]) {
+        loadPrevForItem(it, 4);
+      }
+      return { ...prev, [it.id]: nextOpen };
+    });
+  }
+
+  async function copyLastSetsTo(it: Item) {
+    const hist = prevByItem[it.id];
+    if (!hist || hist.length === 0) return;
+    const last = hist[0];
+    await addSetsBulk(it.id, last.sets);
+  }
+
+  /* ----- Modal: full history for a title ----- */
+  async function openHistoryModal(it: Item, limit = 10) {
+    if (!userId) return;
+    setModalOpen(true);
+    setModalTitle(it.title);
+    setModalForItemId(it.id);
+    setModalLoading(true);
+    try {
+      // same as quick preview but larger limit
+      const { data: itemsRows, error: iErr } = await supabase
+        .from("workout_items")
+        .select("id, session_id")
+        .eq("user_id", userId)
+        .eq("kind", "weights")
+        .ilike("title", it.title)
+        .neq("id", it.id)
+        .order("id", { ascending: false })
+        .limit(limit * 4);
+      if (iErr) throw iErr;
+
+      const prevItems = (itemsRows as Array<{id:number;session_id:number}>) || [];
+      if (prevItems.length === 0) { setModalEntries([]); return; }
+
+      const itemIds = Array.from(new Set(prevItems.map(r => r.id)));
+      const sessionIds = Array.from(new Set(prevItems.map(r => r.session_id)));
+
+      const { data: setsRows, error: sErr } = await supabase
+        .from("workout_sets")
+        .select("item_id, set_number, weight_kg, reps, duration_sec")
+        .in("item_id", itemIds)
+        .order("set_number", { ascending: true });
+      if (sErr) throw sErr;
+
+      const { data: sessRows, error: dErr } = await supabase
+        .from("workout_sessions")
+        .select("id, session_date")
+        .in("id", sessionIds);
+      if (dErr) throw dErr;
+
+      const idToDate: Record<number, string> = {};
+      (sessRows || []).forEach((s:any) => { idToDate[s.id] = s.session_date; });
+
+      const idToSets: Record<number, Array<{weight_kg:number|null; reps:number|null; duration_sec:number|null}>> = {};
+      (setsRows as any[] || []).forEach(s => {
+        (idToSets[s.item_id] ||= []).push({
+          weight_kg: s.weight_kg ?? null,
+          reps: s.reps ?? null,
+          duration_sec: s.duration_sec ?? null,
+        });
+      });
+
+      const entries: PrevEntry[] = prevItems
+        .map(pi => ({ date: idToDate[pi.session_id] || "", sets: idToSets[pi.id] || [] }))
+        .filter(e => !!e.date && e.sets.length > 0)
+        .sort((a,b) => b.date.localeCompare(a.date))
+        .slice(0, limit);
+
+      setModalEntries(entries);
+    } catch (e:any) {
+      setErr(e.message || String(e));
+    } finally {
+      setModalLoading(false);
+    }
+  }
+
+  function closeModal() {
+    setModalOpen(false);
+    setModalTitle("");
+    setModalEntries([]);
+    setModalForItemId(null);
+  }
+
+  async function copySetsFromModal(entry: PrevEntry) {
+    if (!modalForItemId) return;
+    await addSetsBulk(modalForItemId, entry.sets);
   }
 
   /* ----- UI helpers ----- */
@@ -278,23 +472,67 @@ export default function ExerciseDiaryScreen() {
                   {items.length === 0 && <div className="muted">No items yet. Add your first exercise above.</div>}
                   {items.map(it => (
                     <div key={it.id} style={{ border:"1px solid #eee", borderRadius:10, padding:10 }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, flexWrap:"wrap" }}>
                         <KindBadge kind={it.kind} />
                         <input
                           value={it.title}
                           onChange={e=>renameItem(it, e.target.value)}
                           style={{ flex:1, minWidth:0 }}
                         />
-                        <button onClick={()=>deleteItem(it.id)} title="Delete">×</button>
+                        <div style={{ display:"flex", gap:6 }}>
+                          {it.kind === "weights" && (
+                            <>
+                              <button onClick={()=>toggleHistory(it)}>
+                                {openHistoryFor[it.id] ? "Hide previous" : `Show previous`}
+                              </button>
+                              <button onClick={()=>openHistoryModal(it)} title="See more dates">Open history</button>
+                            </>
+                          )}
+                          <button onClick={()=>deleteItem(it.id)} title="Delete">×</button>
+                        </div>
                       </div>
 
                       {it.kind === "weights" ? (
-                        <WeightsEditor
-                          sets={setsByItem[it.id] || []}
-                          onAdd={()=>addSet(it.id)}
-                          onChange={(set, patch)=>updateSet(set, patch)}
-                          onDelete={(set)=>deleteSet(set)}
-                        />
+                        <>
+                          <WeightsEditor
+                            sets={setsByItem[it.id] || []}
+                            onAdd={()=>addSet(it.id)}
+                            onChange={(set, patch)=>updateSet(set, patch)}
+                            onDelete={(set)=>deleteSet(set)}
+                          />
+                          {/* History / previous workouts for this exercise */}
+                          <div style={{ marginTop:8, display:"grid", gap:6 }}>
+                            {openHistoryFor[it.id] && (
+                              <div className="muted" style={{ border:"1px dashed #e5e7eb", borderRadius:8, padding:8 }}>
+                                {loadingPrevFor[it.id] && <div>Loading previous…</div>}
+                                {!loadingPrevFor[it.id] && (prevByItem[it.id]?.length ?? 0) === 0 && (
+                                  <div>No previous entries found for this exercise title.</div>
+                                )}
+                                {!loadingPrevFor[it.id] && (prevByItem[it.id]?.length ?? 0) > 0 && (
+                                  <>
+                                    <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:6 }}>
+                                      <button className="btn-soft" onClick={()=>copyLastSetsTo(it)}>Copy last sets</button>
+                                    </div>
+                                    <ul className="list">
+                                      {prevByItem[it.id]!.map((p, idx) => (
+                                        <li key={idx} className="item">
+                                          <div style={{ fontWeight:600 }}>{p.date}</div>
+                                          <div>
+                                            {p.sets.map((s, j) => {
+                                              const w = s.weight_kg != null ? `${s.weight_kg}kg` : "";
+                                              const r = s.reps != null ? `${s.reps}` : "";
+                                              return <span key={j}>{j>0?" · ": ""}{w && r ? `${w}×${r}` : (w || r || "")}</span>;
+                                            })}
+                                          </div>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </>
                       ) : (
                         <CardioSummary item={it} />
                       )}
@@ -329,6 +567,51 @@ export default function ExerciseDiaryScreen() {
           </aside>
         </div>
       </div>
+
+      {/* History Modal */}
+      {modalOpen && (
+        <div
+          style={{
+            position:"fixed", inset:0, background:"rgba(0,0,0,.35)",
+            display:"grid", placeItems:"center", zIndex:100
+          }}
+          onClick={closeModal}
+        >
+          <div
+            className="card"
+            style={{ width:"min(720px, 92vw)", maxHeight:"80vh", overflow:"auto" }}
+            onClick={e=>e.stopPropagation()}
+          >
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
+              <h2 style={{ margin:0 }}>History · {modalTitle}</h2>
+              <button onClick={closeModal}>Close</button>
+            </div>
+            {modalLoading && <div className="muted" style={{ marginTop:8 }}>Loading…</div>}
+            {!modalLoading && modalEntries.length === 0 && (
+              <div className="muted" style={{ marginTop:8 }}>No previous entries found for this title.</div>
+            )}
+            {!modalLoading && modalEntries.length > 0 && (
+              <ul className="list" style={{ marginTop:8 }}>
+                {modalEntries.map((p, idx) => (
+                  <li key={idx} className="item" style={{ alignItems:"center" }}>
+                    <div style={{ fontWeight:600 }}>{p.date}</div>
+                    <div style={{ flex:1 }}>
+                      {p.sets.map((s, j) => {
+                        const w = s.weight_kg != null ? `${s.weight_kg}kg` : "";
+                        const r = s.reps != null ? `${s.reps}` : "";
+                        return <span key={j}>{j>0?" · ": ""}{w && r ? `${w}×${r}` : (w || r || "")}</span>;
+                      })}
+                    </div>
+                    {modalForItemId && (
+                      <button onClick={()=>copySetsFromModal(p)} className="btn-soft">Copy sets</button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
