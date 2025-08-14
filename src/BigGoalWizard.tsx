@@ -1,16 +1,19 @@
 import { useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-/* -------- categories + colours (same palette as Goals) -------- */
+/* -------- categories + colours (match DB constraint) --------
+   Allowed in DB: 'health' | 'personal' | 'financial' | 'career' | 'other'
+   We can show user-friendly labels (e.g., "Business") while storing the allowed key.
+---------------------------------------------------------------- */
 const CATS = [
   { key: "personal",  label: "Personal",  color: "#a855f7" }, // purple
   { key: "health",    label: "Health",    color: "#22c55e" }, // green
-  { key: "business",  label: "Business",  color: "#3b82f6" }, // blue
-  { key: "finance",   label: "Finance",   color: "#f59e0b" }, // amber
+  { key: "career",    label: "Business",  color: "#3b82f6" }, // blue (stored as 'career')
+  { key: "financial", label: "Finance",   color: "#f59e0b" }, // amber (stored as 'financial')
   { key: "other",     label: "Other",     color: "#6b7280" }, // gray
 ] as const;
-type CatKey = typeof CATS[number]["key"];
-const colorOf = (k: CatKey) => CATS.find(c => c.key === k)?.color || "#6b7280";
+type AllowedCategory = typeof CATS[number]["key"]; // 'personal'|'health'|'career'|'financial'|'other'
+const colorOf = (k: AllowedCategory) => CATS.find(c => c.key === k)?.color || "#6b7280";
 
 /* -------- date helpers (local) -------- */
 function toISO(d: Date) {
@@ -38,7 +41,7 @@ type Props = { onClose: () => void; onCreated: () => void };
 export default function BigGoalWizard({ onClose, onCreated }: Props) {
   const todayISO = useMemo(() => toISO(new Date()), []);
   const [title, setTitle] = useState("");
-  const [category, setCategory] = useState<CatKey>("other");
+  const [category, setCategory] = useState<AllowedCategory>("other"); // now matches DB
   const [startDate, setStartDate] = useState(todayISO);
   const [targetDate, setTargetDate] = useState("");
   const [halfwayNote, setHalfwayNote] = useState("");
@@ -69,13 +72,13 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
       const userId = userData.user?.id;
       if (!userId) throw new Error("Not signed in.");
 
-      // 1) create goal
+      // 1) create goal (store category that DB accepts)
       const { data: goal, error: gerr } = await supabase.from("goals")
         .insert({
           user_id: userId,
           title: title.trim(),
           goal_type: "big",
-          category,
+          category,                 // <-- matches DB constraint
           category_color: catColor,
           start_date: startDate,
           target_date: targetDate,
@@ -92,20 +95,44 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
       if (end < start) throw new Error("Target date is before start date.");
 
       const tasks: any[] = [];
-      const cat = goal.category;
+      const cat = goal.category as AllowedCategory;
       const col = goal.category_color;
 
       // Milestones
-      tasks.push({ user_id:userId, title:`BIG GOAL — Target: ${goal.title}`, due_date: targetDate, source:"big_goal_target", priority:2, category:cat, category_color:col });
+      tasks.push({
+        user_id:userId,
+        title:`BIG GOAL — Target: ${goal.title}`,
+        due_date: targetDate,
+        source:"big_goal_target",
+        priority:2,
+        category:cat,             // <-- allowed
+        category_color:col
+      });
       if (computedHalfDate && halfwayNote.trim()) {
-        tasks.push({ user_id:userId, title:`BIG GOAL — Halfway: ${halfwayNote.trim()}`, due_date: computedHalfDate, source:"big_goal_halfway", priority:2, category:cat, category_color:col });
+        tasks.push({
+          user_id:userId,
+          title:`BIG GOAL — Halfway: ${halfwayNote.trim()}`,
+          due_date: computedHalfDate,
+          source:"big_goal_halfway",
+          priority:2,
+          category:cat,
+          category_color:col
+        });
       }
 
       // Monthly — start next month, same DOM
       if (monthlyCommit.trim()) {
         let d = addMonthsClamped(start, 1, start.getDate());
         while (d <= end) {
-          tasks.push({ user_id:userId, title:`BIG GOAL — Monthly: ${monthlyCommit.trim()}`, due_date: toISO(d), source:"big_goal_monthly", priority:2, category:cat, category_color:col });
+          tasks.push({
+            user_id:userId,
+            title:`BIG GOAL — Monthly: ${monthlyCommit.trim()}`,
+            due_date: toISO(d),
+            source:"big_goal_monthly",
+            priority:2,
+            category:cat,
+            category_color:col
+          });
           d = addMonthsClamped(d, 1, start.getDate());
         }
       }
@@ -114,7 +141,15 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
       if (weeklyCommit.trim()) {
         let d = new Date(start); d.setDate(d.getDate() + 7);
         while (d <= end) {
-          tasks.push({ user_id:userId, title:`BIG GOAL — Weekly: ${weeklyCommit.trim()}`, due_date: toISO(d), source:"big_goal_weekly", priority:2, category:cat, category_color:col });
+          tasks.push({
+            user_id:userId,
+            title:`BIG GOAL — Weekly: ${weeklyCommit.trim()}`,
+            due_date: toISO(d),
+            source:"big_goal_weekly",
+            priority:2,
+            category:cat,
+            category_color:col
+          });
           d.setDate(d.getDate() + 7);
         }
       }
@@ -123,7 +158,15 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
       if (dailyCommit.trim()) {
         let d = clampDay(new Date(Math.max(Date.now(), start.getTime())));
         while (d <= end) {
-          tasks.push({ user_id:userId, title:`BIG GOAL — Daily: ${dailyCommit.trim()}`, due_date: toISO(d), source:"big_goal_daily", priority:2, category:cat, category_color:col });
+          tasks.push({
+            user_id:userId,
+            title:`BIG GOAL — Daily: ${dailyCommit.trim()}`,
+            due_date: toISO(d),
+            source:"big_goal_daily",
+            priority:2,
+            category:cat,
+            category_color:col
+          });
           d.setDate(d.getDate() + 1);
         }
       }
@@ -160,7 +203,7 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
         <label>
           <div className="muted">Category</div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <select value={category} onChange={e=>setCategory(e.target.value as CatKey)}>
+            <select value={category} onChange={e=>setCategory(e.target.value as AllowedCategory)}>
               {CATS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
             </select>
             <span title="Category color" style={{ display:"inline-block", width:18, height:18, borderRadius:999, background:catColor, border:"1px solid #ccc" }} />
