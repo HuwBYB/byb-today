@@ -10,6 +10,7 @@ import ExerciseDiaryScreen from "./ExerciseDiaryScreen";
 import WinsScreen from "./WinsScreen";
 import AlfredScreen from "./AlfredScreen";
 import ConfidenceScreen from "./ConfidenceScreen";
+import NotesScreen from "./NotesScreen"; // ⬅️ NEW
 
 type Tab =
   | "today"
@@ -18,6 +19,7 @@ type Tab =
   | "vision"
   | "gratitude"
   | "exercise"
+  | "notes"      // ⬅️ NEW
   | "wins"
   | "alfred"
   | "confidence";
@@ -40,6 +42,7 @@ export default function App() {
         { key: "vision",     label: "Vision",     icon: "🖼️" },
         { key: "gratitude",  label: "Gratitude",  icon: "🙏" },
         { key: "exercise",   label: "Exercise",   icon: "🏋️" },
+        { key: "notes",      label: "Notes",      icon: "📝" }, // ⬅️ NEW
         { key: "wins",       label: "Successes",  icon: "🏆" },
         { key: "alfred",     label: "Alfred",     icon: "🤖" },
         { key: "confidence", label: "Confidence", icon: "⚡" },
@@ -103,6 +106,8 @@ export default function App() {
           {tab === "gratitude" && <GratitudeScreen />}
 
           {tab === "exercise" && <ExerciseDiaryScreen />}
+
+          {tab === "notes" && <NotesScreen />}{/* ⬅️ NEW */}
 
           {tab === "wins" && <WinsScreen />}
 
