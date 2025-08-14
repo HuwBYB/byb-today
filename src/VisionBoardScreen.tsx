@@ -20,6 +20,9 @@ export default function VisionBoardScreen() {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Lightbox viewer state
+  const [viewIdx, setViewIdx] = useState<number | null>(null);
+
   /* ---- auth ---- */
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
@@ -52,7 +55,6 @@ export default function VisionBoardScreen() {
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !userId) return;
-    // reset the input so choosing the same file again re-triggers
     e.target.value = "";
     if (!file.type.startsWith("image/")) { setErr("Please choose an image file."); return; }
     if (file.size > 10 * 1024 * 1024) { setErr("Image is too large (max 10MB)."); return; }
@@ -100,19 +102,26 @@ export default function VisionBoardScreen() {
   /* ---- delete ---- */
   async function removeItem(it: VisionItem) {
     setErr(null);
-    // Delete DB row first
     const { error: delErr } = await supabase.from("vision_items").delete().eq("id", it.id);
     if (delErr) { setErr(delErr.message); return; }
-    // Then try to remove the storage object (if we have the path)
     if (it.storage_path) {
       const { error: storErr } = await supabase.storage.from("vision").remove([it.storage_path]);
-      // If storage removal fails, we just log the error to UI; DB row is already removed.
       if (storErr) setErr(`Removed from board, but not storage: ${storErr.message}`);
+    }
+    // Adjust viewer index if open
+    if (viewIdx !== null) {
+      if (items.length <= 1) setViewIdx(null);
+      else setViewIdx((prev) => {
+        if (prev == null) return null;
+        const removedAt = items.findIndex(x => x.id === it.id);
+        const next = Math.max(0, Math.min(prev, items.length - 2));
+        return removedAt === prev ? next : prev > removedAt ? prev - 1 : prev;
+      });
     }
     await loadItems();
   }
 
-  /* ---- reorder ---- */
+  /* ---- reorder (swap neighbors in list order) ---- */
   function canMoveLeft(index: number) { return index > 0; }
   function canMoveRight(index: number) { return index < items.length - 1; }
 
@@ -120,24 +129,55 @@ export default function VisionBoardScreen() {
     const j = index + dir;
     if (j < 0 || j >= items.length) return;
     const newItems = [...items];
-    const tmp = newItems[index];
-    newItems[index] = newItems[j];
-    newItems[j] = tmp;
+    [newItems[index], newItems[j]] = [newItems[j], newItems[index]];
     // renumber sort_order by array position
     const updates = newItems.map((it, idx) => ({ id: it.id, sort_order: idx }));
     setItems(newItems);
-    // Persist: update just the two that changed is fine, but with only 6 we can update all
-    for (const u of updates) {
-      await supabase.from("vision_items").update({ sort_order: u.sort_order }).eq("id", u.id);
+    // Persist (small table: update all)
+    await Promise.all(updates.map(u =>
+      supabase.from("vision_items").update({ sort_order: u.sort_order }).eq("id", u.id)
+    ));
+    // If viewer is open, keep it tracking the same image id
+    if (viewIdx !== null) {
+      const viewedId = items[viewIdx]?.id;
+      const newIndex = newItems.findIndex(x => x.id === viewedId);
+      if (newIndex !== -1) setViewIdx(newIndex);
     }
   }
 
+  /* ---- viewer (lightbox) helpers ---- */
+  function openViewer(i: number) { setViewIdx(i); }
+  function closeViewer() { setViewIdx(null); }
+  function next() {
+    if (viewIdx == null || items.length === 0) return;
+    setViewIdx((viewIdx + 1) % items.length);
+  }
+  function prev() {
+    if (viewIdx == null || items.length === 0) return;
+    setViewIdx((viewIdx - 1 + items.length) % items.length);
+  }
+
+  // Keyboard support for viewer
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (viewIdx == null) return;
+      if (e.key === "Escape") { e.preventDefault(); closeViewer(); }
+      if (e.key === "ArrowRight") { e.preventDefault(); next(); }
+      if (e.key === "ArrowLeft") { e.preventDefault(); prev(); }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [viewIdx, items.length]);
+
   return (
     <div style={{ display: "grid", gap: 12 }}>
+      {/* page styles for lightbox */}
+      <style>{CSS_LIGHTBOX}</style>
+
       <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <h1 style={{ margin: 0 }}>Vision Board</h1>
-          <div className="muted">Up to {MAX_ITEMS} images. Drag-free reorder with left/right arrows.</div>
+          <div className="muted">Up to {MAX_ITEMS} images. Click to view; use arrows to navigate. Reorder with ←/→ on each tile.</div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -170,19 +210,24 @@ export default function VisionBoardScreen() {
         }}>
           {items.map((it, idx) => (
             <div key={it.id} style={{ border: "1px solid #eee", borderRadius: 12, overflow: "hidden", display: "grid", gridTemplateRows: "auto auto", background: "#fff" }}>
-              <div style={{ position: "relative", aspectRatio: "4/3", background: "#f8f9fa" }}>
+              <div
+                style={{ position: "relative", aspectRatio: "4/3", background: "#f8f9fa", cursor: "zoom-in" }}
+                onClick={() => openViewer(idx)}
+                title="Click to view"
+              >
                 <img
                   src={it.image_url}
                   alt={it.caption || "Vision"}
                   style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 />
-                {/* reorder + delete */}
+                {/* delete */}
                 <div style={{ position: "absolute", top: 6, right: 6, display: "flex", gap: 6 }}>
-                  <button onClick={() => removeItem(it)} title="Delete" style={{ padding: "4px 8px" }}>×</button>
+                  <button onClick={(e) => { e.stopPropagation(); removeItem(it); }} title="Delete" style={{ padding: "4px 8px" }}>×</button>
                 </div>
+                {/* reorder */}
                 <div style={{ position: "absolute", bottom: 6, left: 6, display: "flex", gap: 6 }}>
-                  <button onClick={() => move(idx, -1)} disabled={!canMoveLeft(idx)} title="Move left">←</button>
-                  <button onClick={() => move(idx, +1)} disabled={!canMoveRight(idx)} title="Move right">→</button>
+                  <button onClick={(e) => { e.stopPropagation(); move(idx, -1); }} disabled={!canMoveLeft(idx)} title="Move left">←</button>
+                  <button onClick={(e) => { e.stopPropagation(); move(idx, +1); }} disabled={!canMoveRight(idx)} title="Move right">→</button>
                 </div>
               </div>
 
@@ -205,6 +250,74 @@ export default function VisionBoardScreen() {
 
         {err && <div style={{ color: "red", marginTop: 12 }}>{err}</div>}
       </div>
+
+      {/* Lightbox viewer */}
+      {viewIdx !== null && items[viewIdx] && (
+        <div className="vb-lightbox" onClick={closeViewer} role="dialog" aria-modal="true">
+          <div className="vb-sheet" onClick={(e) => e.stopPropagation()}>
+            <img
+              src={items[viewIdx].image_url}
+              alt={items[viewIdx].caption || "Vision"}
+              className="vb-img"
+            />
+            {items[viewIdx].caption && <div className="vb-cap">{items[viewIdx].caption}</div>}
+
+            <button className="vb-close" onClick={closeViewer} aria-label="Close">×</button>
+            {items.length > 1 && (
+              <>
+                <button className="vb-nav vb-prev" onClick={prev} aria-label="Previous">←</button>
+                <button className="vb-nav vb-next" onClick={next} aria-label="Next">→</button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+/* --- simple lightbox styles (uses your theme vars) --- */
+const CSS_LIGHTBOX = `
+.vb-lightbox{
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(0,0,0,.6);
+  display: grid; place-items: center;
+  padding: 24px;
+}
+.vb-sheet{
+  position: relative;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  max-width: min(100%, 960px);
+  width: 100%;
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+.vb-img{
+  width: 100%; height: auto; display: block;
+  max-height: calc(80vh - 80px);
+  object-fit: contain;
+  border-radius: 8px;
+  background: #f8f9fa;
+}
+.vb-cap{
+  margin-top: 8px;
+  text-align: center;
+  color: var(--muted);
+}
+.vb-close{
+  position: absolute; top: 8px; right: 8px;
+  padding: 4px 10px; border-radius: 8px;
+}
+.vb-nav{
+  position: absolute; top: 50%; transform: translateY(-50%);
+  padding: 8px 12px; border-radius: 8px;
+}
+.vb-prev{ left: 8px; }
+.vb-next{ right: 8px; }
+@media (max-width: 520px){
+  .vb-sheet{ padding: 10px; }
+  .vb-img{ max-height: calc(80vh - 60px); }
+}
+`;
