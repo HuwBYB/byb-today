@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* ---------- Types ---------- */
@@ -56,6 +56,7 @@ function paceStr(distanceKm?: number, durSec?: number) {
   const secPerKm = Math.round(durSec / distanceKm);
   return `${secondsToMMSS(secPerKm)}/km`;
 }
+const FIN_KEY = (sid:number, dateISO:string) => `byb_session_finished_${sid}_${dateISO}`;
 
 /* ---------- Main ---------- */
 export default function ExerciseDiaryScreen() {
@@ -70,7 +71,7 @@ export default function ExerciseDiaryScreen() {
 
   const [recent, setRecent] = useState<Session[]>([]);
 
-  // per-exercise history state (quick preview)
+  // per-exercise history (quick preview)
   const [openHistoryFor, setOpenHistoryFor] = useState<Record<number, boolean>>({});
   const [loadingPrevFor, setLoadingPrevFor] = useState<Record<number, boolean>>({});
   const [prevByItem, setPrevByItem] = useState<Record<number, PrevEntry[]>>({});
@@ -82,6 +83,9 @@ export default function ExerciseDiaryScreen() {
   const [modalEntries, setModalEntries] = useState<PrevEntry[]>([]);
   const [modalLoading, setModalLoading] = useState(false);
 
+  // collapsed session view after completion (persisted per session/date)
+  const [finished, setFinished] = useState(false);
+
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -90,6 +94,16 @@ export default function ExerciseDiaryScreen() {
   }, []);
 
   useEffect(() => { if (userId) { loadSessionForDay(dateISO); loadRecent(); } }, [userId, dateISO]);
+
+  // refresh finished (collapsed) state whenever the session/date changes
+  useEffect(() => {
+    if (session) {
+      const val = localStorage.getItem(FIN_KEY(session.id, dateISO));
+      setFinished(val === "1");
+    } else {
+      setFinished(false);
+    }
+  }, [session?.id, dateISO]);
 
   /* ----- Loaders ----- */
   async function loadSessionForDay(iso: string) {
@@ -160,6 +174,7 @@ export default function ExerciseDiaryScreen() {
         .single();
       if (error) throw error;
       setSession(data as Session);
+      localStorage.setItem(FIN_KEY((data as Session).id, dateISO), "0");
       await loadItems((data as Session).id);
       await loadRecent();
     } catch (e:any) {
@@ -167,6 +182,17 @@ export default function ExerciseDiaryScreen() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function markComplete() {
+    if (!session) return;
+    localStorage.setItem(FIN_KEY(session.id, dateISO), "1");
+    setFinished(true);
+  }
+  function reopenSession() {
+    if (!session) return;
+    localStorage.setItem(FIN_KEY(session.id, dateISO), "0");
+    setFinished(false);
   }
 
   async function saveSessionNotes(notes: string) {
@@ -266,27 +292,24 @@ export default function ExerciseDiaryScreen() {
   }
 
   /* ----- Quick preview history (per weights exercise) ----- */
-  async function loadPrevForItem(it: Item, limit = 4) {
+  async function loadPrevForItem(it: Item, limit = 3) { // <<< last 3 by default
     if (!userId) return;
     setLoadingPrevFor(prev => ({ ...prev, [it.id]: true }));
     try {
-      // previous items with same title (case-insensitive), weights kind, excluding this item
+      // previous items with the same title (case-insensitive), weights kind, excluding this item
       const { data: itemsRows, error: iErr } = await supabase
         .from("workout_items")
         .select("id, session_id, title, kind")
         .eq("user_id", userId)
         .eq("kind", "weights")
-        .ilike("title", it.title) // case-insensitive "equal" (no wildcards)
+        .ilike("title", it.title) // case-insensitive exact match
         .neq("id", it.id)
         .order("id", { ascending: false })
         .limit(limit * 4);
       if (iErr) throw iErr;
 
       const prevItems = (itemsRows as Array<{id:number;session_id:number;title:string;kind:string}>) || [];
-      if (prevItems.length === 0) {
-        setPrevByItem(prev => ({ ...prev, [it.id]: [] }));
-        return;
-      }
+      if (prevItems.length === 0) { setPrevByItem(prev => ({ ...prev, [it.id]: [] })); return; }
 
       const itemIds = Array.from(new Set(prevItems.map(r => r.id)));
       const sessionIds = Array.from(new Set(prevItems.map(r => r.session_id)));
@@ -333,9 +356,7 @@ export default function ExerciseDiaryScreen() {
   function toggleHistory(it: Item) {
     setOpenHistoryFor(prev => {
       const nextOpen = !prev[it.id];
-      if (nextOpen && !prevByItem[it.id]) {
-        loadPrevForItem(it, 4);
-      }
+      if (nextOpen && !prevByItem[it.id]) loadPrevForItem(it, 3);
       return { ...prev, [it.id]: nextOpen };
     });
   }
@@ -355,7 +376,6 @@ export default function ExerciseDiaryScreen() {
     setModalForItemId(it.id);
     setModalLoading(true);
     try {
-      // same as quick preview but larger limit
       const { data: itemsRows, error: iErr } = await supabase
         .from("workout_items")
         .select("id, session_id")
@@ -429,6 +449,15 @@ export default function ExerciseDiaryScreen() {
   function prevDay() { const d = fromISO(dateISO); d.setDate(d.getDate()-1); setDateISO(toISO(d)); }
   function nextDay() { const d = fromISO(dateISO); d.setDate(d.getDate()+1); setDateISO(toISO(d)); }
 
+  // compact summary when finished
+  const summary = useMemo(() => {
+    const weightsItems = items.filter(i => i.kind === "weights");
+    const cardioItems  = items.filter(i => i.kind !== "weights");
+    const totalSets = items.reduce((n, it) => n + ((setsByItem[it.id]?.length) || 0), 0);
+    const cardioLabels = cardioItems.map(ci => ci.title || ci.kind);
+    return { weightsCount: weightsItems.length, cardioCount: cardioItems.length, totalSets, cardioLabels };
+  }, [items, setsByItem]);
+
   return (
     <div className="page-exercise">
       <div className="container">
@@ -448,19 +477,41 @@ export default function ExerciseDiaryScreen() {
                 style={{ flex:"1 1 180px", minWidth:0 }}
               />
               <button onClick={nextDay}>→</button>
-              <div style={{ marginLeft:"auto" }}>
+              <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
                 {!session ? (
                   <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius:8 }}>
                     {busy ? "Creating…" : "Create session"}
                   </button>
                 ) : (
-                  <span className="muted">Session #{session.id}</span>
+                  <>
+                    {!finished ? (
+                      <button className="btn-primary" onClick={markComplete} style={{ borderRadius:8 }}>Complete session</button>
+                    ) : (
+                      <button onClick={reopenSession}>Reopen</button>
+                    )}
+                    <span className="muted">Session #{session.id}</span>
+                  </>
                 )}
               </div>
             </div>
 
             {!session ? (
               <div className="muted">No session for this day yet. Click <b>Create session</b> to start logging.</div>
+            ) : finished ? (
+              // Collapsed summary view
+              <div className="card card--wash" style={{ display:"grid", gap:10 }}>
+                <h2 style={{ margin:0 }}>Session complete</h2>
+                <div className="muted">
+                  Weights exercises: <b>{summary.weightsCount}</b> · Sets: <b>{summary.totalSets}</b>
+                  {summary.cardioCount > 0 && <> · Cardio: <b>{summary.cardioCount}</b></>}
+                </div>
+                {summary.cardioCount > 0 && (
+                  <div className="muted">Cardio: {summary.cardioLabels.join(" · ")}</div>
+                )}
+                <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
+                  <button onClick={reopenSession}>Reopen session</button>
+                </div>
+              </div>
             ) : (
               <>
                 <QuickAddCard
