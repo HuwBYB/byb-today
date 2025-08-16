@@ -6,12 +6,12 @@ type TaskRow = {
   id: number;
   user_id: string;
   title: string;
-  status: string;              // "done", "pending", ...
-  completed_at: string | null; // ISO timestamp
+  status: string;
+  completed_at: string | null;
   due_date: string | null;
   priority: number | null;
-  source: string | null;       // e.g., 'big_goal_daily'
-  category: string | null;     // e.g., 'today','big_goal','exercise'
+  source: string | null;
+  category: string | null;
   category_color: string | null;
 };
 
@@ -23,11 +23,18 @@ type GratRow = {
   content: string;
 };
 
+type WorkoutSession = {
+  id: number;
+  user_id: string;
+  session_date: string; // 'YYYY-MM-DD'
+  notes: string | null;
+};
+
 type WorkoutItemRow = {
   id: number;
   user_id: string;
   session_id: number;
-  kind: string;
+  kind: string;         // 'weights' | 'run' | ...
   title: string;
   metrics: Record<string, unknown>;
   session_date: string; // joined from workout_sessions
@@ -72,12 +79,13 @@ function isBigGoal(t: TaskRow) {
   const title = (t.title || "").toLowerCase();
   return src.startsWith("big_goal") || cat === "big_goal" || cat === "goal" || title.includes("big goal");
 }
-function isExerciseTask(t: TaskRow) {
+// treat “exercise-like” task titles as exercise so we can EXCLUDE them from counts
+function isExerciseishTask(t: TaskRow) {
   const cat = (t.category || "").toLowerCase();
   const src = (t.source || "").toLowerCase();
   const title = (t.title || "").toLowerCase();
+  if (src.includes("exercise_session")) return true;
   if (cat.includes("exercise") || cat.includes("workout") || cat.includes("fitness")) return true;
-  if (src.includes("exercise") || src.includes("workout")) return true;
   return /\b(run|walk|jog|gym|workout|exercise|yoga|swim|cycle|cycling|ride|lift|weights|pilates|stretch)\b/.test(title);
 }
 
@@ -85,9 +93,12 @@ function isExerciseTask(t: TaskRow) {
 
 export default function WinsScreen() {
   const [userId, setUserId] = useState<string | null>(null);
+
   const [doneTasks, setDoneTasks] = useState<TaskRow[]>([]);
-  const [workoutItems, setWorkoutItems] = useState<WorkoutItemRow[]>([]);
+  const [sessions, setSessions] = useState<WorkoutSession[]>([]);
+  const [sessionItems, setSessionItems] = useState<Record<number, WorkoutItemRow[]>>({});
   const [grats, setGrats] = useState<GratRow[]>([]);
+
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [active, setActive] = useState<BucketKey>("all");
@@ -107,90 +118,110 @@ export default function WinsScreen() {
     if (!userId) return;
     setLoading(true); setErr(null);
     try {
-      // 1) done tasks
+      const since = new Date();
+      since.setDate(since.getDate() - 365);
+
+      // 1) done tasks (exclude legacy exercise_session tasks so no double count)
       const { data: tdata, error: terror } = await supabase
         .from("tasks")
         .select("id,user_id,title,status,completed_at,due_date,priority,source,category,category_color")
         .eq("user_id", userId)
         .eq("status", "done")
+        .neq("source", "exercise_session")
+        .gte("completed_at", since.toISOString())
         .order("completed_at", { ascending: false });
       if (terror) throw terror;
 
-      // 2) workout items
-      const { data: iData, error: iErr } = await supabase
-        .from("workout_items")
-        .select("id,user_id,session_id,kind,title,metrics")
+      // 2) workout sessions (these drive the Exercise count)
+      const { data: sData, error: sErr } = await supabase
+        .from("workout_sessions")
+        .select("id,user_id,session_date,notes")
         .eq("user_id", userId)
-        .order("id", { ascending: false });
-      if (iErr) throw iErr;
+        .gte("session_date", toISO(since))
+        .order("session_date", { ascending: false });
+      if (sErr) throw sErr;
+      const sess = (sData as WorkoutSession[]) || [];
+      setSessions(sess);
 
-      // join to sessions to get the date
-      const sessionIds = Array.from(new Set((iData || []).map((i: any) => i.session_id)));
-      let idToDate: Record<number, string> = {};
-      if (sessionIds.length) {
-        const { data: sData, error: sErr } = await supabase
-          .from("workout_sessions")
-          .select("id,session_date")
-          .in("id", sessionIds);
-        if (sErr) throw sErr;
-        (sData || []).forEach((s: any) => { idToDate[s.id] = s.session_date; });
+      // fetch items for those sessions (to summarize in the list)
+      let itemsBySession: Record<number, WorkoutItemRow[]> = {};
+      if (sess.length) {
+        const sessionIds = sess.map(s => s.id);
+        const { data: iData, error: iErr } = await supabase
+          .from("workout_items")
+          .select("id,user_id,session_id,kind,title,metrics")
+          .in("session_id", sessionIds)
+          .order("id", { ascending: true });
+        if (iErr) throw iErr;
+
+        const idToDate: Record<number, string> = {};
+        sess.forEach(s => { idToDate[s.id] = s.session_date; });
+
+        ((iData as any[]) || []).forEach(i => {
+          const row: WorkoutItemRow = {
+            id: i.id, user_id: i.user_id, session_id: i.session_id,
+            kind: i.kind, title: i.title, metrics: i.metrics || {}, session_date: idToDate[i.session_id] || ""
+          };
+          (itemsBySession[row.session_id] ||= []).push(row);
+        });
       }
-      const wItems: WorkoutItemRow[] = ((iData as any[]) || []).map(i => ({
-        id: i.id,
-        user_id: i.user_id,
-        session_id: i.session_id,
-        kind: i.kind,
-        title: i.title,
-        metrics: i.metrics || {},
-        session_date: idToDate[i.session_id] || ""
-      }));
+      setSessionItems(itemsBySession);
 
       // 3) gratitudes
       const { data: gdata, error: gerror } = await supabase
         .from("gratitude_entries")
         .select("id,user_id,entry_date,item_index,content")
         .eq("user_id", userId)
+        .gte("entry_date", toISO(since))
         .order("entry_date", { ascending: false })
         .order("item_index", { ascending: true });
       if (gerror) throw gerror;
 
       setDoneTasks((tdata as TaskRow[]) || []);
-      setWorkoutItems(wItems);
       setGrats((gdata as GratRow[]) || []);
     } catch (e: any) {
       setErr(e.message || String(e));
-      setDoneTasks([]); setWorkoutItems([]); setGrats([]);
+      setDoneTasks([]); setSessions([]); setSessionItems({}); setGrats([]);
     } finally {
       setLoading(false);
     }
   }
 
   /* Buckets & counts */
-  const bigGoalTasks = useMemo(() => doneTasks.filter(isBigGoal), [doneTasks]);
-  const exerciseTasks = useMemo(() => doneTasks.filter(isExerciseTask), [doneTasks]);
   const generalTasks = useMemo(
-    () => doneTasks.filter(t => !isBigGoal(t) && !isExerciseTask(t)),
+    () => doneTasks.filter(t => !isBigGoal(t) && !isExerciseishTask(t)),
     [doneTasks]
   );
+  const bigGoalTasks = useMemo(() => doneTasks.filter(isBigGoal), [doneTasks]);
 
   const counts = {
     general: generalTasks.length,
     big: bigGoalTasks.length,
-    exercise: exerciseTasks.length + workoutItems.length, // include diary items
+    exercise: sessions.length,         // *** sessions only ***
     gratitude: grats.length,
-    all: generalTasks.length + bigGoalTasks.length + exerciseTasks.length + workoutItems.length + grats.length,
+    all: generalTasks.length + bigGoalTasks.length + sessions.length + grats.length,
   };
 
   /* Labels & details */
-  function labelWorkout(i: WorkoutItemRow) {
+  function labelSession(session: WorkoutSession) {
+    const items = sessionItems[session.id] || [];
+    const weights = items.filter(i => i.kind === "weights").length;
+    const cardioLabels = items.filter(i => i.kind !== "weights").map(i => labelWorkoutItem(i));
+    const parts = [];
+    if (weights) parts.push(`Weights: ${weights}`);
+    if (cardioLabels.length) parts.push(`Cardio: ${cardioLabels.join(" · ")}`);
+    return parts.join(" · ") || "Session";
+  }
+
+  function labelWorkoutItem(i: WorkoutItemRow) {
     const d = i.metrics?.["distance_km"] as number | undefined;
     const sec = i.metrics?.["duration_sec"] as number | undefined;
-    const parts: string[] = [];
-    parts.push(i.title || i.kind);
-    if (d) parts.push(`${d} km`);
-    if (sec) parts.push(secondsToMMSS(sec));
-    if (d && sec) parts.push(paceStr(d, sec));
-    return parts.join(" • ");
+    const bits: string[] = [];
+    bits.push(i.title || i.kind);
+    if (d) bits.push(`${d} km`);
+    if (sec) bits.push(secondsToMMSS(sec));
+    if (d && sec) bits.push(paceStr(d, sec));
+    return bits.join(" • ");
   }
 
   function listFor(k: BucketKey): Detail[] {
@@ -209,19 +240,12 @@ export default function WinsScreen() {
       }));
     }
     if (k === "exercise") {
-      const a = exerciseTasks.map(t => ({
-        id: `task-${t.id}`,
-        label: t.title,
-        date: dateOnlyLocal(t.completed_at) || "",
-        kind: "Task"
+      return sessions.map(s => ({
+        id: `sess-${s.id}`,
+        label: labelSession(s),
+        date: s.session_date,
+        kind: "Session"
       }));
-      const b = workoutItems.map(i => ({
-        id: `workout-${i.id}`,
-        label: labelWorkout(i),
-        date: i.session_date || "",
-        kind: "Diary"
-      }));
-      return [...a, ...b].sort((x, y) => y.date.localeCompare(x.date));
     }
     if (k === "gratitude") {
       return grats.map(g => ({
@@ -237,32 +261,29 @@ export default function WinsScreen() {
     const b = bigGoalTasks.map(t => ({
       id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "Big goal"
     }));
-    const c1 = exerciseTasks.map(t => ({
-      id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "Exercise"
-    }));
-    const c2 = workoutItems.map(i => ({
-      id: `workout-${i.id}`, label: labelWorkout(i), date: i.session_date || "", kind: "Exercise"
+    const c = sessions.map(s => ({
+      id: `sess-${s.id}`, label: labelSession(s), date: s.session_date, kind: "Exercise"
     }));
     const d = grats.map(g => ({
       id: `grat-${g.id}`, label: g.content || "(empty)", date: g.entry_date, kind: "Gratitude"
     }));
-    return [...a, ...b, ...c1, ...c2, ...d].sort((x, y) => y.date.localeCompare(x.date));
+    return [...a, ...b, ...c, ...d].sort((x, y) => y.date.localeCompare(x.date));
   }
 
-  const details = useMemo(() => listFor(active), [active, doneTasks, workoutItems, grats]);
+  const details = useMemo(() => listFor(active), [active, doneTasks, sessions, sessionItems, grats]);
 
   /* Render */
   return (
-    <div className="page-wins">
+    <div className="page-wins" style={{ maxWidth: "100%", overflowX: "hidden" }}>
       <div className="container" style={{ display: "grid", gap: 12 }}>
         {/* Header */}
         <div className="card">
           <h1>Your Wins</h1>
-          <div className="muted">“Exercise” includes items from the Exercise Diary.</div>
+          <div className="muted">Exercise counts whole <b>workout sessions</b>, not individual exercises.</div>
         </div>
 
         {/* KPI cards */}
-        <div className="wins-kpis">
+        <div className="wins-kpis" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10 }}>
           <KpiCard title="Everything"     count={counts.all}       active={active === "all"}       onClick={() => setActive("all")} />
           <KpiCard title="General tasks"  count={counts.general}   active={active === "general"}   onClick={() => setActive("general")} />
           <KpiCard title="Big goal tasks" count={counts.big}       active={active === "big"}       onClick={() => setActive("big")} />
@@ -276,7 +297,7 @@ export default function WinsScreen() {
             {active === "all" ? "All wins" :
              active === "general" ? "General tasks" :
              active === "big" ? "Big goal tasks" :
-             active === "exercise" ? "Exercise" :
+             active === "exercise" ? "Exercise sessions" :
              "Gratitudes"}
           </h2>
 
@@ -284,7 +305,7 @@ export default function WinsScreen() {
             <div className="muted">Nothing here yet.</div>
           ) : (
             <ul className="list">
-              {details.slice(0, 80).map(item => (
+              {details.slice(0, 120).map(item => (
                 <li key={item.id} className="item" style={{ alignItems: "center" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -294,8 +315,8 @@ export default function WinsScreen() {
                   </div>
                 </li>
               ))}
-              {details.length > 80 && (
-                <li className="muted">…and {details.length - 80} more</li>
+              {details.length > 120 && (
+                <li className="muted">…and {details.length - 120} more</li>
               )}
             </ul>
           )}
@@ -328,6 +349,7 @@ function KpiCard({ title, count, onClick, active }:{
         borderColor: active ? "hsl(var(--pastel-hsl))" : "var(--border)",
         boxShadow: active ? "0 8px 22px rgba(0,0,0,.06)" : "var(--shadow)",
       }}
+      aria-pressed={active}
     >
       <div className="section-title">{title}</div>
       <div style={{ fontSize: 28, fontWeight: 700 }}>{count}</div>
