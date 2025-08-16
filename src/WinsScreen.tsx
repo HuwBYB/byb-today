@@ -41,6 +41,7 @@ type WorkoutItemRow = {
 };
 
 type BucketKey = "all" | "general" | "big" | "exercise" | "gratitude";
+type PeriodKey = "today" | "week" | "month" | "year" | "all";
 
 type Detail = {
   id: string;
@@ -49,17 +50,29 @@ type Detail = {
   kind?: string;
 };
 
-/* ---------- Helpers ---------- */
+/* ---------- Date helpers ---------- */
 function toISO(d: Date) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
+function fromISO(s: string) {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
+}
 function dateOnlyLocal(ts: string | null): string | null {
   if (!ts) return null;
   return toISO(new Date(ts));
 }
+function startOfWeekMonday(d: Date) {
+  const t = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diff = (t.getDay() + 6) % 7; // Mon=0
+  t.setDate(t.getDate() - diff);
+  return t;
+}
+
+/* pace/time helpers for labels */
 function secondsToMMSS(sec?: number | null) {
   if (!sec || sec <= 0) return "00:00";
   const m = Math.floor(sec / 60);
@@ -79,7 +92,7 @@ function isBigGoal(t: TaskRow) {
   const title = (t.title || "").toLowerCase();
   return src.startsWith("big_goal") || cat === "big_goal" || cat === "goal" || title.includes("big goal");
 }
-// treat “exercise-like” task titles as exercise so we can EXCLUDE them from counts
+// treat “exercise-like” tasks as exercise so we can EXCLUDE them from general/big
 function isExerciseishTask(t: TaskRow) {
   const cat = (t.category || "").toLowerCase();
   const src = (t.source || "").toLowerCase();
@@ -101,7 +114,9 @@ export default function WinsScreen() {
 
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
   const [active, setActive] = useState<BucketKey>("all");
+  const [period, setPeriod] = useState<PeriodKey>("today");
 
   /* Auth */
   useEffect(() => {
@@ -111,16 +126,13 @@ export default function WinsScreen() {
     });
   }, []);
 
-  /* Load data */
+  /* Load data (ALL TIME so the period filters are accurate) */
   useEffect(() => { if (userId) loadAll(); }, [userId]);
 
   async function loadAll() {
     if (!userId) return;
     setLoading(true); setErr(null);
     try {
-      const since = new Date();
-      since.setDate(since.getDate() - 365);
-
       // 1) done tasks (exclude legacy exercise_session tasks so no double count)
       const { data: tdata, error: terror } = await supabase
         .from("tasks")
@@ -128,7 +140,6 @@ export default function WinsScreen() {
         .eq("user_id", userId)
         .eq("status", "done")
         .neq("source", "exercise_session")
-        .gte("completed_at", since.toISOString())
         .order("completed_at", { ascending: false });
       if (terror) throw terror;
 
@@ -137,7 +148,6 @@ export default function WinsScreen() {
         .from("workout_sessions")
         .select("id,user_id,session_date,notes")
         .eq("user_id", userId)
-        .gte("session_date", toISO(since))
         .order("session_date", { ascending: false });
       if (sErr) throw sErr;
       const sess = (sData as WorkoutSession[]) || [];
@@ -172,7 +182,6 @@ export default function WinsScreen() {
         .from("gratitude_entries")
         .select("id,user_id,entry_date,item_index,content")
         .eq("user_id", userId)
-        .gte("entry_date", toISO(since))
         .order("entry_date", { ascending: false })
         .order("item_index", { ascending: true });
       if (gerror) throw gerror;
@@ -187,32 +196,95 @@ export default function WinsScreen() {
     }
   }
 
-  /* Buckets & counts */
-  const generalTasks = useMemo(
-    () => doneTasks.filter(t => !isBigGoal(t) && !isExerciseishTask(t)),
-    [doneTasks]
+  /* ---------- Period logic ---------- */
+  const PERIODS: { key: PeriodKey; label: string }[] = [
+    { key: "today", label: "Today" },
+    { key: "week",  label: "This week" },
+    { key: "month", label: "This month" },
+    { key: "year",  label: "This year" },
+    { key: "all",   label: "All time" },
+  ];
+
+  function withinPeriod(dateISO: string | null | undefined, p: PeriodKey): boolean {
+    if (!dateISO) return false;
+    if (p === "all") return true;
+
+    const now = new Date();
+    const d = fromISO(dateISO);
+
+    if (p === "today") {
+      return toISO(d) === toISO(now);
+    }
+    if (p === "week") {
+      const start = startOfWeekMonday(now);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      return d >= new Date(start.getFullYear(), start.getMonth(), start.getDate()) &&
+             d <= new Date(end.getFullYear(), end.getMonth(), end.getDate());
+    }
+    if (p === "month") {
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    }
+    if (p === "year") {
+      return d.getFullYear() === now.getFullYear();
+    }
+    return true;
+  }
+
+  /* ---------- Buckets filtered by period ---------- */
+  const tasksForPeriod = useMemo(
+    () => doneTasks.filter(t => withinPeriod(dateOnlyLocal(t.completed_at), period)),
+    [doneTasks, period]
   );
-  const bigGoalTasks = useMemo(() => doneTasks.filter(isBigGoal), [doneTasks]);
+  const generalTasks = useMemo(
+    () => tasksForPeriod.filter(t => !isBigGoal(t) && !isExerciseishTask(t)),
+    [tasksForPeriod]
+  );
+  const bigGoalTasks = useMemo(
+    () => tasksForPeriod.filter(isBigGoal),
+    [tasksForPeriod]
+  );
+  const sessionsForPeriod = useMemo(
+    () => sessions.filter(s => withinPeriod(s.session_date, period)),
+    [sessions, period]
+  );
+  const gratsForPeriod = useMemo(
+    () => grats.filter(g => withinPeriod(g.entry_date, period)),
+    [grats, period]
+  );
 
   const counts = {
     general: generalTasks.length,
     big: bigGoalTasks.length,
-    exercise: sessions.length,         // *** sessions only ***
-    gratitude: grats.length,
-    all: generalTasks.length + bigGoalTasks.length + sessions.length + grats.length,
+    exercise: sessionsForPeriod.length, // sessions only
+    gratitude: gratsForPeriod.length,
+    all: generalTasks.length + bigGoalTasks.length + sessionsForPeriod.length + gratsForPeriod.length,
   };
 
-  /* Labels & details */
+  // “At a glance” totals for Everything across all periods
+  const glance = useMemo(() => {
+    const calc = (p: PeriodKey) => {
+      const t = doneTasks.filter(x => withinPeriod(dateOnlyLocal(x.completed_at), p) && !isBigGoal(x) && !isExerciseishTask(x)).length;
+      const b = doneTasks.filter(x => withinPeriod(dateOnlyLocal(x.completed_at), p) && isBigGoal(x)).length;
+      const e = sessions.filter(s => withinPeriod(s.session_date, p)).length;
+      const g = grats.filter(s => withinPeriod(s.entry_date, p)).length;
+      return t + b + e + g;
+    };
+    const out: Record<PeriodKey, number> = { today: 0, week: 0, month: 0, year: 0, all: 0 };
+    (Object.keys(out) as PeriodKey[]).forEach(k => { out[k] = calc(k); });
+    return out;
+  }, [doneTasks, sessions, grats]);
+
+  /* ---------- Render helpers ---------- */
   function labelSession(session: WorkoutSession) {
     const items = sessionItems[session.id] || [];
     const weights = items.filter(i => i.kind === "weights").length;
     const cardioLabels = items.filter(i => i.kind !== "weights").map(i => labelWorkoutItem(i));
-    const parts = [];
+    const parts: string[] = [];
     if (weights) parts.push(`Weights: ${weights}`);
     if (cardioLabels.length) parts.push(`Cardio: ${cardioLabels.join(" · ")}`);
     return parts.join(" · ") || "Session";
   }
-
   function labelWorkoutItem(i: WorkoutItemRow) {
     const d = i.metrics?.["distance_km"] as number | undefined;
     const sec = i.metrics?.["duration_sec"] as number | undefined;
@@ -227,62 +299,70 @@ export default function WinsScreen() {
   function listFor(k: BucketKey): Detail[] {
     if (k === "general") {
       return generalTasks.map(t => ({
-        id: `task-${t.id}`,
-        label: t.title,
-        date: dateOnlyLocal(t.completed_at) || ""
+        id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || ""
       }));
     }
     if (k === "big") {
       return bigGoalTasks.map(t => ({
-        id: `task-${t.id}`,
-        label: t.title,
-        date: dateOnlyLocal(t.completed_at) || ""
+        id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || ""
       }));
     }
     if (k === "exercise") {
-      return sessions.map(s => ({
-        id: `sess-${s.id}`,
-        label: labelSession(s),
-        date: s.session_date,
-        kind: "Session"
+      return sessionsForPeriod.map(s => ({
+        id: `sess-${s.id}`, label: labelSession(s), date: s.session_date, kind: "Session"
       }));
     }
     if (k === "gratitude") {
-      return grats.map(g => ({
-        id: `grat-${g.id}`,
-        label: g.content || "(empty)",
-        date: g.entry_date
+      return gratsForPeriod.map(g => ({
+        id: `grat-${g.id}`, label: g.content || "(empty)", date: g.entry_date
       }));
     }
     // all
-    const a = generalTasks.map(t => ({
-      id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "General"
-    }));
-    const b = bigGoalTasks.map(t => ({
-      id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "Big goal"
-    }));
-    const c = sessions.map(s => ({
-      id: `sess-${s.id}`, label: labelSession(s), date: s.session_date, kind: "Exercise"
-    }));
-    const d = grats.map(g => ({
-      id: `grat-${g.id}`, label: g.content || "(empty)", date: g.entry_date, kind: "Gratitude"
-    }));
+    const a = generalTasks.map(t => ({ id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "General" }));
+    const b = bigGoalTasks.map(t => ({ id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "Big goal" }));
+    const c = sessionsForPeriod.map(s => ({ id: `sess-${s.id}`, label: labelSession(s), date: s.session_date, kind: "Exercise" }));
+    const d = gratsForPeriod.map(g => ({ id: `grat-${g.id}`, label: g.content || "(empty)", date: g.entry_date, kind: "Gratitude" }));
     return [...a, ...b, ...c, ...d].sort((x, y) => y.date.localeCompare(x.date));
   }
 
-  const details = useMemo(() => listFor(active), [active, doneTasks, sessions, sessionItems, grats]);
+  const details = useMemo(() => listFor(active), [active, generalTasks, bigGoalTasks, sessionsForPeriod, gratsForPeriod]);
 
-  /* Render */
+  /* ---------- UI ---------- */
   return (
     <div className="page-wins" style={{ maxWidth: "100%", overflowX: "hidden" }}>
       <div className="container" style={{ display: "grid", gap: 12 }}>
         {/* Header */}
-        <div className="card">
+        <div className="card" style={{ display:"grid", gap:8 }}>
           <h1>Your Wins</h1>
           <div className="muted">Exercise counts whole <b>workout sessions</b>, not individual exercises.</div>
+
+          {/* Period tabs */}
+          <div className="tabs" style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+            {PERIODS.map(p => (
+              <button
+                key={p.key}
+                onClick={()=>setPeriod(p.key)}
+                className="tab"
+                aria-current={period===p.key ? "page" : undefined}
+                title={p.label}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {/* At a glance: Everything totals by period */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))", gap:8 }}>
+            {PERIODS.map(p => (
+              <div key={p.key} className="card" style={{ padding:10 }}>
+                <div className="section-title">{p.label}</div>
+                <div style={{ fontSize:22, fontWeight:700 }}>{glance[p.key]}</div>
+              </div>
+            ))}
+          </div>
         </div>
 
-        {/* KPI cards */}
+        {/* KPI cards (for CURRENT period) */}
         <div className="wins-kpis" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10 }}>
           <KpiCard title="Everything"     count={counts.all}       active={active === "all"}       onClick={() => setActive("all")} />
           <KpiCard title="General tasks"  count={counts.general}   active={active === "general"}   onClick={() => setActive("general")} />
@@ -291,14 +371,15 @@ export default function WinsScreen() {
           <KpiCard title="Gratitudes"     count={counts.gratitude} active={active === "gratitude"} onClick={() => setActive("gratitude")} />
         </div>
 
-        {/* Details */}
+        {/* Details (filtered by bucket + period) */}
         <div className="card" style={{ display: "grid", gap: 10 }}>
           <h2 style={{ margin: 0 }}>
             {active === "all" ? "All wins" :
              active === "general" ? "General tasks" :
              active === "big" ? "Big goal tasks" :
              active === "exercise" ? "Exercise sessions" :
-             "Gratitudes"}
+             "Gratitudes"}{" "}
+            <span className="muted">· {PERIODS.find(p=>p.key===period)?.label}</span>
           </h2>
 
           {details.length === 0 ? (
