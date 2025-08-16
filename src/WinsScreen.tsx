@@ -6,12 +6,12 @@ type TaskRow = {
   id: number;
   user_id: string;
   title: string;
-  status: string;              // "done", "pending", ...
-  completed_at: string | null; // ISO timestamp
+  status: string;
+  completed_at: string | null;
   due_date: string | null;
   priority: number | null;
-  source: string | null;       // e.g., 'big_goal_daily', 'exercise_session'
-  category: string | null;     // e.g., 'today','big_goal','exercise'
+  source: string | null;
+  category: string | null;
   category_color: string | null;
 };
 
@@ -97,12 +97,12 @@ function isBigGoal(t: TaskRow) {
   const title = (t.title || "").toLowerCase();
   return src.startsWith("big_goal") || cat === "big_goal" || cat === "goal" || title.includes("big goal");
 }
-/** treat “exercise-like” task titles as exercise so we can EXCLUDE them from general/big */
+/** treat “exercise-like” task titles as exercise (kept separate from General) */
 function isExerciseishTask(t: TaskRow) {
   const cat = (t.category || "").toLowerCase();
   const src = (t.source || "").toLowerCase();
   const title = (t.title || "").toLowerCase();
-  if (src.includes("exercise_session")) return true;
+  if (src.includes("exercise_session")) return true; // auto-created alongside a session
   if (cat.includes("exercise") || cat.includes("workout") || cat.includes("fitness")) return true;
   return /\b(run|walk|jog|gym|workout|exercise|yoga|swim|cycle|cycling|ride|lift|weights|pilates|stretch)\b/.test(title);
 }
@@ -169,7 +169,7 @@ export default function WinsScreen() {
     if (!userId) return;
     setLoading(true); setErr(null);
     try {
-      // 1) done tasks (exclude legacy exercise_session tasks so no double count)
+      // 1) done tasks — keep everything EXCEPT auto 'exercise_session' to avoid double count
       const { data: tdata, error: terror } = await supabase
         .from("tasks")
         .select("id,user_id,title,status,completed_at,due_date,priority,source,category,category_color")
@@ -238,15 +238,16 @@ export default function WinsScreen() {
       const d = dateOnlyLocal(t.completed_at);
       return !!d && inPeriodISO(d, period);
     });
-
     const sessionsInPeriod = sessions.filter(s => inPeriodISO(s.session_date, period));
-
     const gratsInPeriod = grats.filter(g => inPeriodISO(g.entry_date, period));
-
     return { tasksInPeriod, sessionsInPeriod, gratsInPeriod };
   }, [doneTasks, sessions, grats, period]);
 
   /* Buckets & counts for current period */
+  const exerciseTasks = useMemo(
+    () => filtered.tasksInPeriod.filter(isExerciseishTask),
+    [filtered.tasksInPeriod]
+  );
   const generalTasks = useMemo(
     () => filtered.tasksInPeriod.filter(t => !isBigGoal(t) && !isExerciseishTask(t)),
     [filtered.tasksInPeriod]
@@ -259,9 +260,13 @@ export default function WinsScreen() {
   const counts = {
     general: generalTasks.length,
     big: bigGoalTasks.length,
-    exercise: filtered.sessionsInPeriod.length,  // sessions only
+    exercise: filtered.sessionsInPeriod.length + exerciseTasks.length, // sessions + exercise-like tasks
     gratitude: filtered.gratsInPeriod.length,
-    all: generalTasks.length + bigGoalTasks.length + filtered.sessionsInPeriod.length + filtered.gratsInPeriod.length,
+    all:
+      generalTasks.length +
+      bigGoalTasks.length +
+      (filtered.sessionsInPeriod.length + exerciseTasks.length) +
+      filtered.gratsInPeriod.length,
   };
 
   /* “At a glance” values (Everything totals for each period) */
@@ -273,9 +278,10 @@ export default function WinsScreen() {
       });
       const generalIn = tasksIn.filter(tt => !isBigGoal(tt) && !isExerciseishTask(tt)).length;
       const bigIn = tasksIn.filter(isBigGoal).length;
+      const exTaskIn = tasksIn.filter(isExerciseishTask).length;
       const sessIn = sessions.filter(s => inPeriodISO(s.session_date, p)).length;
       const gratIn = grats.filter(g => inPeriodISO(g.entry_date, p)).length;
-      return generalIn + bigIn + sessIn + gratIn;
+      return generalIn + bigIn + exTaskIn + sessIn + gratIn;
     };
     return {
       today: calc("today"),
@@ -323,12 +329,19 @@ export default function WinsScreen() {
       }));
     }
     if (k === "exercise") {
-      return filtered.sessionsInPeriod.map(s => ({
+      const sess = filtered.sessionsInPeriod.map(s => ({
         id: `sess-${s.id}`,
         label: labelSession(s),
         date: s.session_date,
         kind: "Session"
       }));
+      const exTasks = exerciseTasks.map(t => ({
+        id: `task-${t.id}`,
+        label: t.title,
+        date: dateOnlyLocal(t.completed_at) || "",
+        kind: "Task",
+      }));
+      return [...sess, ...exTasks].sort((x, y) => y.date.localeCompare(x.date));
     }
     if (k === "gratitude") {
       return filtered.gratsInPeriod.map(g => ({
@@ -347,13 +360,16 @@ export default function WinsScreen() {
     const c = filtered.sessionsInPeriod.map(s => ({
       id: `sess-${s.id}`, label: labelSession(s), date: s.session_date, kind: "Exercise"
     }));
+    const c2 = exerciseTasks.map(t => ({
+      id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "Exercise"
+    }));
     const d = filtered.gratsInPeriod.map(g => ({
       id: `grat-${g.id}`, label: g.content || "(empty)", date: g.entry_date, kind: "Gratitude"
     }));
-    return [...a, ...b, ...c, ...d].sort((x, y) => y.date.localeCompare(x.date));
+    return [...a, ...b, ...c, ...c2, ...d].sort((x, y) => y.date.localeCompare(x.date));
   }
 
-  const details = useMemo(() => listFor(active), [active, filtered, generalTasks, bigGoalTasks, sessionItems]);
+  const details = useMemo(() => listFor(active), [active, filtered, generalTasks, bigGoalTasks, exerciseTasks, sessionItems]);
 
   /* Render */
   return (
@@ -362,7 +378,7 @@ export default function WinsScreen() {
         {/* Header */}
         <div className="card">
           <h1>Your Wins</h1>
-          <div className="muted">Exercise counts whole <b>workout sessions</b>, not individual exercises.</div>
+          <div className="muted">Exercise = workout sessions <i>plus</i> exercise-like tasks (e.g., “Go to the gym”). Auto “exercise session” tasks are ignored to avoid double counts.</div>
         </div>
 
         {/* At a glance (TOP) */}
@@ -412,7 +428,7 @@ export default function WinsScreen() {
             {(active === "all" ? "All wins" :
               active === "general" ? "General tasks" :
               active === "big" ? "Big goal tasks" :
-              active === "exercise" ? "Exercise sessions" :
+              active === "exercise" ? "Exercise" :
               "Gratitudes")
             } · {PERIODS.find(p => p.key === period)?.label || ""}
           </h2>
