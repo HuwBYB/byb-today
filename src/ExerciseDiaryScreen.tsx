@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* ---------- Types ---------- */
@@ -17,7 +17,7 @@ type Item = {
   kind: "weights" | "run" | "jog" | "walk" | "yoga" | "class" | "other" | string;
   title: string;
   order_index: number;
-  metrics: any; // {distance_km?:number, duration_sec?:number, ...}
+  metrics: any;
 };
 
 type WSet = {
@@ -31,32 +31,31 @@ type WSet = {
 };
 
 type PrevEntry = {
-  date: string; // YYYY-MM-DD
+  date: string;
   sets: Array<{ weight_kg: number | null; reps: number | null; duration_sec: number | null }>;
 };
 
 /* ---------- Helpers ---------- */
 function toISO(d: Date) {
-  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,"0"), dd=String(d.getDate()).padStart(2,"0");
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
-function fromISO(s: string) { const [y,m,d]=s.split("-").map(Number); return new Date(y,(m??1)-1,d??1); }
+function fromISO(s: string) { const [y, m, d] = s.split("-").map(Number); return new Date(y, (m ?? 1) - 1, d ?? 1); }
 function secondsToMMSS(sec?: number | null) {
   if (!sec || sec <= 0) return "00:00";
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 function mmssToSeconds(v: string) {
-  const [m,s] = v.split(":").map(n => Number(n||0));
-  return (isFinite(m)?m:0)*60 + (isFinite(s)?s:0);
+  const [m, s] = v.split(":").map(n => Number(n || 0));
+  return (isFinite(m) ? m : 0) * 60 + (isFinite(s) ? s : 0);
 }
 function paceStr(distanceKm?: number, durSec?: number) {
   if (!distanceKm || !durSec || distanceKm <= 0) return "";
   const secPerKm = Math.round(durSec / distanceKm);
   return `${secondsToMMSS(secPerKm)}/km`;
 }
-const FIN_KEY = (sid:number, dateISO:string) => `byb_session_finished_${sid}_${dateISO}`;
+const FIN_KEY = (sid: number, dateISO: string) => `byb_session_finished_${sid}_${dateISO}`;
 
 /* ---------- Main ---------- */
 export default function ExerciseDiaryScreen() {
@@ -71,20 +70,27 @@ export default function ExerciseDiaryScreen() {
 
   const [recent, setRecent] = useState<Session[]>([]);
 
-  // per-exercise history (quick preview)
+  // history preview
   const [openHistoryFor, setOpenHistoryFor] = useState<Record<number, boolean>>({});
   const [loadingPrevFor, setLoadingPrevFor] = useState<Record<number, boolean>>({});
   const [prevByItem, setPrevByItem] = useState<Record<number, PrevEntry[]>>({});
 
-  // modal (full history for a title)
+  // modal
   const [modalOpen, setModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalForItemId, setModalForItemId] = useState<number | null>(null);
   const [modalEntries, setModalEntries] = useState<PrevEntry[]>([]);
   const [modalLoading, setModalLoading] = useState(false);
 
-  // collapsed session view after completion (persisted per session/date)
+  // collapsed
   const [finished, setFinished] = useState(false);
+
+  // backup
+  const [offerBackup, setOfferBackup] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
+
+  // sticky quick-add (weights)
+  const [stickyTitle, setStickyTitle] = useState("");
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
@@ -93,9 +99,8 @@ export default function ExerciseDiaryScreen() {
     });
   }, []);
 
-  useEffect(() => { if (userId) { loadSessionForDay(dateISO); loadRecent(); } }, [userId, dateISO]);
+  useEffect(() => { if (userId) { loadSessionForDay(dateISO); loadRecent(); checkOfferBackup(); } }, [userId, dateISO]);
 
-  // refresh finished (collapsed) state whenever the session/date changes
   useEffect(() => {
     if (session) {
       const val = localStorage.getItem(FIN_KEY(session.id, dateISO));
@@ -110,56 +115,56 @@ export default function ExerciseDiaryScreen() {
     if (!userId) return;
     setErr(null);
     const { data, error } = await supabase
-      .from("workout_sessions")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("session_date", iso)
-      .order("created_at", { ascending: true })
-      .limit(1);
+      .from("workout_sessions").select("*")
+      .eq("user_id", userId).eq("session_date", iso)
+      .order("created_at", { ascending: true }).limit(1);
     if (error) { setErr(error.message); setSession(null); setItems([]); setSetsByItem({}); return; }
     const s = (data as Session[])[0] || null;
     setSession(s || null);
-    if (s) await loadItems(s.id);
-    else { setItems([]); setSetsByItem({}); }
+    if (s) await loadItems(s.id); else { setItems([]); setSetsByItem({}); }
   }
 
   async function loadItems(sessionId: number) {
     const { data, error } = await supabase
-      .from("workout_items")
-      .select("*")
+      .from("workout_items").select("*")
       .eq("session_id", sessionId)
-      .order("order_index", { ascending: true })
-      .order("id", { ascending: true });
+      .order("order_index", { ascending: true }).order("id", { ascending: true });
     if (error) { setErr(error.message); setItems([]); setSetsByItem({}); return; }
     const list = (data as Item[]).map(r => ({ ...r, metrics: r.metrics || {} }));
     setItems(list);
     const ids = list.map(i => i.id);
     if (ids.length) {
       const { data: sets, error: se } = await supabase
-        .from("workout_sets")
-        .select("*")
-        .in("item_id", ids)
+        .from("workout_sets").select("*").in("item_id", ids)
         .order("set_number", { ascending: true });
       if (se) { setErr(se.message); setSetsByItem({}); return; }
       const grouped: Record<number, WSet[]> = {};
       for (const s of (sets as WSet[])) (grouped[s.item_id] ||= []).push(s);
       setSetsByItem(grouped);
-    } else {
-      setSetsByItem({});
-    }
+    } else setSetsByItem({});
   }
 
   async function loadRecent() {
     if (!userId) return;
     const since = new Date(); since.setDate(since.getDate() - 21);
     const { data, error } = await supabase
-      .from("workout_sessions")
-      .select("*")
-      .eq("user_id", userId)
-      .gte("session_date", toISO(since))
+      .from("workout_sessions").select("*")
+      .eq("user_id", userId).gte("session_date", toISO(since))
       .order("session_date", { ascending: false });
     if (error) { setErr(error.message); setRecent([]); return; }
     setRecent(data as Session[]);
+  }
+
+  async function checkOfferBackup() {
+    if (!userId) return;
+    const { data, error } = await supabase
+      .from("workout_sessions")
+      .select("session_date").eq("user_id", userId)
+      .order("session_date", { ascending: true }).limit(1);
+    if (error || !data || !data.length) { setOfferBackup(false); return; }
+    const first = new Date((data as any)[0].session_date);
+    const days = (Date.now() - first.getTime()) / 86400000;
+    setOfferBackup(days >= 365);
   }
 
   /* ----- Session actions ----- */
@@ -168,23 +173,18 @@ export default function ExerciseDiaryScreen() {
     setBusy(true); setErr(null);
     try {
       const { data, error } = await supabase
-        .from("workout_sessions")
-        .insert({ user_id: userId, session_date: dateISO })
-        .select()
-        .single();
+        .from("workout_sessions").insert({ user_id: userId, session_date: dateISO })
+        .select().single();
       if (error) throw error;
       setSession(data as Session);
       localStorage.setItem(FIN_KEY((data as Session).id, dateISO), "0");
       await loadItems((data as Session).id);
       await loadRecent();
-    } catch (e:any) {
-      setErr(e.message || String(e));
-    } finally {
-      setBusy(false);
-    }
+    } catch (e: any) { setErr(e.message || String(e)); }
+    finally { setBusy(false); }
   }
 
-  function markComplete() {
+  function markLocalFinished() {
     if (!session) return;
     localStorage.setItem(FIN_KEY(session.id, dateISO), "1");
     setFinished(true);
@@ -195,25 +195,55 @@ export default function ExerciseDiaryScreen() {
     setFinished(false);
   }
 
+  // Ensure exactly ONE "success" per weights session (logs to tasks)
+  async function ensureWinForSession() {
+    if (!userId || !session) return;
+    try {
+      const { data: existing, error: qerr } = await supabase
+        .from("tasks").select("id").eq("user_id", userId)
+        .eq("source", "exercise_session")
+        .eq("due_date", dateISO)
+        .eq("status", "done")
+        .limit(1);
+      if (qerr) throw qerr;
+      if (!existing || existing.length === 0) {
+        const { error: ierr } = await supabase.from("tasks").insert({
+          user_id: userId,
+          title: "Weights session",
+          status: "done",
+          completed_at: new Date().toISOString(),
+          due_date: dateISO,
+          priority: 0,
+          source: "exercise_session",
+          category: null,
+          category_color: null,
+        } as any);
+        if (ierr) throw ierr;
+      }
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    }
+  }
+
+  async function completeSession() {
+    // UI collapse + single success log
+    markLocalFinished();
+    await ensureWinForSession();
+  }
+
   async function saveSessionNotes(notes: string) {
     if (!session) return;
-    const { error } = await supabase
-      .from("workout_sessions")
-      .update({ notes })
-      .eq("id", session.id);
-    if (error) setErr(error.message);
-    else setSession({ ...session, notes });
+    const { error } = await supabase.from("workout_sessions").update({ notes }).eq("id", session.id);
+    if (error) setErr(error.message); else setSession({ ...session, notes });
   }
 
   /* ----- Item actions ----- */
-  async function addWeightsExercise(title = "Lat Pulldown") {
+  async function addWeightsExercise(title = "") {
     if (!session || !userId) return;
     const order_index = items.length ? Math.max(...items.map(i => i.order_index)) + 1 : 0;
-    const { error } = await supabase
-      .from("workout_items")
-      .insert({
-        session_id: session.id, user_id: userId, kind: "weights", title, order_index, metrics: {}
-      });
+    const { error } = await supabase.from("workout_items").insert({
+      session_id: session.id, user_id: userId, kind: "weights", title, order_index, metrics: {}
+    });
     if (error) { setErr(error.message); return; }
     await loadItems(session.id);
   }
@@ -224,18 +254,15 @@ export default function ExerciseDiaryScreen() {
     const duration_sec = mmssToSeconds(durMMSS || "00:00");
     const metrics: any = { duration_sec };
     if (distanceKm && distanceKm > 0) metrics.distance_km = distanceKm;
-    const { error } = await supabase
-      .from("workout_items").insert({
-        session_id: session.id, user_id: userId, kind, title: title || kind,
-        order_index, metrics
-      });
+    const { error } = await supabase.from("workout_items").insert({
+      session_id: session.id, user_id: userId, kind, title: title || kind, order_index, metrics
+    });
     if (error) { setErr(error.message); return; }
     await loadItems(session.id);
   }
 
   async function renameItem(item: Item, newTitle: string) {
-    const { error } = await supabase
-      .from("workout_items").update({ title: newTitle }).eq("id", item.id);
+    const { error } = await supabase.from("workout_items").update({ title: newTitle }).eq("id", item.id);
     if (error) setErr(error.message);
     else setItems(items.map(i => i.id === item.id ? { ...i, title: newTitle } : i));
   }
@@ -246,30 +273,25 @@ export default function ExerciseDiaryScreen() {
     if (session) await loadItems(session.id);
   }
 
-  /* ----- Set actions (weights) ----- */
+  /* ----- Sets ----- */
   async function addSet(itemId: number) {
     if (!userId) return;
     const current = setsByItem[itemId] || [];
     const nextNum = current.length ? Math.max(...current.map(s => s.set_number)) + 1 : 1;
-    const { data, error } = await supabase
-      .from("workout_sets").insert({
-        item_id: itemId, user_id: userId, set_number: nextNum, weight_kg: null, reps: null
-      }).select().single();
+    const { data, error } = await supabase.from("workout_sets").insert({
+      item_id: itemId, user_id: userId, set_number: nextNum, weight_kg: null, reps: null
+    }).select().single();
     if (error) { setErr(error.message); return; }
     setSetsByItem({ ...setsByItem, [itemId]: [...current, data as WSet] });
   }
 
-  async function addSetsBulk(itemId: number, payloads: Array<{weight_kg:number|null; reps:number|null; duration_sec:number|null}>) {
+  async function addSetsBulk(itemId: number, payloads: Array<{ weight_kg: number | null; reps: number | null; duration_sec: number | null }>) {
     if (!userId || payloads.length === 0) return;
     const current = setsByItem[itemId] || [];
     const baseNum = current.length ? Math.max(...current.map(s => s.set_number)) : 0;
     const rows = payloads.map((p, idx) => ({
-      item_id: itemId,
-      user_id: userId,
-      set_number: baseNum + idx + 1,
-      weight_kg: p.weight_kg ?? null,
-      reps: p.reps ?? null,
-      duration_sec: p.duration_sec ?? null,
+      item_id: itemId, user_id: userId, set_number: baseNum + idx + 1,
+      weight_kg: p.weight_kg ?? null, reps: p.reps ?? null, duration_sec: p.duration_sec ?? null,
     }));
     const { data, error } = await supabase.from("workout_sets").insert(rows).select();
     if (error) { setErr(error.message); return; }
@@ -277,8 +299,7 @@ export default function ExerciseDiaryScreen() {
   }
 
   async function updateSet(set: WSet, patch: Partial<WSet>) {
-    const { error } = await supabase
-      .from("workout_sets").update(patch).eq("id", set.id);
+    const { error } = await supabase.from("workout_sets").update(patch).eq("id", set.id);
     if (error) { setErr(error.message); return; }
     const list = (setsByItem[set.item_id] || []).map(s => s.id === set.id ? { ...s, ...patch } as WSet : s);
     setSetsByItem({ ...setsByItem, [set.item_id]: list });
@@ -291,28 +312,27 @@ export default function ExerciseDiaryScreen() {
     setSetsByItem({ ...setsByItem, [set.item_id]: list });
   }
 
-  /* ----- Quick preview history (per weights exercise) ----- */
-  async function loadPrevForItem(it: Item, limit = 3) { // <<< last 3 by default
+  /* ----- History (per exercise title) ----- */
+  async function loadPrevForItem(it: Item, limit = 3) {
     if (!userId) return;
     setLoadingPrevFor(prev => ({ ...prev, [it.id]: true }));
     try {
-      // previous items with the same title (case-insensitive), weights kind, excluding this item
       const { data: itemsRows, error: iErr } = await supabase
         .from("workout_items")
-        .select("id, session_id, title, kind")
+        .select("id, session_id")
         .eq("user_id", userId)
         .eq("kind", "weights")
-        .ilike("title", it.title) // case-insensitive exact match
+        .ilike("title", it.title)
         .neq("id", it.id)
         .order("id", { ascending: false })
         .limit(limit * 4);
       if (iErr) throw iErr;
 
-      const prevItems = (itemsRows as Array<{id:number;session_id:number;title:string;kind:string}>) || [];
+      const prevItems = (itemsRows as Array<{ id: number; session_id: number }>) || [];
       if (prevItems.length === 0) { setPrevByItem(prev => ({ ...prev, [it.id]: [] })); return; }
 
-      const itemIds = Array.from(new Set(prevItems.map(r => r.id)));
-      const sessionIds = Array.from(new Set(prevItems.map(r => r.session_id)));
+      const itemIds = [...new Set(prevItems.map(r => r.id))];
+      const sessionIds = [...new Set(prevItems.map(r => r.session_id))];
 
       const { data: setsRows, error: sErr } = await supabase
         .from("workout_sets")
@@ -323,34 +343,27 @@ export default function ExerciseDiaryScreen() {
 
       const { data: sessRows, error: dErr } = await supabase
         .from("workout_sessions")
-        .select("id, session_date")
-        .in("id", sessionIds);
+        .select("id, session_date").in("id", sessionIds);
       if (dErr) throw dErr;
 
       const idToDate: Record<number, string> = {};
-      (sessRows || []).forEach((s:any) => { idToDate[s.id] = s.session_date; });
-
-      const idToSets: Record<number, Array<{weight_kg:number|null; reps:number|null; duration_sec:number|null}>> = {};
+      (sessRows || []).forEach((s: any) => { idToDate[s.id] = s.session_date; });
+      const idToSets: Record<number, Array<{ weight_kg: number | null; reps: number | null; duration_sec: number | null }>> = {};
       (setsRows as any[] || []).forEach(s => {
         (idToSets[s.item_id] ||= []).push({
-          weight_kg: s.weight_kg ?? null,
-          reps: s.reps ?? null,
-          duration_sec: s.duration_sec ?? null,
+          weight_kg: s.weight_kg ?? null, reps: s.reps ?? null, duration_sec: s.duration_sec ?? null,
         });
       });
 
       const entries: PrevEntry[] = prevItems
         .map(pi => ({ date: idToDate[pi.session_id] || "", sets: idToSets[pi.id] || [] }))
         .filter(e => !!e.date && e.sets.length > 0)
-        .sort((a,b) => b.date.localeCompare(a.date))
+        .sort((a, b) => b.date.localeCompare(a.date))
         .slice(0, limit);
 
       setPrevByItem(prev => ({ ...prev, [it.id]: entries }));
-    } catch (e:any) {
-      setErr(e.message || String(e));
-    } finally {
-      setLoadingPrevFor(prev => ({ ...prev, [it.id]: false }));
-    }
+    } catch (e: any) { setErr(e.message || String(e)); }
+    finally { setLoadingPrevFor(prev => ({ ...prev, [it.id]: false })); }
   }
 
   function toggleHistory(it: Item) {
@@ -364,95 +377,104 @@ export default function ExerciseDiaryScreen() {
   async function copyLastSetsTo(it: Item) {
     const hist = prevByItem[it.id];
     if (!hist || hist.length === 0) return;
-    const last = hist[0];
-    await addSetsBulk(it.id, last.sets);
+    await addSetsBulk(it.id, hist[0].sets);
   }
 
-  /* ----- Modal: full history for a title ----- */
+  /* ----- Modal (full history) ----- */
   async function openHistoryModal(it: Item, limit = 10) {
     if (!userId) return;
-    setModalOpen(true);
-    setModalTitle(it.title);
-    setModalForItemId(it.id);
-    setModalLoading(true);
+    setModalOpen(true); setModalTitle(it.title); setModalForItemId(it.id); setModalLoading(true);
     try {
       const { data: itemsRows, error: iErr } = await supabase
-        .from("workout_items")
-        .select("id, session_id")
-        .eq("user_id", userId)
-        .eq("kind", "weights")
-        .ilike("title", it.title)
-        .neq("id", it.id)
-        .order("id", { ascending: false })
-        .limit(limit * 4);
+        .from("workout_items").select("id, session_id")
+        .eq("user_id", userId).eq("kind", "weights").ilike("title", it.title)
+        .neq("id", it.id).order("id", { ascending: false }).limit(limit * 4);
       if (iErr) throw iErr;
 
-      const prevItems = (itemsRows as Array<{id:number;session_id:number}>) || [];
+      const prevItems = (itemsRows as Array<{ id: number; session_id: number }>) || [];
       if (prevItems.length === 0) { setModalEntries([]); return; }
 
-      const itemIds = Array.from(new Set(prevItems.map(r => r.id)));
-      const sessionIds = Array.from(new Set(prevItems.map(r => r.session_id)));
+      const itemIds = [...new Set(prevItems.map(r => r.id))];
+      const sessionIds = [...new Set(prevItems.map(r => r.session_id))];
 
       const { data: setsRows, error: sErr } = await supabase
-        .from("workout_sets")
-        .select("item_id, set_number, weight_kg, reps, duration_sec")
-        .in("item_id", itemIds)
-        .order("set_number", { ascending: true });
+        .from("workout_sets").select("item_id, set_number, weight_kg, reps, duration_sec")
+        .in("item_id", itemIds).order("set_number", { ascending: true });
       if (sErr) throw sErr;
 
       const { data: sessRows, error: dErr } = await supabase
-        .from("workout_sessions")
-        .select("id, session_date")
-        .in("id", sessionIds);
+        .from("workout_sessions").select("id, session_date").in("id", sessionIds);
       if (dErr) throw dErr;
 
       const idToDate: Record<number, string> = {};
-      (sessRows || []).forEach((s:any) => { idToDate[s.id] = s.session_date; });
-
-      const idToSets: Record<number, Array<{weight_kg:number|null; reps:number|null; duration_sec:number|null}>> = {};
+      (sessRows || []).forEach((s: any) => { idToDate[s.id] = s.session_date; });
+      const idToSets: Record<number, Array<{ weight_kg: number | null; reps: number | null; duration_sec: number | null }>> = {};
       (setsRows as any[] || []).forEach(s => {
         (idToSets[s.item_id] ||= []).push({
-          weight_kg: s.weight_kg ?? null,
-          reps: s.reps ?? null,
-          duration_sec: s.duration_sec ?? null,
+          weight_kg: s.weight_kg ?? null, reps: s.reps ?? null, duration_sec: s.duration_sec ?? null,
         });
       });
 
       const entries: PrevEntry[] = prevItems
         .map(pi => ({ date: idToDate[pi.session_id] || "", sets: idToSets[pi.id] || [] }))
         .filter(e => !!e.date && e.sets.length > 0)
-        .sort((a,b) => b.date.localeCompare(a.date))
+        .sort((a, b) => b.date.localeCompare(a.date))
         .slice(0, limit);
 
       setModalEntries(entries);
-    } catch (e:any) {
-      setErr(e.message || String(e));
-    } finally {
-      setModalLoading(false);
-    }
+    } catch (e: any) { setErr(e.message || String(e)); }
+    finally { setModalLoading(false); }
   }
+  function closeModal() { setModalOpen(false); setModalTitle(""); setModalEntries([]); setModalForItemId(null); }
+  async function copySetsFromModal(entry: PrevEntry) { if (modalForItemId) await addSetsBulk(modalForItemId, entry.sets); }
 
-  function closeModal() {
-    setModalOpen(false);
-    setModalTitle("");
-    setModalEntries([]);
-    setModalForItemId(null);
-  }
+  /* ----- Backup/export ----- */
+  async function downloadBackup() {
+    if (!userId) return;
+    setBackingUp(true);
+    try {
+      const { data: sessions, error: se } = await supabase
+        .from("workout_sessions").select("*").eq("user_id", userId)
+        .order("session_date", { ascending: true });
+      if (se) throw se;
 
-  async function copySetsFromModal(entry: PrevEntry) {
-    if (!modalForItemId) return;
-    await addSetsBulk(modalForItemId, entry.sets);
+      const sessionIds = (sessions as Session[]).map(s => s.id);
+      const { data: itemsRows, error: ie } = await supabase
+        .from("workout_items").select("*").in("session_id", sessionIds);
+      if (ie) throw ie;
+
+      const itemIds = (itemsRows as Item[]).map(i => i.id);
+      const { data: setsRows, error: te } = await supabase
+        .from("workout_sets").select("*").in("item_id", itemIds);
+      if (te) throw te;
+
+      const payload = {
+        exported_at: new Date().toISOString(),
+        user_id: userId,
+        sessions,
+        items: itemsRows,
+        sets: setsRows,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `workout_backup_${toISO(new Date()).replace(/-/g, "")}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) { setErr(e.message || String(e)); }
+    finally { setBackingUp(false); }
   }
 
   /* ----- UI helpers ----- */
   function gotoToday() { setDateISO(toISO(new Date())); }
-  function prevDay() { const d = fromISO(dateISO); d.setDate(d.getDate()-1); setDateISO(toISO(d)); }
-  function nextDay() { const d = fromISO(dateISO); d.setDate(d.getDate()+1); setDateISO(toISO(d)); }
+  function prevDay() { const d = fromISO(dateISO); d.setDate(d.getDate() - 1); setDateISO(toISO(d)); }
+  function nextDay() { const d = fromISO(dateISO); d.setDate(d.getDate() + 1); setDateISO(toISO(d)); }
 
-  // compact summary when finished
+  // summary for collapsed view
   const summary = useMemo(() => {
     const weightsItems = items.filter(i => i.kind === "weights");
-    const cardioItems  = items.filter(i => i.kind !== "weights");
+    const cardioItems = items.filter(i => i.kind !== "weights");
     const totalSets = items.reduce((n, it) => n + ((setsByItem[it.id]?.length) || 0), 0);
     const cardioLabels = cardioItems.map(ci => ci.title || ci.kind);
     return { weightsCount: weightsItems.length, cardioCount: cardioItems.length, totalSets, cardioLabels };
@@ -463,83 +485,97 @@ export default function ExerciseDiaryScreen() {
       <div className="container">
         <div className="exercise-layout">
           {/* Left: editor */}
-          <div className="card" style={{ display:"grid", gap:12 }}>
-            <h1 style={{ margin:0 }}>Exercise Diary</h1>
+          <div className="card" style={{ display: "grid", gap: 12 }}>
+            <h1 style={{ margin: 0 }}>Exercise Diary</h1>
 
             {/* Date bar */}
-            <div className="exercise-toolbar" style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+            <div className="exercise-toolbar" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <button onClick={gotoToday}>Today</button>
               <button onClick={prevDay}>←</button>
-              <input
-                type="date"
-                value={dateISO}
-                onChange={e=>setDateISO(e.target.value)}
-                style={{ flex:"1 1 180px", minWidth:0 }}
-              />
+              <input type="date" value={dateISO} onChange={e => setDateISO(e.target.value)} style={{ flex: "1 1 180px", minWidth: 0 }} />
               <button onClick={nextDay}>→</button>
-              <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
-                {!session ? (
-                  <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius:8 }}>
+              <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+                {session ? <span className="muted">Session #{session.id}</span> : (
+                  <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius: 8 }}>
                     {busy ? "Creating…" : "Create session"}
                   </button>
-                ) : (
-                  <>
-                    {!finished ? (
-                      <button className="btn-primary" onClick={markComplete} style={{ borderRadius:8 }}>Complete session</button>
-                    ) : (
-                      <button onClick={reopenSession}>Reopen</button>
-                    )}
-                    <span className="muted">Session #{session.id}</span>
-                  </>
                 )}
+                {session && finished && <button onClick={reopenSession}>Reopen</button>}
               </div>
             </div>
+
+            {/* Sticky weights bar (only when session exists and not finished) */}
+            {session && !finished && (
+              <div
+                style={{
+                  position: "sticky", top: 0, zIndex: 5,
+                  background: "#fff", border: "1px solid var(--border)", borderRadius: 10,
+                  padding: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap"
+                }}
+              >
+                <span className="badge">Weights</span>
+                <input
+                  placeholder="Enter exercise name here"
+                  value={stickyTitle}
+                  onChange={e => setStickyTitle(e.target.value)}
+                  style={{ flex: "1 1 200px", minWidth: 0 }}
+                />
+                <button
+                  className="btn-soft"
+                  onClick={async () => { await addWeightsExercise(stickyTitle.trim()); setStickyTitle(""); }}
+                >
+                  Add exercise
+                </button>
+                <button className="btn-primary" onClick={completeSession} style={{ marginLeft: "auto", borderRadius: 8 }}>
+                  Complete session
+                </button>
+              </div>
+            )}
 
             {!session ? (
               <div className="muted">No session for this day yet. Click <b>Create session</b> to start logging.</div>
             ) : finished ? (
-              // Collapsed summary view
-              <div className="card card--wash" style={{ display:"grid", gap:10 }}>
-                <h2 style={{ margin:0 }}>Session complete</h2>
+              <div className="card card--wash" style={{ display: "grid", gap: 10 }}>
+                <h2 style={{ margin: 0 }}>Session complete</h2>
                 <div className="muted">
-                  Weights exercises: <b>{summary.weightsCount}</b> · Sets: <b>{summary.totalSets}</b>
+                  Weights: <b>{summary.weightsCount}</b> · Sets: <b>{summary.totalSets}</b>
                   {summary.cardioCount > 0 && <> · Cardio: <b>{summary.cardioCount}</b></>}
                 </div>
-                {summary.cardioCount > 0 && (
-                  <div className="muted">Cardio: {summary.cardioLabels.join(" · ")}</div>
-                )}
-                <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
+                {summary.cardioCount > 0 && <div className="muted">Cardio: {summary.cardioLabels.join(" · ")}</div>}
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                   <button onClick={reopenSession}>Reopen session</button>
                 </div>
               </div>
             ) : (
               <>
+                {/* Full quick add (kept for cardio etc.) */}
                 <QuickAddCard
-                  onAddWeights={() => addWeightsExercise("Lat Pulldown")}
+                  onAddWeights={(name) => addWeightsExercise(name)}
                   onAddCardio={(kind, title, km, mmss) => addCardio(kind, title, km, mmss)}
                 />
 
-                <div style={{ display:"grid", gap:10 }}>
+                <div style={{ display: "grid", gap: 10 }}>
                   {items.length === 0 && <div className="muted">No items yet. Add your first exercise above.</div>}
                   {items.map(it => (
-                    <div key={it.id} style={{ border:"1px solid #eee", borderRadius:10, padding:10 }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, flexWrap:"wrap" }}>
+                    <div key={it.id} style={{ border: "1px solid #eee", borderRadius: 10, padding: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                         <KindBadge kind={it.kind} />
                         <input
+                          placeholder={it.kind === "weights" ? "Enter exercise name here" : "Title"}
                           value={it.title}
-                          onChange={e=>renameItem(it, e.target.value)}
-                          style={{ flex:1, minWidth:0 }}
+                          onChange={e => renameItem(it, e.target.value)}
+                          style={{ flex: 1, minWidth: 0 }}
                         />
-                        <div style={{ display:"flex", gap:6 }}>
+                        <div style={{ display: "flex", gap: 6 }}>
                           {it.kind === "weights" && (
                             <>
-                              <button onClick={()=>toggleHistory(it)}>
-                                {openHistoryFor[it.id] ? "Hide previous" : `Show previous`}
+                              <button onClick={() => toggleHistory(it)}>
+                                {openHistoryFor[it.id] ? "Hide previous" : "Show previous"}
                               </button>
-                              <button onClick={()=>openHistoryModal(it)} title="See more dates">Open history</button>
+                              <button onClick={() => openHistoryModal(it)} title="See more dates">Open history</button>
                             </>
                           )}
-                          <button onClick={()=>deleteItem(it.id)} title="Delete">×</button>
+                          <button onClick={() => deleteItem(it.id)} title="Delete">×</button>
                         </div>
                       </div>
 
@@ -547,42 +583,37 @@ export default function ExerciseDiaryScreen() {
                         <>
                           <WeightsEditor
                             sets={setsByItem[it.id] || []}
-                            onAdd={()=>addSet(it.id)}
-                            onChange={(set, patch)=>updateSet(set, patch)}
-                            onDelete={(set)=>deleteSet(set)}
+                            onAdd={() => addSet(it.id)}
+                            onChange={(set, patch) => updateSet(set, patch)}
+                            onDelete={(set) => deleteSet(set)}
                           />
-                          {/* History / previous workouts for this exercise */}
-                          <div style={{ marginTop:8, display:"grid", gap:6 }}>
-                            {openHistoryFor[it.id] && (
-                              <div className="muted" style={{ border:"1px dashed #e5e7eb", borderRadius:8, padding:8 }}>
-                                {loadingPrevFor[it.id] && <div>Loading previous…</div>}
-                                {!loadingPrevFor[it.id] && (prevByItem[it.id]?.length ?? 0) === 0 && (
-                                  <div>No previous entries found for this exercise title.</div>
-                                )}
-                                {!loadingPrevFor[it.id] && (prevByItem[it.id]?.length ?? 0) > 0 && (
-                                  <>
-                                    <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:6 }}>
-                                      <button className="btn-soft" onClick={()=>copyLastSetsTo(it)}>Copy last sets</button>
-                                    </div>
-                                    <ul className="list">
-                                      {prevByItem[it.id]!.map((p, idx) => (
-                                        <li key={idx} className="item">
-                                          <div style={{ fontWeight:600 }}>{p.date}</div>
-                                          <div>
-                                            {p.sets.map((s, j) => {
-                                              const w = s.weight_kg != null ? `${s.weight_kg}kg` : "";
-                                              const r = s.reps != null ? `${s.reps}` : "";
-                                              return <span key={j}>{j>0?" · ": ""}{w && r ? `${w}×${r}` : (w || r || "")}</span>;
-                                            })}
-                                          </div>
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </>
-                                )}
-                              </div>
-                            )}
-                          </div>
+                          {openHistoryFor[it.id] && (
+                            <div className="muted" style={{ border: "1px dashed #e5e7eb", borderRadius: 8, padding: 8, marginTop: 8 }}>
+                              {loadingPrevFor[it.id] && <div>Loading previous…</div>}
+                              {!loadingPrevFor[it.id] && (prevByItem[it.id]?.length ?? 0) === 0 && <div>No previous entries for this title.</div>}
+                              {!loadingPrevFor[it.id] && (prevByItem[it.id]?.length ?? 0) > 0 && (
+                                <>
+                                  <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                                    <button className="btn-soft" onClick={() => copyLastSetsTo(it)}>Copy last sets</button>
+                                  </div>
+                                  <ul className="list">
+                                    {prevByItem[it.id]!.map((p, idx) => (
+                                      <li key={idx} className="item">
+                                        <div style={{ fontWeight: 600 }}>{p.date}</div>
+                                        <div>
+                                          {p.sets.map((s, j) => {
+                                            const w = s.weight_kg != null ? `${s.weight_kg}kg` : "";
+                                            const r = s.reps != null ? `${s.reps}` : "";
+                                            return <span key={j}>{j > 0 ? " · " : ""}{w && r ? `${w}×${r}` : (w || r || "")}</span>;
+                                          })}
+                                        </div>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </>
+                              )}
+                            </div>
+                          )}
                         </>
                       ) : (
                         <CardioSummary item={it} />
@@ -591,30 +622,40 @@ export default function ExerciseDiaryScreen() {
                   ))}
                 </div>
 
-                <div style={{ borderTop:"1px solid #eee", paddingTop:8 }}>
+                <div style={{ borderTop: "1px solid #eee", paddingTop: 8 }}>
                   <div className="section-title">Notes</div>
-                  <textarea rows={3} value={session.notes || ""} onChange={e=>saveSessionNotes(e.target.value)} />
+                  <textarea rows={3} value={session.notes || ""} onChange={e => saveSessionNotes(e.target.value)} />
                 </div>
               </>
             )}
 
-            {err && <div style={{ color:"red" }}>{err}</div>}
+            {err && <div style={{ color: "red" }}>{err}</div>}
           </div>
 
-          {/* Right: recent sessions */}
-          <aside className="card" style={{ display:"grid", gridTemplateRows:"auto 1fr", minWidth:0 }}>
-            <h2 style={{ margin:0 }}>Recent</h2>
-            <ul className="list" style={{ overflow:"auto", maxHeight:"60vh" }}>
+          {/* Right: recent + backup */}
+          <aside className="card" style={{ display: "grid", gridTemplateRows: "auto 1fr auto", minWidth: 0, gap: 10 }}>
+            <h2 style={{ margin: 0 }}>Recent</h2>
+            <ul className="list" style={{ overflow: "auto", maxHeight: "60vh" }}>
               {recent.length === 0 && <li className="muted">No recent sessions.</li>}
               {recent.map(s => (
                 <li key={s.id} className="item">
-                  <button onClick={()=>{ setDateISO(s.session_date); }} style={{ textAlign:"left", width:"100%" }}>
-                    <div style={{ fontWeight:600 }}>{s.session_date}</div>
-                    {s.notes && <div className="muted" style={{ marginTop:4, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{s.notes}</div>}
+                  <button onClick={() => { setDateISO(s.session_date); }} style={{ textAlign: "left", width: "100%" }}>
+                    <div style={{ fontWeight: 600 }}>{s.session_date}</div>
+                    {s.notes && <div className="muted" style={{ marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.notes}</div>}
                   </button>
                 </li>
               ))}
             </ul>
+            <div>
+              {offerBackup && (
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div className="muted">Nice streak — you’ve logged over a year. Back up your workouts?</div>
+                  <button onClick={downloadBackup} disabled={backingUp} className="btn-soft">
+                    {backingUp ? "Preparing…" : "Backup & Download"}
+                  </button>
+                </div>
+              )}
+            </div>
           </aside>
         </div>
       </div>
@@ -622,40 +663,29 @@ export default function ExerciseDiaryScreen() {
       {/* History Modal */}
       {modalOpen && (
         <div
-          style={{
-            position:"fixed", inset:0, background:"rgba(0,0,0,.35)",
-            display:"grid", placeItems:"center", zIndex:100
-          }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "grid", placeItems: "center", zIndex: 100 }}
           onClick={closeModal}
         >
-          <div
-            className="card"
-            style={{ width:"min(720px, 92vw)", maxHeight:"80vh", overflow:"auto" }}
-            onClick={e=>e.stopPropagation()}
-          >
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
-              <h2 style={{ margin:0 }}>History · {modalTitle}</h2>
+          <div className="card" style={{ width: "min(720px, 92vw)", maxHeight: "80vh", overflow: "auto" }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <h2 style={{ margin: 0 }}>History · {modalTitle}</h2>
               <button onClick={closeModal}>Close</button>
             </div>
-            {modalLoading && <div className="muted" style={{ marginTop:8 }}>Loading…</div>}
-            {!modalLoading && modalEntries.length === 0 && (
-              <div className="muted" style={{ marginTop:8 }}>No previous entries found for this title.</div>
-            )}
+            {modalLoading && <div className="muted" style={{ marginTop: 8 }}>Loading…</div>}
+            {!modalLoading && modalEntries.length === 0 && <div className="muted" style={{ marginTop: 8 }}>No previous entries found for this title.</div>}
             {!modalLoading && modalEntries.length > 0 && (
-              <ul className="list" style={{ marginTop:8 }}>
+              <ul className="list" style={{ marginTop: 8 }}>
                 {modalEntries.map((p, idx) => (
-                  <li key={idx} className="item" style={{ alignItems:"center" }}>
-                    <div style={{ fontWeight:600 }}>{p.date}</div>
-                    <div style={{ flex:1 }}>
+                  <li key={idx} className="item" style={{ alignItems: "center" }}>
+                    <div style={{ fontWeight: 600 }}>{p.date}</div>
+                    <div style={{ flex: 1 }}>
                       {p.sets.map((s, j) => {
                         const w = s.weight_kg != null ? `${s.weight_kg}kg` : "";
                         const r = s.reps != null ? `${s.reps}` : "";
-                        return <span key={j}>{j>0?" · ": ""}{w && r ? `${w}×${r}` : (w || r || "")}</span>;
+                        return <span key={j}>{j > 0 ? " · " : ""}{w && r ? `${w}×${r}` : (w || r || "")}</span>;
                       })}
                     </div>
-                    {modalForItemId && (
-                      <button onClick={()=>copySetsFromModal(p)} className="btn-soft">Copy sets</button>
-                    )}
+                    {modalForItemId && <button onClick={() => copySetsFromModal(p)} className="btn-soft">Copy sets</button>}
                   </li>
                 ))}
               </ul>
@@ -668,45 +698,34 @@ export default function ExerciseDiaryScreen() {
 }
 
 /* ---------- sub components ---------- */
-function KindBadge({ kind }:{ kind: Item["kind"] }) {
-  const label = kind[0].toUpperCase()+kind.slice(1);
+function KindBadge({ kind }: { kind: Item["kind"] }) {
+  const label = kind[0].toUpperCase() + kind.slice(1);
   const bg = ({
-    weights:"#e0f2fe", run:"#fee2e2", jog:"#fee2e2", walk:"#fee2e2",
-    yoga:"#dcfce7", class:"#ede9fe", other:"#f3f4f6"
+    weights: "#e0f2fe", run: "#fee2e2", jog: "#fee2e2", walk: "#fee2e2",
+    yoga: "#dcfce7", class: "#ede9fe", other: "#f3f4f6"
   } as any)[kind] || "#f3f4f6";
-  return <span style={{ fontSize:12, padding:"2px 8px", borderRadius:999, background:bg, border:"1px solid #e5e7eb" }}>{label}</span>;
+  return <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 999, background: bg, border: "1px solid #e5e7eb" }}>{label}</span>;
 }
 
-function WeightsEditor({
-  sets, onAdd, onChange, onDelete
-}:{ sets:WSet[]; onAdd:()=>void; onChange:(s:WSet, patch:Partial<WSet>)=>void; onDelete:(s:WSet)=>void }) {
+function WeightsEditor({ sets, onAdd, onChange, onDelete }: {
+  sets: WSet[]; onAdd: () => void; onChange: (s: WSet, patch: Partial<WSet>) => void; onDelete: (s: WSet) => void;
+}) {
   return (
     <div>
-      <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:6, flexWrap:"wrap" }}>
-        <div style={{ fontWeight:600 }}>Sets</div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
+        <div style={{ fontWeight: 600 }}>Sets</div>
         <button onClick={onAdd}>+ Add set</button>
       </div>
-      <div style={{ display:"grid", gap:6 }}>
+      <div style={{ display: "grid", gap: 6 }}>
         {sets.length === 0 && <div className="muted">No sets yet.</div>}
         {sets.map(s => (
-          <div
-            key={s.id}
-            style={{
-              display:"grid",
-              gridTemplateColumns:"68px minmax(0,1fr) minmax(0,1fr) 32px",
-              gap:6, alignItems:"center"
-            }}
-          >
+          <div key={s.id} style={{ display: "grid", gridTemplateColumns: "68px minmax(0,1fr) minmax(0,1fr) 32px", gap: 6, alignItems: "center" }}>
             <div className="muted">Set {s.set_number}</div>
-            <input
-              type="number" inputMode="decimal" step="0.5" placeholder="kg"
-              value={s.weight_kg ?? ""} onChange={e=>onChange(s, { weight_kg: e.target.value===""? null : Number(e.target.value) })}
-            />
-            <input
-              type="number" inputMode="numeric" placeholder="reps"
-              value={s.reps ?? ""} onChange={e=>onChange(s, { reps: e.target.value===""? null : Number(e.target.value) })}
-            />
-            <button onClick={()=>onDelete(s)} title="Delete set">×</button>
+            <input type="number" inputMode="decimal" step="0.5" placeholder="kg"
+              value={s.weight_kg ?? ""} onChange={e => onChange(s, { weight_kg: e.target.value === "" ? null : Number(e.target.value) })} />
+            <input type="number" inputMode="numeric" placeholder="reps"
+              value={s.reps ?? ""} onChange={e => onChange(s, { reps: e.target.value === "" ? null : Number(e.target.value) })} />
+            <button onClick={() => onDelete(s)} title="Delete set">×</button>
           </div>
         ))}
       </div>
@@ -718,35 +737,31 @@ function CardioSummary({ item }: { item: Item }) {
   const d = item.metrics?.distance_km as number | undefined;
   const sec = item.metrics?.duration_sec as number | undefined;
   const pace = paceStr(d, sec);
-  return (
-    <div className="muted">
-      {(d ? `${d} km` : "")}
-      {(d && sec) ? " • " : ""}
-      {(sec ? secondsToMMSS(sec) : "")}
-      {pace ? ` • ${pace}` : ""}
-    </div>
-  );
+  return <div className="muted">{d ? `${d} km` : ""}{(d && sec) ? " • " : ""}{sec ? secondsToMMSS(sec) : ""}{pace ? ` • ${pace}` : ""}</div>;
 }
 
 function QuickAddCard({
   onAddWeights, onAddCardio
-}:{ onAddWeights:()=>void; onAddCardio:(kind:Item["kind"], title:string, distanceKm:number|null, mmss:string)=>void }) {
+}: {
+  onAddWeights: (name: string) => void;
+  onAddCardio: (kind: Item["kind"], title: string, distanceKm: number | null, mmss: string) => void;
+}) {
   const [kind, setKind] = useState<Item["kind"]>("weights");
   const [title, setTitle] = useState("");
   const [dist, setDist] = useState<string>("");
   const [dur, setDur] = useState<string>("");
 
   function add() {
-    if (kind === "weights") onAddWeights();
-    else onAddCardio(kind, title || (kind === "class" ? "Class" : kind[0].toUpperCase()+kind.slice(1)), dist ? Number(dist) : null, dur || "00:00");
-    setTitle(""); setDist(""); setDur("");
+    if (kind === "weights") { onAddWeights(title.trim()); setTitle(""); }
+    else onAddCardio(kind, title || (kind === "class" ? "Class" : kind[0].toUpperCase() + kind.slice(1)), dist ? Number(dist) : null, dur || "00:00");
+    if (kind !== "weights") { setTitle(""); setDist(""); setDur(""); }
   }
 
   return (
-    <div style={{ border:"1px solid #eee", borderRadius:10, padding:10 }}>
+    <div style={{ border: "1px solid #eee", borderRadius: 10, padding: 10 }}>
       <div className="section-title">Quick add</div>
-      <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
-        <select value={kind} onChange={e=>setKind(e.target.value as Item["kind"])}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <select value={kind} onChange={e => setKind(e.target.value as Item["kind"])}>
           <option value="weights">Weights</option>
           <option value="run">Run</option>
           <option value="jog">Jog</option>
@@ -756,13 +771,16 @@ function QuickAddCard({
         </select>
 
         {kind === "weights" ? (
-          <button className="btn-primary" onClick={add}>Add Weights Exercise</button>
+          <>
+            <input placeholder="Enter exercise name here" value={title} onChange={e => setTitle(e.target.value)} />
+            <button className="btn-primary" onClick={add}>Add Weights Exercise</button>
+          </>
         ) : (
           <>
-            <input placeholder={kind === "class" ? "Class title" : "Title (optional)"} value={title} onChange={e=>setTitle(e.target.value)} />
-            <input type="number" inputMode="decimal" step="0.1" placeholder="Distance (km)" value={dist} onChange={e=>setDist(e.target.value)} />
-            <input placeholder="Duration mm:ss" value={dur} onChange={e=>setDur(e.target.value)} />
-            <button className="btn-primary" onClick={add}>Add {kind[0].toUpperCase()+kind.slice(1)}</button>
+            <input placeholder={kind === "class" ? "Class title" : "Title (optional)"} value={title} onChange={e => setTitle(e.target.value)} />
+            <input type="number" inputMode="decimal" step="0.1" placeholder="Distance (km)" value={dist} onChange={e => setDist(e.target.value)} />
+            <input placeholder="Duration mm:ss" value={dur} onChange={e => setDur(e.target.value)} />
+            <button className="btn-primary" onClick={add}>Add {kind[0].toUpperCase() + kind.slice(1)}</button>
           </>
         )}
       </div>
