@@ -267,10 +267,6 @@ export default function WinsScreen() {
   /* “At a glance” values (Everything totals for each period) */
   const glance = useMemo(() => {
     const calc = (p: PeriodKey) => {
-      const t = doneTasks.filter(tt => {
-        const d = dateOnlyLocal(tt.completed_at);
-        return !!d && inPeriodISO(d, p) && !isExerciseishTask(tt) && !isBigGoal(tt) ? true : !!d && inPeriodISO(d, p);
-      }); // we'll compute categories below anyway
       const tasksIn = doneTasks.filter(tt => {
         const d = dateOnlyLocal(tt.completed_at);
         return !!d && inPeriodISO(d, p);
@@ -369,7 +365,7 @@ export default function WinsScreen() {
           <div className="muted">Exercise counts whole <b>workout sessions</b>, not individual exercises.</div>
         </div>
 
-        {/* At a glance: Everything totals by period (clickable, highlights active) */}
+        {/* At a glance (TOP) */}
         <div className="card" style={{ display: "grid", gap: 10 }}>
           <div className="section-title">At a glance</div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))", gap:8 }}>
@@ -418,9 +414,7 @@ export default function WinsScreen() {
               active === "big" ? "Big goal tasks" :
               active === "exercise" ? "Exercise sessions" :
               "Gratitudes")
-            } · {
-              PERIODS.find(p => p.key === period)?.label || ""
-            }
+            } · {PERIODS.find(p => p.key === period)?.label || ""}
           </h2>
 
           {details.length === 0 ? (
