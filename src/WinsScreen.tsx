@@ -267,6 +267,10 @@ export default function WinsScreen() {
   /* “At a glance” values (Everything totals for each period) */
   const glance = useMemo(() => {
     const calc = (p: PeriodKey) => {
+      const t = doneTasks.filter(tt => {
+        const d = dateOnlyLocal(tt.completed_at);
+        return !!d && inPeriodISO(d, p) && !isExerciseishTask(tt) && !isBigGoal(tt) ? true : !!d && inPeriodISO(d, p);
+      }); // we'll compute categories below anyway
       const tasksIn = doneTasks.filter(tt => {
         const d = dateOnlyLocal(tt.completed_at);
         return !!d && inPeriodISO(d, p);
@@ -365,16 +369,7 @@ export default function WinsScreen() {
           <div className="muted">Exercise counts whole <b>workout sessions</b>, not individual exercises.</div>
         </div>
 
-        {/* KPI cards (respect current period) */}
-        <div className="wins-kpis" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10 }}>
-          <KpiCard title="Everything"     count={counts.all}       active={active === "all"}       onClick={() => setActive("all")} />
-          <KpiCard title="General tasks"  count={counts.general}   active={active === "general"}   onClick={() => setActive("general")} />
-          <KpiCard title="Big goal tasks" count={counts.big}       active={active === "big"}       onClick={() => setActive("big")} />
-          <KpiCard title="Exercise"       count={counts.exercise}  active={active === "exercise"}  onClick={() => setActive("exercise")} />
-          <KpiCard title="Gratitudes"     count={counts.gratitude} active={active === "gratitude"} onClick={() => setActive("gratitude")} />
-        </div>
-
-        {/* Period selector (“At a glance”) — now below KPIs and directly above the data it changes */}
+        {/* At a glance: Everything totals by period (clickable, highlights active) */}
         <div className="card" style={{ display: "grid", gap: 10 }}>
           <div className="section-title">At a glance</div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))", gap:8 }}>
@@ -404,6 +399,15 @@ export default function WinsScreen() {
               );
             })}
           </div>
+        </div>
+
+        {/* KPI cards (respect current period) */}
+        <div className="wins-kpis" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10 }}>
+          <KpiCard title="Everything"     count={counts.all}       active={active === "all"}       onClick={() => setActive("all")} />
+          <KpiCard title="General tasks"  count={counts.general}   active={active === "general"}   onClick={() => setActive("general")} />
+          <KpiCard title="Big goal tasks" count={counts.big}       active={active === "big"}       onClick={() => setActive("big")} />
+          <KpiCard title="Exercise"       count={counts.exercise}  active={active === "exercise"}  onClick={() => setActive("exercise")} />
+          <KpiCard title="Gratitudes"     count={counts.gratitude} active={active === "gratitude"} onClick={() => setActive("gratitude")} />
         </div>
 
         {/* Details */}
