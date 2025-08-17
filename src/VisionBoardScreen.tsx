@@ -22,9 +22,9 @@ const VB_ALFRED_CANDIDATES = [
 
 /** Types */
 type VBImage = {
-  path: string;       // storage path
-  url: string;        // public URL
-  caption: string;    // optional text
+  path: string;
+  url: string;
+  caption: string;
   created_at?: string;
 };
 
@@ -123,7 +123,7 @@ export default function VisionBoardScreen() {
   useEffect(() => {
     if (!userId) return;
 
-    const uid = userId as string; // non-null here
+    const uid = userId as string;
 
     const envBucket =
       (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_VISION_BUCKET) ||
@@ -136,7 +136,8 @@ export default function VisionBoardScreen() {
 
     async function bucketExists(name: string) {
       try {
-        const { error } = await supabase.storage.from(name).list(undefined, { limit: 1 });
+        // IMPORTANT: use "" (empty string) to list the root
+        const { error } = await supabase.storage.from(name).list("", { limit: 1 });
         return !error;
       } catch {
         return false;
@@ -166,12 +167,12 @@ export default function VisionBoardScreen() {
       // 2) decide prefix: under {userId}/ or root
       let usePrefix: "" | "user" = "user";
       try {
-        const resUser = await supabase.storage.from(chosen).list(uid, { limit: 1 }); // uid is string
+        const resUser = await supabase.storage.from(chosen).list(uid, { limit: 1 });
         if (resUser.error) throw resUser.error;
 
         const hasInUser = (resUser.data || []).some((f: any) => !("id" in f && (f as any).id === null));
         if (!hasInUser) {
-          const resRoot = await supabase.storage.from(chosen).list(undefined, { limit: 1 });
+          const resRoot = await supabase.storage.from(chosen).list("", { limit: 1 });
           if (!resRoot.error && (resRoot.data || []).length > 0) {
             usePrefix = "";
           }
@@ -185,7 +186,7 @@ export default function VisionBoardScreen() {
 
       // 3) load images (up to 6)
       try {
-        const listPath: string | undefined = usePrefix === "user" ? uid : undefined;
+        const listPath: string = usePrefix === "user" ? uid : "";
         const { data, error } = await supabase.storage.from(chosen).list(listPath, {
           sortBy: { column: "created_at", order: "asc" },
         });
@@ -260,7 +261,6 @@ export default function VisionBoardScreen() {
         const { data: pub } = supabase.storage.from(bucket).getPublicUrl(path);
         newOnes.push({ path, url: pub.publicUrl, caption: "" });
 
-        // best-effort: persist caption row
         try { await supabase.from("vision_images").insert({ user_id: uid, path, caption: "" }); } catch {}
       }
 
@@ -404,7 +404,7 @@ export default function VisionBoardScreen() {
             {/* Main image with arrows */}
             <div style={{ position: "relative", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", minHeight: 280 }}>
               <button
-                onClick={prev}
+                onClick={() => setSelected(i => (i - 1 + images.length) % images.length)}
                 title="Previous"
                 aria-label="Previous"
                 style={{
@@ -413,7 +413,7 @@ export default function VisionBoardScreen() {
                 }}
               >←</button>
               <button
-                onClick={next}
+                onClick={() => setSelected(i => (i + 1) % images.length)}
                 title="Next"
                 aria-label="Next"
                 style={{
