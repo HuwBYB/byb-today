@@ -119,30 +119,43 @@ export default function VisionBoardScreen() {
     });
   }, []);
 
+  /* ----- helpers ----- */
+  const getEnvBucket = () =>
+    (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_VISION_BUCKET) ||
+    (typeof process !== "undefined" && (process as any).env?.VITE_VISION_BUCKET) ||
+    "";
+
+  async function bucketExists(name: string) {
+    try {
+      // Use "" (empty string) to list the root
+      const { error } = await supabase.storage.from(name).list("", { limit: 1 });
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
   /* ----- detect bucket + folder prefix, then load images ----- */
   useEffect(() => {
     if (!userId) return;
 
     const uid = userId as string;
 
-    const envBucket =
-      (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_VISION_BUCKET) ||
-      (typeof process !== "undefined" && (process as any).env?.VITE_VISION_BUCKET) ||
-      "";
+    // Allow user override (saved in browser) if detection failed before
+    const override = localStorage.getItem("vision.bucketOverride") || "";
 
-    const BUCKET_CANDIDATES = Array.from(
-      new Set([envBucket, "vision_board", "visionboard"].filter(Boolean))
+    const candidates = Array.from(
+      new Set(
+        [
+          override,
+          getEnvBucket(),
+          "visionboard",
+          "vision_board",
+          "vision",
+          "vision-board",
+        ].filter(Boolean)
+      )
     );
-
-    async function bucketExists(name: string) {
-      try {
-        // Use "" (empty string) to list the root
-        const { error } = await supabase.storage.from(name).list("", { limit: 1 });
-        return !error;
-      } catch {
-        return false;
-      }
-    }
 
     async function detect() {
       setErr(null);
@@ -150,13 +163,13 @@ export default function VisionBoardScreen() {
 
       // 1) find a bucket that exists
       let chosen: string | null = null;
-      for (const name of BUCKET_CANDIDATES) {
+      for (const name of candidates) {
         if (await bucketExists(name)) { chosen = name; break; }
       }
       if (!chosen) {
         setErr(
-          `Storage bucket not found. Tried: ${BUCKET_CANDIDATES.map((b) => `"${b}"`).join(", ")}. ` +
-          `Create one in Supabase Studio (public) or set VITE_VISION_BUCKET.`
+          `Storage bucket not found. Tried: ${candidates.map((b) => `"${b}"`).join(", ")}. ` +
+          `If you know your bucket id, enter it below.`
         );
         setBucket(null);
         setImages([]);
@@ -251,8 +264,10 @@ export default function VisionBoardScreen() {
         const { error: uerr } = await supabase.storage.from(bucket).upload(path, file, { upsert: false });
         if (uerr) {
           const msg = (uerr.message || "").toLowerCase();
-          if (msg.includes("bucket not found")) {
-            setErr(`Bucket "${bucket}" not found. Create it (public) or set VITE_VISION_BUCKET.`);
+          if (msg.includes("bucket") && msg.includes("not") && msg.includes("found")) {
+            setErr(
+              `Bucket "${bucket}" not found. Enter your actual bucket id below (we’ll remember it) or set VITE_VISION_BUCKET.`
+            );
             break;
           }
           throw uerr;
@@ -310,6 +325,19 @@ export default function VisionBoardScreen() {
     const d = new Date();
     return d.toLocaleString(undefined, { month: "long", year: "numeric" });
   }, []);
+
+  /* ----- bucket override UI ----- */
+  const [overrideInput, setOverrideInput] = useState("");
+  function saveOverride() {
+    const v = overrideInput.trim();
+    if (!v) return;
+    localStorage.setItem("vision.bucketOverride", v);
+    window.location.reload();
+  }
+  function clearOverride() {
+    localStorage.removeItem("vision.bucketOverride");
+    window.location.reload();
+  }
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
@@ -388,9 +416,21 @@ export default function VisionBoardScreen() {
             {playing ? "Pause" : "Play 30s"}
           </button>
         </div>
+
+        {/* If storage not detected, show quick fix controls */}
         {(!bucket || err) && (
-          <div style={{ color: err ? "red" : "#64748b", marginTop: 6 }}>
-            {err || "Storage initialising…"}
+          <div style={{ marginTop: 6 }}>
+            <div style={{ color: err ? "red" : "#64748b" }}>{err || "Storage initialising…"}</div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+              <input
+                value={overrideInput}
+                onChange={e => setOverrideInput(e.target.value)}
+                placeholder="Enter your bucket id (e.g. visionboard)"
+                style={{ minWidth: 260 }}
+              />
+              <button onClick={saveOverride}>Use this bucket</button>
+              <button onClick={clearOverride}>Clear override</button>
+            </div>
           </div>
         )}
       </div>
