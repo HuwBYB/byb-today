@@ -22,13 +22,13 @@ const VB_ALFRED_CANDIDATES = [
 
 /** Types */
 type VBImage = {
-  path: string;       // storage path, e.g. "1234-uuid/file.jpg" or "file.jpg"
+  path: string;       // storage path
   url: string;        // public URL
   caption: string;    // optional text
   created_at?: string;
 };
 
-/* ---------- Modal shell (like Goals / Calendar) ---------- */
+/* ---------- Modal shell ---------- */
 function Modal({
   open, onClose, title, children,
 }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
@@ -57,7 +57,7 @@ function Modal({
   );
 }
 
-/* ---------- Inline help content (your doc text) ---------- */
+/* ---------- Inline help content ---------- */
 function VisionHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
@@ -123,6 +123,8 @@ export default function VisionBoardScreen() {
   useEffect(() => {
     if (!userId) return;
 
+    const uid = userId as string; // non-null here
+
     const envBucket =
       (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_VISION_BUCKET) ||
       (typeof process !== "undefined" && (process as any).env?.VITE_VISION_BUCKET) ||
@@ -134,8 +136,7 @@ export default function VisionBoardScreen() {
 
     async function bucketExists(name: string) {
       try {
-        // If bucket doesn't exist, this list will throw an error we can catch.
-        const { error } = await supabase.storage.from(name).list("", { limit: 1 });
+        const { error } = await supabase.storage.from(name).list(undefined, { limit: 1 });
         return !error;
       } catch {
         return false;
@@ -153,8 +154,8 @@ export default function VisionBoardScreen() {
       }
       if (!chosen) {
         setErr(
-          `Storage bucket not found. Tried: ${BUCKET_CANDIDATES.map((b) => `"${b}"`).join(", ")}.`
-          + ` Please create one in Supabase Studio (public) or set VITE_VISION_BUCKET.`
+          `Storage bucket not found. Tried: ${BUCKET_CANDIDATES.map((b) => `"${b}"`).join(", ")}. ` +
+          `Create one in Supabase Studio (public) or set VITE_VISION_BUCKET.`
         );
         setBucket(null);
         setImages([]);
@@ -163,21 +164,19 @@ export default function VisionBoardScreen() {
       }
 
       // 2) decide prefix: under {userId}/ or root
-      // try user folder first
       let usePrefix: "" | "user" = "user";
       try {
-        const resUser = await supabase.storage.from(chosen).list(userId, { limit: 1 });
+        const resUser = await supabase.storage.from(chosen).list(uid, { limit: 1 }); // uid is string
         if (resUser.error) throw resUser.error;
-        const hasInUser = (resUser.data || []).some((f: any) => !("id" in f && (f as any).id === null)); // files vs subfolders
+
+        const hasInUser = (resUser.data || []).some((f: any) => !("id" in f && (f as any).id === null));
         if (!hasInUser) {
-          // no files under user folder — check root
-          const resRoot = await supabase.storage.from(chosen).list("", { limit: 1 });
+          const resRoot = await supabase.storage.from(chosen).list(undefined, { limit: 1 });
           if (!resRoot.error && (resRoot.data || []).length > 0) {
             usePrefix = "";
           }
         }
       } catch {
-        // if listing user folder fails oddly, fall back to root
         usePrefix = "";
       }
 
@@ -186,315 +185,17 @@ export default function VisionBoardScreen() {
 
       // 3) load images (up to 6)
       try {
-        const listPath = usePrefix === "user" ? userId : "";
+        const listPath: string | undefined = usePrefix === "user" ? uid : undefined;
         const { data, error } = await supabase.storage.from(chosen).list(listPath, {
           sortBy: { column: "created_at", order: "asc" },
         });
         if (error) throw error;
 
-        const files = (data || []).filter((f: any) => !("id" in f && (f as any).id === null)); // ignore "folders"
+        const files = (data || []).filter((f: any) => !("id" in f && (f as any).id === null));
         const rows: VBImage[] = files.map((f: any) => {
-          const path = usePrefix === "user" ? `${userId}/${f.name}` : f.name;
+          const path = usePrefix === "user" ? `${uid}/${f.name}` : f.name;
           const { data: pub } = supabase.storage.from(chosen).getPublicUrl(path);
           return { path, url: pub.publicUrl, caption: "", created_at: (f as any)?.created_at };
         });
 
-        // optional captions table
-        try {
-          const { data: caps } = await supabase
-            .from("vision_images")
-            .select("path, caption")
-            .eq("user_id", userId);
-          if (caps && Array.isArray(caps)) {
-            const map = new Map<string, string>(caps.map((c: any) => [c.path, c.caption || ""]));
-            rows.forEach(r => { r.caption = map.get(r.path) || ""; });
-          }
-        } catch { /* table may not exist; ignore */ }
-
-        setImages(rows.slice(0, 6));
-        setSelected(0);
-      } catch (e: any) {
-        setErr(e.message || String(e));
-        setImages([]);
-      } finally {
-        setStorageReady(true);
-      }
-    }
-
-    detect();
-  }, [userId]);
-
-  /* ----- slideshow every 30s ----- */
-  useEffect(() => {
-    if (!playing || images.length === 0) return;
-    const id = setInterval(() => setSelected(i => (i + 1) % images.length), 30000);
-    return () => clearInterval(id);
-  }, [playing, images.length]);
-
-  /* ----- actions ----- */
-  function prev() { if (images.length) setSelected(i => (i - 1 + images.length) % images.length); }
-  function next() { if (images.length) setSelected(i => (i + 1) % images.length); }
-
-  async function handleUpload(files: FileList | null) {
-    if (!userId || !files || files.length === 0 || !bucket) return;
-    setBusy(true); setErr(null);
-    try {
-      const remaining = Math.max(0, 6 - images.length);
-      const toUpload = Array.from(files).slice(0, remaining);
-      const newOnes: VBImage[] = [];
-
-      for (const file of toUpload) {
-        const safeName = `${Date.now()}-${file.name.replace(/\s+/g, "_")}`;
-        const path = (prefix === "user" ? `${userId}/` : "") + safeName;
-
-        const { error: uerr } = await supabase.storage.from(bucket).upload(path, file, { upsert: false });
-        if (uerr) {
-          const msg = (uerr.message || "").toLowerCase();
-          if (msg.includes("bucket not found")) {
-            setErr(`Bucket "${bucket}" not found. Create it (public) or set VITE_VISION_BUCKET.`);
-            break;
-          }
-          throw uerr;
-        }
-
-        const { data: pub } = supabase.storage.from(bucket).getPublicUrl(path);
-        newOnes.push({ path, url: pub.publicUrl, caption: "" });
-
-        // best-effort: persist caption row
-        try { await supabase.from("vision_images").insert({ user_id: userId, path, caption: "" }); } catch {}
-      }
-
-      const updated = [...images, ...newOnes].slice(0, 6);
-      setImages(updated);
-      if (images.length === 0 && updated.length > 0) setSelected(0);
-      if (fileRef.current) fileRef.current.value = "";
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveCaption(idx: number, caption: string) {
-    const img = images[idx]; if (!img || !userId) return;
-    const nextImgs = images.slice(); nextImgs[idx] = { ...img, caption };
-    setImages(nextImgs);
-    try {
-      await supabase.from("vision_images").upsert(
-        { user_id: userId, path: img.path, caption },
-        { onConflict: "user_id,path" } as any
-      );
-    } catch {}
-  }
-
-  async function removeAt(idx: number) {
-    if (!userId || !bucket) return;
-    const img = images[idx]; if (!img) return;
-    setBusy(true); setErr(null);
-    try {
-      await supabase.storage.from(bucket).remove([img.path]);
-      try { await supabase.from("vision_images").delete().eq("user_id", userId).eq("path", img.path); } catch {}
-      const next = images.filter((_, i) => i !== idx);
-      setImages(next);
-      setSelected(Math.max(0, Math.min(selected, next.length - 1)));
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  /* ----- layout helpers ----- */
-  const monthLabel = useMemo(() => {
-    const d = new Date();
-    return d.toLocaleString(undefined, { month: "long", year: "numeric" });
-  }, []);
-
-  return (
-    <div style={{ display: "grid", gap: 12 }}>
-      {/* Title card ONLY */}
-      <div className="card" style={{ position: "relative", paddingRight: 64 }}>
-        {/* Alfred — top-right */}
-        <button
-          onClick={() => setShowHelp(true)}
-          aria-label="Open Vision Board help"
-          title="Need a hand? Ask Alfred"
-          style={{
-            position: "absolute",
-            top: 8,
-            right: 8,
-            border: "none",
-            background: "transparent",
-            padding: 0,
-            cursor: "pointer",
-            lineHeight: 0,
-            zIndex: 10,
-          }}
-        >
-          {VB_ALFRED_SRC ? (
-            <img
-              src={VB_ALFRED_SRC}
-              alt="Vision Board Alfred — open help"
-              style={{ width: 48, height: 48 }}
-              onError={() => setImgIdx(i => i + 1)}
-            />
-          ) : (
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 36, height: 36, borderRadius: 999,
-                border: "1px solid #d1d5db",
-                background: "#f9fafb",
-                fontWeight: 700,
-              }}
-            >
-              ?
-            </span>
-          )}
-        </button>
-
-        <h1 style={{ margin: 0 }}>Vision Board</h1>
-        <div className="muted">{monthLabel}</div>
-      </div>
-
-      {/* Info + Upload live BELOW the title */}
-      <div className="card" style={{ display: "grid", gap: 10 }}>
-        <div className="muted">
-          You can upload up to <strong>6 images</strong> for your vision board.
-        </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            multiple
-            onChange={e => handleUpload(e.target.files)}
-            style={{ display: "none" }}
-            disabled={!userId || !storageReady || !bucket || !canAddMore || busy}
-          />
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={!userId || !storageReady || !bucket || !canAddMore || busy}
-            className="btn-primary"
-            style={{ borderRadius: 8 }}
-          >
-            Upload image
-          </button>
-          {!canAddMore && <span className="muted">Limit reached.</span>}
-          <button onClick={() => setPlaying(p => !p)} disabled={images.length <= 1} style={{ marginLeft: "auto" }}>
-            {playing ? "Pause" : "Play 30s"}
-          </button>
-        </div>
-        {(!bucket || err) && (
-          <div style={{ color: err ? "red" : "#64748b", marginTop: 6 }}>
-            {err || "Storage initialising…"}
-          </div>
-        )}
-      </div>
-
-      {/* Viewer */}
-      <div className="card" style={{ display: "grid", gap: 10 }}>
-        {images.length === 0 ? (
-          <div className="muted">No images yet. Use <strong>Upload image</strong> above to add your first one.</div>
-        ) : (
-          <>
-            {/* Main image with arrows */}
-            <div style={{ position: "relative", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", minHeight: 280 }}>
-              <button
-                onClick={() => setSelected(i => (i - 1 + images.length) % images.length)}
-                title="Previous"
-                aria-label="Previous"
-                style={{
-                  position: "absolute", top: "50%", left: 8, transform: "translateY(-50%)",
-                  width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db", background: "#fff"
-                }}
-              >←</button>
-              <button
-                onClick={() => setSelected(i => (i + 1) % images.length)}
-                title="Next"
-                aria-label="Next"
-                style={{
-                  position: "absolute", top: "50%", right: 8, transform: "translateY(-50%)",
-                  width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db", background: "#fff"
-                }}
-              >→</button>
-
-              {current && (
-                <img
-                  key={current.path}
-                  src={current.url}
-                  alt=""
-                  style={{ width: "100%", height: 360, objectFit: "cover", display: "block" }}
-                />
-              )}
-            </div>
-
-            {/* Caption editor for selected */}
-            {current && (
-              <label style={{ display: "grid", gap: 6 }}>
-                <div className="muted">Personalise this image (optional)</div>
-                <input
-                  value={current.caption}
-                  onChange={e => {
-                    const v = e.target.value;
-                    setImages(imgs => {
-                      const copy = imgs.slice();
-                      copy[selected] = { ...copy[selected], caption: v };
-                      return copy;
-                    });
-                  }}
-                  onBlur={e => saveCaption(selected, e.target.value)}
-                  placeholder="Add a short line that makes this image yours…"
-                />
-              </label>
-            )}
-
-            {/* Thumbnails */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 8 }}>
-              {images.map((img, i) => (
-                <div key={img.path} style={{ position: "relative", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
-                  <button
-                    onClick={() => setSelected(i)}
-                    title={img.caption || "Select"}
-                    style={{ padding: 0, border: "none", background: "transparent", width: "100%", lineHeight: 0 }}
-                  >
-                    <img src={img.url} alt="" style={{ width: "100%", height: 80, objectFit: "cover", display: "block", opacity: i === selected ? 1 : 0.9 }} />
-                  </button>
-                  <button
-                    onClick={() => removeAt(i)}
-                    title="Remove"
-                    aria-label="Remove"
-                    style={{
-                      position: "absolute", top: 6, right: 6, width: 26, height: 26,
-                      borderRadius: 999, border: "1px solid #d1d5db", background: "#fff"
-                    }}
-                  >✕</button>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Help modal (inline content) */}
-      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Vision Board — Help">
-        <div style={{ display: "flex", gap: 16 }}>
-          {VB_ALFRED_SRC && (
-            <img
-              src={VB_ALFRED_SRC}
-              alt=""
-              aria-hidden="true"
-              style={{ width: 72, height: 72, flex: "0 0 auto" }}
-              onError={() => setImgIdx(i => i + 1)}
-            />
-          )}
-          <div style={{ flex: 1 }}>
-            <VisionHelpContent />
-          </div>
-        </div>
-      </Modal>
-    </div>
-  );
-}
+        //
