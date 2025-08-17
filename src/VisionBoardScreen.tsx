@@ -1,33 +1,110 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-type VisionItem = {
-  id: number;
-  user_id: string;
-  image_url: string;
-  storage_path: string | null;
-  caption: string | null;
-  sort_order: number | null;
+/** Public path helper (Vite/CRA/Vercel/GH Pages) */
+function publicPath(p: string) {
+  // @ts-ignore
+  const base =
+    (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
+    (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
+    "";
+  const withSlash = p.startsWith("/") ? p : `/${p}`;
+  return `${base.replace(/\/$/, "")}${withSlash}`;
+}
+
+/** Alfred image (exact file you provided) + extensions fallback */
+const VB_ALFRED_CANDIDATES = [
+  "/alfred/Vision_Alfred.png",
+  "/alfred/Vision_Alfred.jpg",
+  "/alfred/Vision_Alfred.jpeg",
+  "/alfred/Vision_Alfred.webp",
+].map(publicPath);
+
+/** Types */
+type VBImage = {
+  path: string;       // storage path, e.g. userId/123-name.jpg
+  url: string;        // public URL
+  caption: string;    // optional text
   created_at?: string;
 };
 
-const MAX_ITEMS = 6;
-const SLIDESHOW_MS = 30000; // 30s per image
+/* ---------- Modal shell (like Goals / Calendar) ---------- */
+function Modal({
+  open, onClose, title, children,
+}: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    if (open) window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+  useEffect(() => { if (open && closeRef.current) closeRef.current.focus(); }, [open]);
+  if (!open) return null;
+  return (
+    <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 2000,
+               display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 760, width: "100%", background: "#fff", borderRadius: 12,
+                 boxShadow: "0 10px 30px rgba(0,0,0,0.2)", padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+          <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
+          <button ref={closeRef} onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>✕</button>
+        </div>
+        <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Inline help content (from your doc) ---------- */
+function VisionHelpContent() {
+  return (
+    <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
+      <h4 style={{ margin: 0 }}>Introduction / Motivation</h4>
+      <p><em>“If you look at what you want every day and really imagine it you can make it your reality, well if you believe some sort of secret. We don’t believe that but if you vision what you want and actually take steps to get there then it is possible”</em></p>
+
+      <h4 style={{ margin: 0 }}>Step-by-Step Guidance</h4>
+      <ol style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Upload some images of things you would like to have in your life</li>
+        <li>You can add some text to each picture that makes it more personal to you</li>
+        <li>Once you have your images in place you can either scroll through by pressing the left and right arrows on the top image</li>
+        <li>You can watch it as a slide show by pressing <strong>Play 30s</strong> (this will scroll the images every 30 seconds)</li>
+        <li>When you look at each image you should imagine they are already in your life, really vividly imagine yourself in the picture with whatever items are there.</li>
+      </ol>
+
+      <h4 style={{ margin: 0 }}>Alfred’s Tips</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li>You can make dreams come to your reality if you imagine what it will be like to already have them</li>
+        <li>Think about what you will need to do to make it real and start doing the things it will take</li>
+      </ul>
+
+      <h4 style={{ margin: 0 }}>Closing Note</h4>
+      <p><em>“You can manifest what you want if you work hard enough to get it. Seeing the things you want every day should be your motivation”</em></p>
+    </div>
+  );
+}
+
+/* ========================== MAIN PAGE ========================== */
 
 export default function VisionBoardScreen() {
   const [userId, setUserId] = useState<string | null>(null);
-  const [items, setItems] = useState<VisionItem[]>([]);
+  const [images, setImages] = useState<VBImage[]>([]);
+  const [selected, setSelected] = useState(0);
+  const [playing, setPlaying] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  // Inline viewer (no overlay text)
-  const [currentIdx, setCurrentIdx] = useState<number>(0);
-  const [playing, setPlaying] = useState<boolean>(false);
-  const playTimerRef = useRef<number | null>(null);
-  const viewerRef = useRef<HTMLDivElement | null>(null);
+  // Alfred
+  const [showHelp, setShowHelp] = useState(false);
+  const [imgIdx, setImgIdx] = useState(0);
+  const VB_ALFRED_SRC = VB_ALFRED_CANDIDATES[imgIdx] ?? "";
 
-  /* ---- auth ---- */
+  const fileRef = useRef<HTMLInputElement>(null);
+  const canAddMore = images.length < 6;
+  const current = images[selected] || null;
+
+  /* ----- auth ----- */
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -35,245 +112,308 @@ export default function VisionBoardScreen() {
     });
   }, []);
 
-  /* ---- load items ---- */
-  useEffect(() => { if (userId) loadItems(); }, [userId]);
-
-  async function loadItems() {
+  /* ----- load user's images from storage (bucket: vision_board) ----- */
+  useEffect(() => {
     if (!userId) return;
-    setErr(null);
-    const { data, error } = await supabase
-      .from("vision_items")
-      .select("*")
-      .eq("user_id", userId)
-      .order("sort_order", { ascending: true })
-      .order("id", { ascending: true });
-    if (error) { setErr(error.message); setItems([]); return; }
-    const list = (data as VisionItem[]) || [];
-    setItems(list);
-    if (list.length) setCurrentIdx(i => Math.min(i, list.length - 1));
-    else { setCurrentIdx(0); setPlaying(false); }
-  }
+    (async () => {
+      try {
+        setErr(null);
+        const { data: files, error } = await supabase.storage.from("vision_board").list(userId, {
+          sortBy: { column: "created_at", order: "asc" },
+        });
+        if (error) throw error;
 
-  /* ---- upload ---- */
-  function triggerFile() { fileInputRef.current?.click(); }
+        const rows: VBImage[] = (files || []).map(f => {
+          const path = `${userId}/${f.name}`;
+          const { data } = supabase.storage.from("vision_board").getPublicUrl(path);
+          return { path, url: data.publicUrl, caption: "", created_at: (f as any)?.created_at };
+        });
 
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file || !userId) return;
-    e.target.value = "";
-    if (!file.type.startsWith("image/")) { setErr("Please choose an image file."); return; }
-    if (file.size > 10 * 1024 * 1024) { setErr("Image is too large (max 10MB)."); return; }
+        // optional captions table
+        try {
+          const { data: caps } = await supabase
+            .from("vision_images")
+            .select("path, caption")
+            .eq("user_id", userId);
+          if (caps && Array.isArray(caps)) {
+            const map = new Map<string, string>(caps.map((c: any) => [c.path, c.caption || ""]));
+            rows.forEach(r => { r.caption = map.get(r.path) || ""; });
+          }
+        } catch { /* table may not exist */ }
 
-    setUploading(true); setErr(null);
+        setImages(rows.slice(0, 6));
+        setSelected(0);
+      } catch (e: any) {
+        setErr(e.message || String(e));
+        setImages([]);
+      }
+    })();
+  }, [userId]);
+
+  /* ----- slideshow every 30s ----- */
+  useEffect(() => {
+    if (!playing || images.length === 0) return;
+    const id = setInterval(() => {
+      setSelected(i => (i + 1) % images.length);
+    }, 30000);
+    return () => clearInterval(id);
+  }, [playing, images.length]);
+
+  /* ----- actions ----- */
+  function prev() { if (images.length) setSelected(i => (i - 1 + images.length) % images.length); }
+  function next() { if (images.length) setSelected(i => (i + 1) % images.length); }
+
+  async function handleUpload(files: FileList | null) {
+    if (!userId || !files || files.length === 0) return;
+    setBusy(true); setErr(null);
     try {
-      const ext = file.name.split(".").pop() || "jpg";
-      const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-      const { error: upErr } = await supabase.storage.from("vision").upload(path, file, { upsert: false });
-      if (upErr) throw upErr;
+      const remaining = Math.max(0, 6 - images.length);
+      const toUpload = Array.from(files).slice(0, remaining);
+      const newOnes: VBImage[] = [];
 
-      const { data: pub } = supabase.storage.from("vision").getPublicUrl(path);
-      const image_url = pub.publicUrl;
+      for (const file of toUpload) {
+        const safeName = `${Date.now()}-${file.name.replace(/\s+/g, "_")}`;
+        const path = `${userId}/${safeName}`;
+        const { error: uerr } = await supabase.storage.from("vision_board").upload(path, file, { upsert: false });
+        if (uerr) throw uerr;
+        const { data } = supabase.storage.from("vision_board").getPublicUrl(path);
+        newOnes.push({ path, url: data.publicUrl, caption: "" });
 
-      const nextOrder = items.length ? Math.max(...items.map(i => i.sort_order ?? 0)) + 1 : 0;
-      const { error: insErr } = await supabase
-        .from("vision_items")
-        .insert({ user_id: userId, image_url, storage_path: path, caption: null, sort_order: nextOrder });
-      if (insErr) throw insErr;
+        try {
+          await supabase.from("vision_images").insert({ user_id: userId, path, caption: "" });
+        } catch { /* ignore if table doesn't exist */ }
+      }
 
-      await loadItems();
-      setCurrentIdx(items.length); // jump to new image
-      viewerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const updated = [...images, ...newOnes].slice(0, 6);
+      setImages(updated);
+      if (images.length === 0 && updated.length > 0) setSelected(0);
+      if (fileRef.current) fileRef.current.value = "";
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
-      setUploading(false);
+      setBusy(false);
     }
   }
 
-  /* ---- caption update (kept in grid only) ---- */
-  async function saveCaption(it: VisionItem, caption: string) {
-    const { error } = await supabase.from("vision_items").update({ caption }).eq("id", it.id);
-    if (error) { setErr(error.message); return; }
-    setItems(items.map(x => x.id === it.id ? { ...x, caption } : x));
+  async function saveCaption(idx: number, caption: string) {
+    const img = images[idx]; if (!img || !userId) return;
+    const nextImgs = images.slice(); nextImgs[idx] = { ...img, caption };
+    setImages(nextImgs);
+    try {
+      await supabase.from("vision_images").upsert(
+        { user_id: userId, path: img.path, caption },
+        { onConflict: "user_id,path" } as any
+      );
+    } catch { /* ignore */ }
   }
 
-  /* ---- delete ---- */
-  async function removeItem(it: VisionItem) {
-    setErr(null);
-    const { error: delErr } = await supabase.from("vision_items").delete().eq("id", it.id);
-    if (delErr) { setErr(delErr.message); return; }
-    if (it.storage_path) {
-      const { error: storErr } = await supabase.storage.from("vision").remove([it.storage_path]);
-      if (storErr) setErr(`Removed from board, but not storage: ${storErr.message}`);
+  async function removeAt(idx: number) {
+    if (!userId) return;
+    const img = images[idx]; if (!img) return;
+    setBusy(true); setErr(null);
+    try {
+      await supabase.storage.from("vision_board").remove([img.path]);
+      try {
+        await supabase.from("vision_images").delete().eq("user_id", userId).eq("path", img.path);
+      } catch {}
+      const next = images.filter((_, i) => i !== idx);
+      setImages(next);
+      setSelected(Math.max(0, Math.min(selected, next.length - 1)));
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
     }
-    await loadItems();
-    setCurrentIdx(i => Math.min(i, Math.max(0, items.length - 2)));
   }
 
-  /* ---- inline viewer nav ---- */
-  function next() { if (items.length) setCurrentIdx(i => (i + 1) % items.length); }
-  function prev() { if (items.length) setCurrentIdx(i => (i - 1 + items.length) % items.length); }
-
-  // Keyboard support (no overlay text)
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (!items.length) return;
-      if (e.key === "ArrowRight") { e.preventDefault(); next(); }
-      if (e.key === "ArrowLeft")  { e.preventDefault(); prev(); }
-      if (e.key === " " || e.key === "Spacebar") { e.preventDefault(); setPlaying(p => !p); }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [items.length]);
-
-  // Slideshow timer
-  useEffect(() => {
-    if (!playing || !items.length) {
-      if (playTimerRef.current) { window.clearInterval(playTimerRef.current); playTimerRef.current = null; }
-      return;
-    }
-    playTimerRef.current = window.setInterval(() => setCurrentIdx(i => (i + 1) % items.length), SLIDESHOW_MS);
-    return () => {
-      if (playTimerRef.current) { window.clearInterval(playTimerRef.current); playTimerRef.current = null; }
-    };
-  }, [playing, items.length]);
-
-  function showAt(i: number) {
-    setCurrentIdx(i);
-    viewerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
+  /* ----- layout helpers ----- */
+  const monthLabel = useMemo(() => {
+    const d = new Date();
+    return d.toLocaleString(undefined, { month: "long", year: "numeric" });
+  }, []);
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      <style>{CSS_VIEWER}</style>
+      {/* Title card ONLY */}
+      <div className="card" style={{ position: "relative", paddingRight: 64 }}>
+        {/* Alfred — top-right */}
+        <button
+          onClick={() => setShowHelp(true)}
+          aria-label="Open Vision Board help"
+          title="Need a hand? Ask Alfred"
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            cursor: "pointer",
+            lineHeight: 0,
+            zIndex: 10,
+          }}
+        >
+          {VB_ALFRED_SRC ? (
+            <img
+              src={VB_ALFRED_SRC}
+              alt="Vision Board Alfred — open help"
+              style={{ width: 48, height: 48 }}
+              onError={() => setImgIdx(i => i + 1)}
+            />
+          ) : (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 36, height: 36, borderRadius: 999,
+                border: "1px solid #d1d5db",
+                background: "#f9fafb",
+                fontWeight: 700,
+              }}
+            >
+              ?
+            </span>
+          )}
+        </button>
 
-      <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div>
-          <h1 style={{ margin: 0 }}>Vision Board</h1>
-          <div className="muted">
-            Up to {MAX_ITEMS} images. View on-page, cycle with arrows (or keys), or play a 30s slideshow.
-          </div>
+        <h1 style={{ margin: 0 }}>Vision Board</h1>
+        <div className="muted">{monthLabel}</div>
+      </div>
+
+      {/* Info + Upload live BELOW the title */}
+      <div className="card" style={{ display: "grid", gap: 10 }}>
+        <div className="muted">
+          You can upload up to <strong>6 images</strong> for your vision board.
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {/* hidden input; button triggers it */}
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={e => handleUpload(e.target.files)}
+            style={{ display: "none" }}
+            disabled={!canAddMore || busy || !userId}
+          />
           <button
+            onClick={() => fileRef.current?.click()}
+            disabled={!canAddMore || busy || !userId}
             className="btn-primary"
-            onClick={triggerFile}
-            disabled={!userId || items.length >= MAX_ITEMS || uploading}
             style={{ borderRadius: 8 }}
-            title={items.length >= MAX_ITEMS ? "Maximum reached" : "Upload image"}
           >
-            {uploading ? "Uploading…" : items.length >= MAX_ITEMS ? "Max reached" : "Upload image"}
+            Upload image
+          </button>
+          {!canAddMore && <span className="muted">Limit reached.</span>}
+          <button onClick={() => setPlaying(p => !p)} disabled={images.length <= 1} style={{ marginLeft: "auto" }}>
+            {playing ? "Pause" : "Play 30s"}
           </button>
         </div>
+        {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-      {/* Inline viewer (no text overlays) */}
-      {items.length > 0 && (
-        <div className="card card--wash" ref={viewerRef}>
-          <div className="vb-inline">
-            <button className="vb-arrow vb-left" onClick={prev} aria-label="Previous">←</button>
+      {/* Viewer */}
+      <div className="card" style={{ display: "grid", gap: 10 }}>
+        {images.length === 0 ? (
+          <div className="muted">No images yet. Use <strong>Upload image</strong> above to add your first one.</div>
+        ) : (
+          <>
+            {/* Main image with arrows */}
+            <div style={{ position: "relative", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", minHeight: 280 }}>
+              <button
+                onClick={prev}
+                title="Previous"
+                aria-label="Previous"
+                style={{
+                  position: "absolute", top: "50%", left: 8, transform: "translateY(-50%)",
+                  width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db", background: "#fff"
+                }}
+              >←</button>
+              <button
+                onClick={next}
+                title="Next"
+                aria-label="Next"
+                style={{
+                  position: "absolute", top: "50%", right: 8, transform: "translateY(-50%)",
+                  width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db", background: "#fff"
+                }}
+              >→</button>
 
-            <div className="vb-stage">
-              <img
-                key={items[currentIdx].id}
-                src={items[currentIdx].image_url}
-                alt={items[currentIdx].caption || "Vision"}
-                className="vb-img"
-              />
-            </div>
-
-            <button className="vb-arrow vb-right" onClick={next} aria-label="Next">→</button>
-          </div>
-
-          <div className="vb-controls">
-            <button onClick={() => setPlaying(p => !p)} aria-label={playing ? "Pause slideshow" : "Play slideshow"}>
-              {playing ? "Pause" : "Play 30s"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Grid of tiles (captions kept here only) */}
-      <div className="card" style={{ padding: 12 }}>
-        {items.length === 0 && <div className="muted">No images yet. Upload your first vision image.</div>}
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
-          {items.map((it, idx) => (
-            <div key={it.id} style={{ border: "1px solid #eee", borderRadius: 12, overflow: "hidden", display: "grid", gridTemplateRows: "auto auto", background: "#fff" }}>
-              <div
-                style={{ position: "relative", aspectRatio: "4/3", background: "#f8f9fa", cursor: "pointer" }}
-                onClick={() => showAt(idx)}
-                title="View"
-              >
-                <img src={it.image_url} alt={it.caption || "Vision"} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                {/* delete */}
-                <div style={{ position: "absolute", top: 6, right: 6, display: "flex", gap: 6 }}>
-                  <button onClick={(e) => { e.stopPropagation(); removeItem(it); }} title="Delete" style={{ padding: "4px 8px" }}>×</button>
-                </div>
-              </div>
-
-              <div style={{ padding: 8, display: "grid", gap: 6 }}>
-                <input
-                  placeholder="Add a short caption (optional)"
-                  defaultValue={it.caption || ""}
-                  onBlur={(e) => {
-                    const v = e.target.value.trim();
-                    if ((it.caption || "") !== v) saveCaption(it, v || null as any);
-                  }}
+              {current && (
+                <img
+                  key={current.path}
+                  src={current.url}
+                  alt=""
+                  style={{ width: "100%", height: 360, objectFit: "cover", display: "block" }}
                 />
-                <div className="muted" style={{ fontSize: 12 }}>
-                  {it.storage_path ? <span>Stored: {it.storage_path.split("/").slice(-1)[0]}</span> : <span>External</span>}
-                </div>
-              </div>
+              )}
             </div>
-          ))}
-        </div>
 
-        {err && <div style={{ color: "red", marginTop: 12 }}>{err}</div>}
+            {/* Caption editor for selected */}
+            {current && (
+              <label style={{ display: "grid", gap: 6 }}>
+                <div className="muted">Personalise this image (optional)</div>
+                <input
+                  value={current.caption}
+                  onChange={e => {
+                    const v = e.target.value;
+                    setImages(imgs => {
+                      const copy = imgs.slice();
+                      copy[selected] = { ...copy[selected], caption: v };
+                      return copy;
+                    });
+                  }}
+                  onBlur={e => saveCaption(selected, e.target.value)}
+                  placeholder="Add a short line that makes this image yours…"
+                />
+              </label>
+            )}
+
+            {/* Thumbnails */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 8 }}>
+              {images.map((img, i) => (
+                <div key={img.path} style={{ position: "relative", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+                  <button
+                    onClick={() => setSelected(i)}
+                    title={img.caption || "Select"}
+                    style={{ padding: 0, border: "none", background: "transparent", width: "100%", lineHeight: 0 }}
+                  >
+                    <img src={img.url} alt="" style={{ width: "100%", height: 80, objectFit: "cover", display: "block", opacity: i === selected ? 1 : 0.9 }} />
+                  </button>
+                  <button
+                    onClick={() => removeAt(i)}
+                    title="Remove"
+                    aria-label="Remove"
+                    style={{
+                      position: "absolute", top: 6, right: 6, width: 26, height: 26,
+                      borderRadius: 999, border: "1px solid #d1d5db", background: "#fff"
+                    }}
+                  >✕</button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
+
+      {/* Help modal (inline content) */}
+      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Vision Board — Help">
+        <div style={{ display: "flex", gap: 16 }}>
+          {VB_ALFRED_SRC && (
+            <img
+              src={VB_ALFRED_SRC}
+              alt=""
+              aria-hidden="true"
+              style={{ width: 72, height: 72, flex: "0 0 auto" }}
+              onError={() => setImgIdx(i => i + 1)}
+            />
+          )}
+          <div style={{ flex: 1 }}>
+            <VisionHelpContent />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
-
-/* --- inline viewer styles (no text overlays) --- */
-const CSS_VIEWER = `
-.vb-inline{
-  display: grid;
-  grid-template-columns: 40px 1fr 40px;
-  gap: 8px;
-  align-items: center;
-}
-.vb-stage{
-  position: relative;
-  background: #f8f9fa;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
-  aspect-ratio: 4 / 3;
-  display: grid;
-  place-items: center;
-}
-.vb-img{
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
-  background: #f8f9fa;
-}
-.vb-arrow{
-  height: 40px; width: 40px;
-  border-radius: 999px;
-}
-.vb-left{ justify-self: start; }
-.vb-right{ justify-self: end; }
-
-.vb-controls{
-  display: flex; justify-content: center; gap: 8px; margin-top: 8px;
-}
-
-@media (max-width: 520px){
-  .vb-inline{ grid-template-columns: 32px 1fr 32px; }
-  .vb-arrow{ height: 32px; width: 32px; }
-}
-`;
