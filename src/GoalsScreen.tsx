@@ -1,19 +1,16 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 import BigGoalWizard from "./BigGoalWizard";
 
-/** Public path helper:
- * - Vite: import.meta.env.BASE_URL
- * - CRA / GH Pages: process.env.PUBLIC_URL
- * - Fallback: '' (root)
- */
+/** Public path helper (Vite/CRA/Vercel/GH Pages) */
 function publicPath(p: string) {
   // @ts-ignore
   const base =
     (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
     (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
     "";
-  return `${base}${p.startsWith("/") ? p : `/${p}`}`;
+  const withSlash = p.startsWith("/") ? p : `/${p}`;
+  return `${base.replace(/\/$/, "")}${withSlash}`;
 }
 const ALFRED_SRC = publicPath("/alfred/goals-alfred.png");
 
@@ -38,8 +35,8 @@ type Goal = {
   start_date: string | null;
   target_date: string | null;
   status: string | null;
-  halfway_date?: string | null;    // may exist in your schema
-  halfway_note?: string | null;    // may exist in your schema
+  halfway_date?: string | null;
+  halfway_note?: string | null;
 };
 
 type Step = {
@@ -56,10 +53,7 @@ function toISO(d: Date) {
   const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,"0"), dd = String(d.getDate()).padStart(2,"0");
   return `${y}-${m}-${dd}`;
 }
-function fromISO(s: string) {
-  const [y,m,d] = s.split("-").map(Number);
-  return new Date(y,(m??1)-1,(d??1));
-}
+function fromISO(s: string) { const [y,m,d] = s.split("-").map(Number); return new Date(y,(m??1)-1,(d??1)); }
 function clampDay(d: Date) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
 function lastDayOfMonth(y:number,m0:number){ return new Date(y,m0+1,0).getDate(); }
 function addMonthsClamped(base: Date, months: number, anchorDay?: number) {
@@ -80,59 +74,25 @@ function normalizeCat(x: string | null | undefined): CatKey {
 /* ---------- Alfred modal components ---------- */
 function Modal({
   open, onClose, title, children,
-}: {
-  open: boolean;
-  onClose: () => void;
-  title: string;
-  children: React.ReactNode;
-}) {
+}: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
   const closeRef = useRef<HTMLButtonElement>(null);
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     if (open) window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
-
-  useEffect(() => {
-    if (open && closeRef.current) closeRef.current.focus();
-  }, [open]);
-
+  useEffect(() => { if (open && closeRef.current) closeRef.current.focus(); }, [open]);
   if (!open) return null;
-
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.35)",
-        zIndex: 1000,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 16,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          maxWidth: 720,
-          width: "100%",
-          background: "#fff",
-          borderRadius: 12,
-          boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
-          padding: 20,
-        }}
-      >
+    <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 2000,
+               display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 720, width: "100%", background: "#fff", borderRadius: 12,
+                 boxShadow: "0 10px 30px rgba(0,0,0,0.2)", padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
           <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
-          <button ref={closeRef} onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>
-            ✕
-          </button>
+          <button ref={closeRef} onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>✕</button>
         </div>
         <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
       </div>
@@ -144,7 +104,6 @@ function GoalsHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
       <p><em>“A dream with a well thought out plan on how to achieve it becomes a goal…”</em></p>
-
       <h4 style={{ margin: "8px 0" }}>Step-by-Step Guidance</h4>
       <ol style={{ paddingLeft: 18, margin: 0 }}>
         <li>Write down your dream</li>
@@ -154,20 +113,17 @@ function GoalsHelpContent() {
         <li>Turn it into monthly / weekly / daily commitments</li>
         <li>Work on it every day</li>
       </ol>
-
       <h4 style={{ margin: "8px 0" }}>Alfred’s Tips</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
         <li>Every small step counts</li>
         <li>Consistency beats intensity</li>
         <li>Celebrate progress, not just results</li>
       </ul>
-
       <h4 style={{ margin: "8px 0" }}>How it appears in the app</h4>
       <p>
         Set your dream as a Big Goal, define the halfway milestone, add monthly/weekly/daily commitments.
         The steps appear on your Today screen as top priorities so you’re always moving forward.
       </p>
-
       <p><strong>Closing Note:</strong> You’ve turned a dream into a plan — now we make it real.</p>
     </div>
   );
@@ -197,8 +153,15 @@ export default function GoalsScreen() {
   // category editor for selected
   const [editCat, setEditCat] = useState<CatKey>("other");
 
-  // Alfred modal
+  // Alfred modal + image state
   const [showHelp, setShowHelp] = useState(false);
+  const [imgOk, setImgOk] = useState(true);
+
+  useEffect(() => {
+    // helpful console breadcrumb
+    // eslint-disable-next-line no-console
+    console.log("Alfred looking for image at:", ALFRED_SRC);
+  }, []);
 
   /* ----- auth ----- */
   useEffect(() => {
@@ -236,8 +199,6 @@ export default function GoalsScreen() {
     setMonthly(rows.filter(r => r.cadence === "monthly").map(r => r.description));
     setWeekly(rows.filter(r => r.cadence === "weekly").map(r => r.description));
     setDaily(rows.filter(r => r.cadence === "daily").map(r => r.description));
-
-    // prime category editor
     setEditCat(normalizeCat(g.category));
   }
 
@@ -245,7 +206,6 @@ export default function GoalsScreen() {
   async function clientReseedTasksForGoal(goalId: number) {
     if (!userId) return;
 
-    // 1) fetch goal + its active steps
     const { data: g, error: ge } = await supabase
       .from("goals")
       .select("id,user_id,title,category,category_color,start_date,target_date,halfway_date,halfway_note")
@@ -270,7 +230,6 @@ export default function GoalsScreen() {
     const cat: CatKey = normalizeCat(goal.category);
     const col = goal.category_color || colorOf(cat);
 
-    // 2) delete FUTURE tasks for this goal (avoid duplicates)
     const today = toISO(new Date());
     await supabase
       .from("tasks")
@@ -280,7 +239,6 @@ export default function GoalsScreen() {
       .in("source", ["big_goal_monthly","big_goal_weekly","big_goal_daily"])
       .gte("due_date", today);
 
-    // 3) rebuild tasks from steps
     const queue: any[] = [];
 
     // monthly
@@ -291,14 +249,10 @@ export default function GoalsScreen() {
         const due = toISO(d);
         for (const s of monthSteps) {
           queue.push({
-            user_id: userId,
-            goal_id: goalId,
+            user_id: userId, goal_id: goalId,
             title: `BIG GOAL — Monthly: ${s.description}`,
-            due_date: due,
-            source: "big_goal_monthly",
-            priority: 2,
-            category: cat,
-            category_color: col,
+            due_date: due, source: "big_goal_monthly", priority: 2,
+            category: cat, category_color: col,
           });
         }
         d = addMonthsClamped(d, 1, start.getDate());
@@ -313,14 +267,10 @@ export default function GoalsScreen() {
         const due = toISO(d);
         for (const s of weekSteps) {
           queue.push({
-            user_id: userId,
-            goal_id: goalId,
+            user_id: userId, goal_id: goalId,
             title: `BIG GOAL — Weekly: ${s.description}`,
-            due_date: due,
-            source: "big_goal_weekly",
-            priority: 2,
-            category: cat,
-            category_color: col,
+            due_date: due, source: "big_goal_weekly", priority: 2,
+            category: cat, category_color: col,
           });
         }
         d.setDate(d.getDate() + 7);
@@ -335,21 +285,16 @@ export default function GoalsScreen() {
         const due = toISO(d);
         for (const s of daySteps) {
           queue.push({
-            user_id: userId,
-            goal_id: goalId,
+            user_id: userId, goal_id: goalId,
             title: `BIG GOAL — Daily: ${s.description}`,
-            due_date: due,
-            source: "big_goal_daily",
-            priority: 2,
-            category: cat,
-            category_color: col,
+            due_date: due, source: "big_goal_daily", priority: 2,
+            category: cat, category_color: col,
           });
         }
         d.setDate(d.getDate() + 1);
       }
     }
 
-    // 4) bulk insert in chunks
     for (let i = 0; i < queue.length; i += 500) {
       const slice = queue.slice(i, i + 500);
       const { error: terr } = await supabase.from("tasks").insert(slice);
@@ -364,14 +309,12 @@ export default function GoalsScreen() {
     if (!userId || !selected) return;
     setBusy(true); setErr(null);
     try {
-      // deactivate existing
       const { error: de } = await supabase
         .from("big_goal_steps")
         .update({ active: false })
         .eq("goal_id", selected.id);
       if (de) throw de;
 
-      // insert new (Monthly → Weekly → Daily)
       const rows: any[] = [];
       for (const s of monthly.map(x=>x.trim()).filter(Boolean)) rows.push({ user_id:userId, goal_id:selected.id, cadence:"monthly", description:s, active:true });
       for (const s of weekly.map(x=>x.trim()).filter(Boolean))  rows.push({ user_id:userId, goal_id:selected.id, cadence:"weekly",  description:s, active:true });
@@ -381,10 +324,8 @@ export default function GoalsScreen() {
         if (ie) throw ie;
       }
 
-      // Try server RPC first
       const { error: rerr } = await supabase.rpc("reseed_big_goal_steps", { p_goal_id: selected.id });
       if (rerr) {
-        // Fallback: do it client-side
         const n = await clientReseedTasksForGoal(selected.id);
         alert(`Steps saved. ${n ?? 0} task(s) reseeded for this goal.`);
       } else {
@@ -464,17 +405,31 @@ export default function GoalsScreen() {
             padding: 0,
             cursor: "pointer",
             lineHeight: 0,
+            zIndex: 10,
           }}
         >
-          <img
-            src={ALFRED_SRC}
-            alt="Alfred — open help"
-            style={{ width: 56, height: 56 }}
-            onError={(e) => {
-              (e.currentTarget as HTMLImageElement).style.display = "none";
-              console.warn("Alfred image not found at:", ALFRED_SRC);
-            }}
-          />
+          {imgOk ? (
+            <img
+              src={ALFRED_SRC}
+              alt="Alfred — open help"
+              style={{ width: 56, height: 56 }}
+              onError={() => { setImgOk(false); console.warn("Alfred image not found at:", ALFRED_SRC); }}
+            />
+          ) : (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 40, height: 40, borderRadius: 999,
+                border: "1px solid #d1d5db",
+                background: "#f9fafb",
+                fontWeight: 700,
+              }}
+            >
+              ?
+            </span>
+          )}
         </button>
 
         <h1>Goals</h1>
@@ -633,7 +588,7 @@ export default function GoalsScreen() {
       {/* Help modal at page level */}
       <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Goals — Help">
         <div style={{ display: "flex", gap: 16 }}>
-          <img src={ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />
+          {imgOk && <img src={ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
           <GoalsHelpContent />
         </div>
       </Modal>
