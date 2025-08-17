@@ -20,7 +20,7 @@ const VB_ALFRED_CANDIDATES = [
   "/alfred/Vision_Alfred.webp",
 ].map(publicPath);
 
-/** ← your storage bucket name */
+/** Storage bucket name */
 const VISION_BUCKET = "vision";
 
 /** Types */
@@ -111,6 +111,13 @@ export default function VisionBoardScreen() {
   const fileRef = useRef<HTMLInputElement>(null);
   const canAddMore = images.length < 6;
   const current = images[selected] || null;
+
+  /* ----- make sure our contain style wins even if a global CSS used cover ----- */
+  const styleTag = (
+    <style>{`
+      .vb-viewer-img { object-fit: contain !important; }
+    `}</style>
+  );
 
   /* ----- auth ----- */
   useEffect(() => {
@@ -221,7 +228,7 @@ export default function VisionBoardScreen() {
       const newOnes: VBImage[] = [];
 
       for (const file of toUpload) {
-        const safeName = `${Date.now()}-${file.name.replace(/\s+/g, "_")}`;
+        the const safeName = `${Date.now()}-${file.name.replace(/\s+/g, "_")}`;
         const path = (prefix === "user" ? `${uid}/` : "") + safeName;
 
         const { error: uerr } = await supabase.storage.from(VISION_BUCKET).upload(path, file, { upsert: false });
@@ -283,6 +290,8 @@ export default function VisionBoardScreen() {
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
+      {styleTag}
+
       {/* Title card ONLY */}
       <div className="card" style={{ position: "relative", paddingRight: 64 }}>
         {/* Alfred — top-right */}
@@ -405,12 +414,12 @@ export default function VisionBoardScreen() {
                   key={current.path}
                   src={current.url}
                   alt=""
+                  className="vb-viewer-img"
                   style={{
                     width: "100%",
                     height: "100%",
                     maxWidth: "100%",
                     maxHeight: "100%",
-                    objectFit: "contain",   // show the whole image
                     display: "block",
                   }}
                 />
@@ -420,7 +429,7 @@ export default function VisionBoardScreen() {
             {/* Caption editor for selected */}
             {current && (
               <label style={{ display: "grid", gap: 6 }}>
-                <div className="muted">Add text for this image (optional)</div>
+                <div className="muted">Add text for this image here</div>
                 <input
                   value={current.caption}
                   onChange={e => {
