@@ -37,7 +37,7 @@ function publicPath(p: string) {
 }
 const CAL_ALFRED_SRC = publicPath("/alfred/Calendar_Alfred.png");
 
-/* ---------- Alfred modal components ---------- */
+/* ---------- Alfred modal shell ---------- */
 function Modal({
   open, onClose, title, children,
 }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
@@ -66,16 +66,83 @@ function Modal({
   );
 }
 
+/* ---------- Loads full help doc from /public/help ---------- */
 function CalendarHelpContent() {
-  // Replace this with your attached Calendar help copy if you want exact wording.
+  const CANDIDATES = [
+    publicPath("/help/calendar-help.html"),
+    publicPath("/help/calendar-help.pdf"),
+    publicPath("/help/calendar-help.md"),
+    publicPath("/help/calendar-help.txt"),
+  ];
+  const [mode, setMode] = useState<"html" | "pdf" | "md" | "txt" | "none">("none");
+  const [url, setUrl] = useState<string>("");
+  const [text, setText] = useState<string>("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      for (const candidate of CANDIDATES) {
+        try {
+          const res = await fetch(candidate, { cache: "no-cache" });
+          if (!res.ok) continue;
+
+          if (candidate.endsWith(".html")) {
+            if (!cancelled) { setMode("html"); setUrl(candidate); setLoading(false); }
+            return;
+          }
+          if (candidate.endsWith(".pdf")) {
+            if (!cancelled) { setMode("pdf"); setUrl(candidate); setLoading(false); }
+            return;
+          }
+          // md / txt
+          const t = await res.text();
+          if (!cancelled) {
+            setText(t);
+            setMode(candidate.endsWith(".md") ? "md" : "txt");
+            setLoading(false);
+          }
+          return;
+        } catch {
+          /* try next */
+        }
+      }
+      if (!cancelled) { setMode("none"); setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) return <div className="muted">Loading help…</div>;
+  if (mode === "html" || mode === "pdf") {
+    return (
+      <div style={{ display: "grid", gap: 8 }}>
+        <iframe
+          src={url}
+          title="Calendar help"
+          style={{ width: "100%", height: "60vh", border: "1px solid #e5e7eb", borderRadius: 8 }}
+        />
+        <a href={url} target="_blank" rel="noreferrer">Open in new tab</a>
+      </div>
+    );
+  }
+  if (mode === "md") {
+    // very light markdown: preserve newlines, show headings/bold/italic minimally
+    const html = text
+      .replace(/^### (.*)$/gm, "<h4>$1</h4>")
+      .replace(/^## (.*)$/gm, "<h3>$1</h3>")
+      .replace(/^# (.*)$/gm, "<h2>$1</h2>")
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.+?)\*/g, "<em>$1</em>")
+      .replace(/^- (.*)$/gm, "• $1")
+      .replace(/\n/g, "<br/>");
+    return <div dangerouslySetInnerHTML={{ __html: html }} />;
+  }
+  if (mode === "txt") {
+    return <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{text}</pre>;
+  }
   return (
-    <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
-      <p><em>Click any day to highlight it and see that day’s tasks. Stay on this page; no navigation needed.</em></p>
-      <h4 style={{ margin: "8px 0" }}>Quick tips</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Use ← / → to change months, or press <strong>Today</strong>.</li>
-        <li>Add tasks straight to the selected date — set category, priority, and frequency.</li>
-      </ul>
+    <div className="muted">
+      Place your help at <code>public/help/calendar-help.html</code> (or <code>.pdf</code>, <code>.md</code>, <code>.txt</code>) and it’ll appear here.
     </div>
   );
 }
@@ -115,15 +182,14 @@ export default function CalendarScreen({
 
   const startGrid = useMemo(() => {
     const d = new Date(firstDayOfMonth);
-    // Start on Monday (ISO week). Adjust so Mon=0 … Sun=6.
-    const dow = (d.getDay() + 6) % 7;
+    const dow = (d.getDay() + 6) % 7; // Mon=0 .. Sun=6
     d.setDate(d.getDate() - dow);
     return d;
   }, [firstDayOfMonth]);
 
   const endGrid = useMemo(() => {
     const d = new Date(lastDayOfMonth);
-    const dow = (d.getDay() + 6) % 7; // Mon=0 … Sun=6
+    const dow = (d.getDay() + 6) % 7;
     d.setDate(d.getDate() + (6 - dow));
     return d;
   }, [lastDayOfMonth]);
@@ -297,7 +363,7 @@ export default function CalendarScreen({
           position: "relative",
           display: "grid",
           gap: 6,
-          paddingRight: 64, // breathing room so the image doesn't overlap the title
+          paddingRight: 64,
         }}
       >
         {/* Alfred — top-right */}
@@ -539,11 +605,13 @@ export default function CalendarScreen({
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-      {/* Help modal */}
+      {/* Help modal (loads your real doc) */}
       <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Calendar — Help">
         <div style={{ display: "flex", gap: 16 }}>
           {imgOk && <img src={CAL_ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
-          <CalendarHelpContent />
+          <div style={{ flex: 1 }}>
+            <CalendarHelpContent />
+          </div>
         </div>
       </Modal>
     </div>
