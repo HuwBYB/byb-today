@@ -35,7 +35,14 @@ function publicPath(p: string) {
   const withSlash = p.startsWith("/") ? p : `/${p}`;
   return `${base.replace(/\/$/, "")}${withSlash}`;
 }
-const CAL_ALFRED_SRC = publicPath("/alfred/Calendar_Alfred.png");
+
+/** Alfred image candidates (like Goals) */
+const CAL_ALFRED_CANDIDATES = [
+  "/alfred/Calendar_Alfred.png",
+  "/alfred/Calendar_Alfred.jpg",
+  "/alfred/Calendar_Alfred.jpeg",
+  "/alfred/Calendar_Alfred.webp",
+].map(publicPath);
 
 /* ---------- Alfred modal shell ---------- */
 function Modal({
@@ -66,83 +73,33 @@ function Modal({
   );
 }
 
-/* ---------- Loads full help doc from /public/help ---------- */
+/* ---------- Inline help content (like Goals) ---------- */
 function CalendarHelpContent() {
-  const CANDIDATES = [
-    publicPath("/help/calendar-help.html"),
-    publicPath("/help/calendar-help.pdf"),
-    publicPath("/help/calendar-help.md"),
-    publicPath("/help/calendar-help.txt"),
-  ];
-  const [mode, setMode] = useState<"html" | "pdf" | "md" | "txt" | "none">("none");
-  const [url, setUrl] = useState<string>("");
-  const [text, setText] = useState<string>("");
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      for (const candidate of CANDIDATES) {
-        try {
-          const res = await fetch(candidate, { cache: "no-cache" });
-          if (!res.ok) continue;
-
-          if (candidate.endsWith(".html")) {
-            if (!cancelled) { setMode("html"); setUrl(candidate); setLoading(false); }
-            return;
-          }
-          if (candidate.endsWith(".pdf")) {
-            if (!cancelled) { setMode("pdf"); setUrl(candidate); setLoading(false); }
-            return;
-          }
-          // md / txt
-          const t = await res.text();
-          if (!cancelled) {
-            setText(t);
-            setMode(candidate.endsWith(".md") ? "md" : "txt");
-            setLoading(false);
-          }
-          return;
-        } catch {
-          /* try next */
-        }
-      }
-      if (!cancelled) { setMode("none"); setLoading(false); }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  if (loading) return <div className="muted">Loading help…</div>;
-  if (mode === "html" || mode === "pdf") {
-    return (
-      <div style={{ display: "grid", gap: 8 }}>
-        <iframe
-          src={url}
-          title="Calendar help"
-          style={{ width: "100%", height: "60vh", border: "1px solid #e5e7eb", borderRadius: 8 }}
-        />
-        <a href={url} target="_blank" rel="noreferrer">Open in new tab</a>
-      </div>
-    );
-  }
-  if (mode === "md") {
-    // very light markdown: preserve newlines, show headings/bold/italic minimally
-    const html = text
-      .replace(/^### (.*)$/gm, "<h4>$1</h4>")
-      .replace(/^## (.*)$/gm, "<h3>$1</h3>")
-      .replace(/^# (.*)$/gm, "<h2>$1</h2>")
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/\*(.+?)\*/g, "<em>$1</em>")
-      .replace(/^- (.*)$/gm, "• $1")
-      .replace(/\n/g, "<br/>");
-    return <div dangerouslySetInnerHTML={{ __html: html }} />;
-  }
-  if (mode === "txt") {
-    return <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{text}</pre>;
-  }
   return (
-    <div className="muted">
-      Place your help at <code>public/help/calendar-help.html</code> (or <code>.pdf</code>, <code>.md</code>, <code>.txt</code>) and it’ll appear here.
+    <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
+      <p><em>“It can be difficult to remember everything all the time and we want to make sure you have all of your important information in one place.”</em></p>
+
+      <h4 style={{ margin: "8px 0" }}>Step-by-Step Guidance</h4>
+      <ol style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Pick the date in question.</li>
+        <li>View existing tasks or add a new one to that date.</li>
+        <li>Choose the life area: <strong>Personal</strong> / <strong>Health</strong> / <strong>Business</strong> / <strong>Finance</strong>.</li>
+        <li>Pick a priority: <strong>High</strong> / <strong>Normal</strong> / <strong>Low</strong>.</li>
+        <li>Select frequency: <strong>Once</strong>, <strong>Daily</strong>, <strong>Weekly</strong>, <strong>Monthly</strong>, or <strong>Annually</strong>.</li>
+        <li>Click <strong>Add</strong>.</li>
+      </ol>
+
+      <h4 style={{ margin: "8px 0" }}>Alfred’s Tips</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Put any reminder here, big or small.</li>
+        <li>Consistency beats intensity — small steps scheduled are powerful.</li>
+      </ul>
+
+      <h4 style={{ margin: "8px 0" }}>How it appears in the app</h4>
+      <p>Calendar items show on your <strong>Today</strong> page as tasks when that day arrives.</p>
+
+      <h4 style={{ margin: "8px 0" }}>Closing Note</h4>
+      <p><em>“It can be hard to remember everything in a busy life — let me help you.”</em></p>
     </div>
   );
 }
@@ -213,12 +170,13 @@ export default function CalendarScreen({
   const [newCat, setNewCat] = useState<CatKey>("other");
   const [newPriority, setNewPriority] = useState<number>(2);
   const [newFreq, setNewFreq] = useState<"once" | "daily" | "weekly" | "monthly" | "annually">("once");
-  const [repeatCount, setRepeatCount] = useState<number>(1); // number of occurrences (including the first)
+  const [repeatCount, setRepeatCount] = useState<number>(1);
   const [adding, setAdding] = useState(false);
 
-  // Alfred modal
+  // Alfred modal (like Goals)
   const [showHelp, setShowHelp] = useState(false);
-  const [imgOk, setImgOk] = useState(true);
+  const [imgIdx, setImgIdx] = useState(0);
+  const ALFRED_SRC = CAL_ALFRED_CANDIDATES[imgIdx] ?? "";
 
   // auth
   useEffect(() => {
@@ -356,7 +314,7 @@ export default function CalendarScreen({
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      {/* Title card with Alfred */}
+      {/* Title card with Alfred (like Goals) */}
       <div
         className="card"
         style={{
@@ -383,12 +341,12 @@ export default function CalendarScreen({
             zIndex: 10,
           }}
         >
-          {imgOk ? (
+          {ALFRED_SRC ? (
             <img
-              src={CAL_ALFRED_SRC}
+              src={ALFRED_SRC}
               alt="Calendar Alfred — open help"
               style={{ width: 48, height: 48 }}
-              onError={() => setImgOk(false)}
+              onError={() => setImgIdx(i => i + 1)}
             />
           ) : (
             <span
@@ -548,7 +506,7 @@ export default function CalendarScreen({
               <option value={3}>Low</option>
             </select>
 
-            {/* Frequency (after Priority) */}
+            {/* Frequency */}
             <select value={newFreq} onChange={e => setNewFreq(e.target.value as any)} title="Frequency">
               <option value="once">Once</option>
               <option value="daily">Daily</option>
@@ -605,10 +563,18 @@ export default function CalendarScreen({
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-      {/* Help modal (loads your real doc) */}
+      {/* Help modal (inline content like Goals) */}
       <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Calendar — Help">
         <div style={{ display: "flex", gap: 16 }}>
-          {imgOk && <img src={CAL_ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
+          {ALFRED_SRC && (
+            <img
+              src={ALFRED_SRC}
+              alt=""
+              aria-hidden="true"
+              style={{ width: 72, height: 72, flex: "0 0 auto" }}
+              onError={() => setImgIdx(i => i + 1)}
+            />
+          )}
           <div style={{ flex: 1 }}>
             <CalendarHelpContent />
           </div>
