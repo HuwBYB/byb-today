@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 import BigGoalWizard from "./BigGoalWizard";
 
-/** Public path helper (Vite/CRA/Vercel/GH Pages) */
+/** Public path helper (works with Vite/CRA/Vercel/GH Pages) */
 function publicPath(p: string) {
   // @ts-ignore
   const base =
@@ -12,7 +12,16 @@ function publicPath(p: string) {
   const withSlash = p.startsWith("/") ? p : `/${p}`;
   return `${base.replace(/\/$/, "")}${withSlash}`;
 }
-const ALFRED_SRC = publicPath("/alfred/goals-alfred.png");
+
+/** We'll start with the path you gave: /alfred/Goals_Alfred.png
+ *  If the extension differs, we'll auto-try jpg/jpeg/webp.
+ */
+const ALFRED_CANDIDATES = [
+  "/alfred/Goals_Alfred.png",
+  "/alfred/Goals_Alfred.jpg",
+  "/alfred/Goals_Alfred.jpeg",
+  "/alfred/Goals_Alfred.webp",
+].map(publicPath);
 
 /* ---------- Categories + colours (match DB constraint) ---------- */
 const CATS = [
@@ -153,14 +162,12 @@ export default function GoalsScreen() {
   // category editor for selected
   const [editCat, setEditCat] = useState<CatKey>("other");
 
-  // Alfred modal + image state
+  // Alfred modal + image source index
   const [showHelp, setShowHelp] = useState(false);
-  const [imgOk, setImgOk] = useState(true);
+  const [imgIdx, setImgIdx] = useState(0); // which candidate we’re trying
 
   useEffect(() => {
-    // helpful console breadcrumb
-    // eslint-disable-next-line no-console
-    console.log("Alfred looking for image at:", ALFRED_SRC);
+    console.log("Alfred image candidates:", ALFRED_CANDIDATES);
   }, []);
 
   /* ----- auth ----- */
@@ -387,6 +394,8 @@ export default function GoalsScreen() {
     }
   }
 
+  const currentAlfredSrc = ALFRED_CANDIDATES[Math.min(imgIdx, ALFRED_CANDIDATES.length - 1)];
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 12 }}>
       {/* Left: list + creators */}
@@ -408,28 +417,21 @@ export default function GoalsScreen() {
             zIndex: 10,
           }}
         >
-          {imgOk ? (
-            <img
-              src={ALFRED_SRC}
-              alt="Alfred — open help"
-              style={{ width: 56, height: 56 }}
-              onError={() => { setImgOk(false); console.warn("Alfred image not found at:", ALFRED_SRC); }}
-            />
-          ) : (
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 40, height: 40, borderRadius: 999,
-                border: "1px solid #d1d5db",
-                background: "#f9fafb",
-                fontWeight: 700,
-              }}
-            >
-              ?
-            </span>
-          )}
+          <img
+            src={currentAlfredSrc}
+            alt="Alfred — open help"
+            style={{ width: 56, height: 56, display: "block" }}
+            onError={() => {
+              // try the next candidate (jpg/jpeg/webp)
+              if (imgIdx < ALFRED_CANDIDATES.length - 1) {
+                setImgIdx(imgIdx + 1);
+              } else {
+                // hide if none found
+                (document.activeElement as HTMLElement | null)?.blur?.();
+              }
+              console.warn("Alfred image not found at:", currentAlfredSrc);
+            }}
+          />
         </button>
 
         <h1>Goals</h1>
@@ -441,6 +443,7 @@ export default function GoalsScreen() {
             <span className="muted">Title</span>
             <input value={sgTitle} onChange={e => setSgTitle(e.target.value)} placeholder="e.g., Read 12 books" />
           </label>
+        {/* date + category row */}
           <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
             <label style={{ flex: 1 }}>
               <div className="muted">Target date (optional)</div>
@@ -588,7 +591,16 @@ export default function GoalsScreen() {
       {/* Help modal at page level */}
       <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Goals — Help">
         <div style={{ display: "flex", gap: 16 }}>
-          {imgOk && <img src={ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
+          <img
+            src={currentAlfredSrc}
+            alt=""
+            aria-hidden="true"
+            style={{ width: 72, height: 72, flex: "0 0 auto" }}
+            onError={() => {
+              if (imgIdx < ALFRED_CANDIDATES.length - 1) setImgIdx(imgIdx + 1);
+              console.warn("Alfred image not found at:", currentAlfredSrc);
+            }}
+          />
           <GoalsHelpContent />
         </div>
       </Modal>
