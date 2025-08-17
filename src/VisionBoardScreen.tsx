@@ -12,7 +12,7 @@ function publicPath(p: string) {
   return `${base.replace(/\/$/, "")}${withSlash}`;
 }
 
-/** Alfred image (exact file you provided) + extensions fallback */
+/** Alfred image (your exact path, with fallbacks) */
 const VB_ALFRED_CANDIDATES = [
   "/alfred/Vision_Alfred.png",
   "/alfred/Vision_Alfred.jpg",
@@ -22,7 +22,7 @@ const VB_ALFRED_CANDIDATES = [
 
 /** Types */
 type VBImage = {
-  path: string;       // storage path, e.g. userId/123-name.jpg
+  path: string;       // storage path, e.g. "1234-uuid/file.jpg" or "file.jpg"
   url: string;        // public URL
   caption: string;    // optional text
   created_at?: string;
@@ -57,7 +57,7 @@ function Modal({
   );
 }
 
-/* ---------- Inline help content (from your doc) ---------- */
+/* ---------- Inline help content (your doc text) ---------- */
 function VisionHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
@@ -89,6 +89,12 @@ function VisionHelpContent() {
 
 export default function VisionBoardScreen() {
   const [userId, setUserId] = useState<string | null>(null);
+
+  // storage detection
+  const [bucket, setBucket] = useState<string | null>(null);
+  const [prefix, setPrefix] = useState<"" | "user">(""); // "" = root, "user" = {userId}/
+  const [storageReady, setStorageReady] = useState(false);
+
   const [images, setImages] = useState<VBImage[]>([]);
   const [selected, setSelected] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -101,6 +107,7 @@ export default function VisionBoardScreen() {
   const VB_ALFRED_SRC = VB_ALFRED_CANDIDATES[imgIdx] ?? "";
 
   const fileRef = useRef<HTMLInputElement>(null);
+
   const canAddMore = images.length < 6;
   const current = images[selected] || null;
 
@@ -112,21 +119,84 @@ export default function VisionBoardScreen() {
     });
   }, []);
 
-  /* ----- load user's images from storage (bucket: vision_board) ----- */
+  /* ----- detect bucket + folder prefix, then load images ----- */
   useEffect(() => {
     if (!userId) return;
-    (async () => {
+
+    const envBucket =
+      (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_VISION_BUCKET) ||
+      (typeof process !== "undefined" && (process as any).env?.VITE_VISION_BUCKET) ||
+      "";
+
+    const BUCKET_CANDIDATES = Array.from(
+      new Set([envBucket, "vision_board", "visionboard"].filter(Boolean))
+    );
+
+    async function bucketExists(name: string) {
       try {
-        setErr(null);
-        const { data: files, error } = await supabase.storage.from("vision_board").list(userId, {
+        // If bucket doesn't exist, this list will throw an error we can catch.
+        const { error } = await supabase.storage.from(name).list("", { limit: 1 });
+        return !error;
+      } catch {
+        return false;
+      }
+    }
+
+    async function detect() {
+      setErr(null);
+      setStorageReady(false);
+
+      // 1) find a bucket that exists
+      let chosen: string | null = null;
+      for (const name of BUCKET_CANDIDATES) {
+        if (await bucketExists(name)) { chosen = name; break; }
+      }
+      if (!chosen) {
+        setErr(
+          `Storage bucket not found. Tried: ${BUCKET_CANDIDATES.map((b) => `"${b}"`).join(", ")}.`
+          + ` Please create one in Supabase Studio (public) or set VITE_VISION_BUCKET.`
+        );
+        setBucket(null);
+        setImages([]);
+        setStorageReady(true);
+        return;
+      }
+
+      // 2) decide prefix: under {userId}/ or root
+      // try user folder first
+      let usePrefix: "" | "user" = "user";
+      try {
+        const resUser = await supabase.storage.from(chosen).list(userId, { limit: 1 });
+        if (resUser.error) throw resUser.error;
+        const hasInUser = (resUser.data || []).some((f: any) => !("id" in f && (f as any).id === null)); // files vs subfolders
+        if (!hasInUser) {
+          // no files under user folder — check root
+          const resRoot = await supabase.storage.from(chosen).list("", { limit: 1 });
+          if (!resRoot.error && (resRoot.data || []).length > 0) {
+            usePrefix = "";
+          }
+        }
+      } catch {
+        // if listing user folder fails oddly, fall back to root
+        usePrefix = "";
+      }
+
+      setBucket(chosen);
+      setPrefix(usePrefix);
+
+      // 3) load images (up to 6)
+      try {
+        const listPath = usePrefix === "user" ? userId : "";
+        const { data, error } = await supabase.storage.from(chosen).list(listPath, {
           sortBy: { column: "created_at", order: "asc" },
         });
         if (error) throw error;
 
-        const rows: VBImage[] = (files || []).map(f => {
-          const path = `${userId}/${f.name}`;
-          const { data } = supabase.storage.from("vision_board").getPublicUrl(path);
-          return { path, url: data.publicUrl, caption: "", created_at: (f as any)?.created_at };
+        const files = (data || []).filter((f: any) => !("id" in f && (f as any).id === null)); // ignore "folders"
+        const rows: VBImage[] = files.map((f: any) => {
+          const path = usePrefix === "user" ? `${userId}/${f.name}` : f.name;
+          const { data: pub } = supabase.storage.from(chosen).getPublicUrl(path);
+          return { path, url: pub.publicUrl, caption: "", created_at: (f as any)?.created_at };
         });
 
         // optional captions table
@@ -139,23 +209,25 @@ export default function VisionBoardScreen() {
             const map = new Map<string, string>(caps.map((c: any) => [c.path, c.caption || ""]));
             rows.forEach(r => { r.caption = map.get(r.path) || ""; });
           }
-        } catch { /* table may not exist */ }
+        } catch { /* table may not exist; ignore */ }
 
         setImages(rows.slice(0, 6));
         setSelected(0);
       } catch (e: any) {
         setErr(e.message || String(e));
         setImages([]);
+      } finally {
+        setStorageReady(true);
       }
-    })();
+    }
+
+    detect();
   }, [userId]);
 
   /* ----- slideshow every 30s ----- */
   useEffect(() => {
     if (!playing || images.length === 0) return;
-    const id = setInterval(() => {
-      setSelected(i => (i + 1) % images.length);
-    }, 30000);
+    const id = setInterval(() => setSelected(i => (i + 1) % images.length), 30000);
     return () => clearInterval(id);
   }, [playing, images.length]);
 
@@ -164,7 +236,7 @@ export default function VisionBoardScreen() {
   function next() { if (images.length) setSelected(i => (i + 1) % images.length); }
 
   async function handleUpload(files: FileList | null) {
-    if (!userId || !files || files.length === 0) return;
+    if (!userId || !files || files.length === 0 || !bucket) return;
     setBusy(true); setErr(null);
     try {
       const remaining = Math.max(0, 6 - images.length);
@@ -173,15 +245,23 @@ export default function VisionBoardScreen() {
 
       for (const file of toUpload) {
         const safeName = `${Date.now()}-${file.name.replace(/\s+/g, "_")}`;
-        const path = `${userId}/${safeName}`;
-        const { error: uerr } = await supabase.storage.from("vision_board").upload(path, file, { upsert: false });
-        if (uerr) throw uerr;
-        const { data } = supabase.storage.from("vision_board").getPublicUrl(path);
-        newOnes.push({ path, url: data.publicUrl, caption: "" });
+        const path = (prefix === "user" ? `${userId}/` : "") + safeName;
 
-        try {
-          await supabase.from("vision_images").insert({ user_id: userId, path, caption: "" });
-        } catch { /* ignore if table doesn't exist */ }
+        const { error: uerr } = await supabase.storage.from(bucket).upload(path, file, { upsert: false });
+        if (uerr) {
+          const msg = (uerr.message || "").toLowerCase();
+          if (msg.includes("bucket not found")) {
+            setErr(`Bucket "${bucket}" not found. Create it (public) or set VITE_VISION_BUCKET.`);
+            break;
+          }
+          throw uerr;
+        }
+
+        const { data: pub } = supabase.storage.from(bucket).getPublicUrl(path);
+        newOnes.push({ path, url: pub.publicUrl, caption: "" });
+
+        // best-effort: persist caption row
+        try { await supabase.from("vision_images").insert({ user_id: userId, path, caption: "" }); } catch {}
       }
 
       const updated = [...images, ...newOnes].slice(0, 6);
@@ -204,18 +284,16 @@ export default function VisionBoardScreen() {
         { user_id: userId, path: img.path, caption },
         { onConflict: "user_id,path" } as any
       );
-    } catch { /* ignore */ }
+    } catch {}
   }
 
   async function removeAt(idx: number) {
-    if (!userId) return;
+    if (!userId || !bucket) return;
     const img = images[idx]; if (!img) return;
     setBusy(true); setErr(null);
     try {
-      await supabase.storage.from("vision_board").remove([img.path]);
-      try {
-        await supabase.from("vision_images").delete().eq("user_id", userId).eq("path", img.path);
-      } catch {}
+      await supabase.storage.from(bucket).remove([img.path]);
+      try { await supabase.from("vision_images").delete().eq("user_id", userId).eq("path", img.path); } catch {}
       const next = images.filter((_, i) => i !== idx);
       setImages(next);
       setSelected(Math.max(0, Math.min(selected, next.length - 1)));
@@ -287,7 +365,6 @@ export default function VisionBoardScreen() {
           You can upload up to <strong>6 images</strong> for your vision board.
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          {/* hidden input; button triggers it */}
           <input
             ref={fileRef}
             type="file"
@@ -295,11 +372,11 @@ export default function VisionBoardScreen() {
             multiple
             onChange={e => handleUpload(e.target.files)}
             style={{ display: "none" }}
-            disabled={!canAddMore || busy || !userId}
+            disabled={!userId || !storageReady || !bucket || !canAddMore || busy}
           />
           <button
             onClick={() => fileRef.current?.click()}
-            disabled={!canAddMore || busy || !userId}
+            disabled={!userId || !storageReady || !bucket || !canAddMore || busy}
             className="btn-primary"
             style={{ borderRadius: 8 }}
           >
@@ -310,7 +387,11 @@ export default function VisionBoardScreen() {
             {playing ? "Pause" : "Play 30s"}
           </button>
         </div>
-        {err && <div style={{ color: "red" }}>{err}</div>}
+        {(!bucket || err) && (
+          <div style={{ color: err ? "red" : "#64748b", marginTop: 6 }}>
+            {err || "Storage initialising…"}
+          </div>
+        )}
       </div>
 
       {/* Viewer */}
@@ -322,7 +403,7 @@ export default function VisionBoardScreen() {
             {/* Main image with arrows */}
             <div style={{ position: "relative", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", minHeight: 280 }}>
               <button
-                onClick={prev}
+                onClick={() => setSelected(i => (i - 1 + images.length) % images.length)}
                 title="Previous"
                 aria-label="Previous"
                 style={{
@@ -331,7 +412,7 @@ export default function VisionBoardScreen() {
                 }}
               >←</button>
               <button
-                onClick={next}
+                onClick={() => setSelected(i => (i + 1) % images.length)}
                 title="Next"
                 aria-label="Next"
                 style={{
