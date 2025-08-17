@@ -225,10 +225,10 @@ export default function VisionBoardScreen() {
     try {
       const remaining = Math.max(0, 6 - images.length);
       const toUpload = Array.from(files).slice(0, remaining);
-      const newOnes: VBImage[] = [];
+      const newOnes: VBImage[] = []
 
       for (const file of toUpload) {
-        the const safeName = `${Date.now()}-${file.name.replace(/\s+/g, "_")}`;
+        const safeName = `${Date.now()}-${file.name.replace(/\s+/g, "_")}`;
         const path = (prefix === "user" ? `${uid}/` : "") + safeName;
 
         const { error: uerr } = await supabase.storage.from(VISION_BUCKET).upload(path, file, { upsert: false });
