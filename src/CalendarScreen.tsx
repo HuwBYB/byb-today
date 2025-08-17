@@ -13,10 +13,25 @@ type Task = {
   source: string | null;
 };
 
+/* ---------- Categories + colours (shared with Goals) ---------- */
+const CATS = [
+  { key: "personal",  label: "Personal",  color: "#a855f7" },
+  { key: "health",    label: "Health",    color: "#22c55e" },
+  { key: "career",    label: "Business",  color: "#3b82f6" },   // stored as 'career'
+  { key: "financial", label: "Finance",   color: "#f59e0b" },   // stored as 'financial'
+  { key: "other",     label: "Other",     color: "#6b7280" },
+] as const;
+type CatKey = typeof CATS[number]["key"];
+const colorOf = (k: CatKey | null | undefined) =>
+  CATS.find(c => c.key === k)?.color || "#6b7280";
+
 export default function CalendarScreen({
   onSelectDate,
+  navigateOnSelect = false, // new: default to staying on the calendar
 }: {
   onSelectDate?: (iso: string) => void;
+  /** When true, clicking a date or "Today" will call onSelectDate (navigation). */
+  navigateOnSelect?: boolean;
 }) {
   const [userId, setUserId] = useState<string | null>(null);
   const todayISO = toISO(new Date());
@@ -69,6 +84,12 @@ export default function CalendarScreen({
   const [tasksByDay, setTasksByDay] = useState<Record<string, Task[]>>({});
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // add-task state
+  const [newTitle, setNewTitle] = useState("");
+  const [newCat, setNewCat] = useState<CatKey>("other");
+  const [newPriority, setNewPriority] = useState<number>(2);
+  const [adding, setAdding] = useState(false);
 
   // auth
   useEffect(() => {
@@ -132,10 +153,10 @@ export default function CalendarScreen({
   }
   function goToday() {
     const d = new Date();
-    setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
     const iso = toISO(d);
+    setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
     setSelectedISO(iso);
-    onSelectDate?.(iso);
+    if (navigateOnSelect && onSelectDate) onSelectDate(iso);
   }
 
   function isSameMonth(iso: string) {
@@ -143,6 +164,43 @@ export default function CalendarScreen({
     return (
       d.getMonth() === cursor.getMonth() && d.getFullYear() === cursor.getFullYear()
     );
+  }
+
+  async function addTaskToSelected() {
+    if (!userId) return;
+    const title = newTitle.trim();
+    if (!title) return;
+    setAdding(true); setErr(null);
+    try {
+      const category = newCat;
+      const category_color = colorOf(category);
+      const { data, error } = await supabase
+        .from("tasks")
+        .insert({
+          user_id: userId,
+          title,
+          due_date: selectedISO,
+          priority: newPriority,
+          category,
+          category_color,
+          source: "calendar_manual",
+        })
+        .select()
+        .single();
+      if (error) throw error;
+
+      // Update local state so it appears immediately
+      setTasksByDay(prev => ({
+        ...prev,
+        [selectedISO]: [...(prev[selectedISO] || []), data as Task],
+      }));
+      setNewTitle("");
+      // keep user on calendar; no navigation
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setAdding(false);
+    }
   }
 
   const dayTasks = tasksByDay[selectedISO] || [];
@@ -194,7 +252,7 @@ export default function CalendarScreen({
         </div>
       </div>
 
-      {/* Month grid — cells show date + count only */}
+      {/* Month grid — select a day, stay on this page */}
       <div className="card" style={{ padding: 8 }}>
         <div
           style={{
@@ -208,14 +266,19 @@ export default function CalendarScreen({
             const list = tasksByDay[iso] || [];
             const count = list.length;
             const isSelected = iso === selectedISO;
-            const dayNum = fromISO(iso).getDate();
+            const d = fromISO(iso);
+            const dayNum = d.getDate();
 
             return (
               <button
                 key={iso}
                 onClick={() => {
                   setSelectedISO(iso);
-                  onSelectDate?.(iso);
+                  // If the user clicked a trailing/leading day, move the month view too.
+                  if (!inMonth) {
+                    setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
+                  }
+                  if (navigateOnSelect && onSelectDate) onSelectDate(iso);
                 }}
                 className="cal-day"
                 title={`${iso}${count ? ` • ${count} task(s)` : ""}`}
@@ -256,14 +319,41 @@ export default function CalendarScreen({
         </div>
       </div>
 
-      {/* Day detail list (full titles) */}
-      <div className="card" style={{ display: "grid", gap: 8 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <h2 style={{ margin: 0 }}>{selectedISO}</h2>
-          <span className="muted">
-            {dayTasks.length} task{dayTasks.length === 1 ? "" : "s"}
-          </span>
+      {/* Day detail + add-task */}
+      <div className="card" style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <h2 style={{ margin: 0 }}>{selectedISO}</h2>
+            <span className="muted">
+              {dayTasks.length} task{dayTasks.length === 1 ? "" : "s"}
+            </span>
+          </div>
+
+          {/* Add task to selected date */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input
+              value={newTitle}
+              onChange={e => setNewTitle(e.target.value)}
+              placeholder="Add a task…"
+              style={{ minWidth: 200 }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && newTitle.trim() && !adding) addTaskToSelected();
+              }}
+            />
+            <select value={newCat} onChange={e => setNewCat(e.target.value as CatKey)} title="Category">
+              {CATS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </select>
+            <select value={newPriority} onChange={e => setNewPriority(Number(e.target.value))} title="Priority">
+              <option value={1}>High</option>
+              <option value={2}>Normal</option>
+              <option value={3}>Low</option>
+            </select>
+            <button className="btn-primary" onClick={addTaskToSelected} disabled={!newTitle.trim() || adding} style={{ borderRadius: 8 }}>
+              {adding ? "Adding…" : "Add"}
+            </button>
+          </div>
         </div>
+
         {dayTasks.length === 0 && <div className="muted">Nothing scheduled.</div>}
         <ul className="list">
           {dayTasks.map((t) => (
