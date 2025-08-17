@@ -23,6 +23,26 @@ const VB_ALFRED_CANDIDATES = [
 /** Storage bucket name */
 const VISION_BUCKET = "vision";
 
+/** Local captions fallback */
+function localCapsKey(userId: string) {
+  return `vb_caps_${userId}`;
+}
+function readLocalCaps(userId: string): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(localCapsKey(userId));
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+function writeLocalCaps(userId: string, caps: Record<string, string>) {
+  try {
+    localStorage.setItem(localCapsKey(userId), JSON.stringify(caps));
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Types */
 type VBImage = {
   path: string;       // storage path
@@ -112,7 +132,7 @@ export default function VisionBoardScreen() {
   const canAddMore = images.length < 6;
   const current = images[selected] || null;
 
-  /* ----- local CSS to keep icons perfectly centered ----- */
+  /* ----- local CSS to keep icons perfectly centered + contain viewer ----- */
   const styleTag = (
     <style>{`
       .vb-viewer-img { object-fit: contain !important; }
@@ -122,9 +142,7 @@ export default function VisionBoardScreen() {
         border: 1px solid #d1d5db; background: #fff; padding: 0;
         line-height: 1; cursor: pointer; color: #111827;
       }
-      .vb-circle-btn--sm {
-        width: 26px; height: 26px;
-      }
+      .vb-circle-btn--sm { width: 26px; height: 26px; }
       .vb-circle-btn svg { display: block; width: 18px; height: 18px; }
       .vb-circle-btn--sm svg { width: 14px; height: 14px; }
       .vb-circle-btn:hover { background: #f8fafc; }
@@ -194,17 +212,23 @@ export default function VisionBoardScreen() {
           return { path, url: pub.publicUrl, caption: "", created_at: (f as any)?.created_at };
         });
 
-        // optional captions table
+        // Try to merge captions from DB (if table exists)
         try {
-          const { data: caps } = await supabase
+          const { data: caps, error: capErr } = await supabase
             .from("vision_images")
             .select("path, caption")
             .eq("user_id", uid);
-          if (caps && Array.isArray(caps)) {
+          if (!capErr && caps && Array.isArray(caps)) {
             const map = new Map<string, string>(caps.map((c: any) => [c.path, c.caption || ""]));
             rows.forEach(r => { r.caption = map.get(r.path) || ""; });
           }
         } catch { /* table may not exist; ignore */ }
+
+        // Merge localStorage fallback (fills any blanks)
+        const local = readLocalCaps(uid);
+        rows.forEach(r => {
+          if (!r.caption && local[r.path]) r.caption = local[r.path];
+        });
 
         setImages(rows.slice(0, 6));
         setSelected(0);
@@ -249,8 +273,12 @@ export default function VisionBoardScreen() {
         const { data: pub } = supabase.storage.from(VISION_BUCKET).getPublicUrl(path);
         newOnes.push({ path, url: pub.publicUrl, caption: "" });
 
-        // best-effort: persist caption row
-        try { await supabase.from("vision_images").insert({ user_id: uid, path, caption: "" }); } catch {}
+        // best-effort: create empty caption row
+        try {
+          await supabase.from("vision_images").insert({ user_id: uid, path, caption: "" });
+        } catch {
+          // table or policy may not exist; ignore (local fallback still works)
+        }
       }
 
       const updated = [...images, ...newOnes].slice(0, 6);
@@ -267,14 +295,31 @@ export default function VisionBoardScreen() {
   async function saveCaption(idx: number, caption: string) {
     const img = images[idx]; if (!img || !userId) return;
     const uid = userId as string;
-    const nextImgs = images.slice(); nextImgs[idx] = { ...img, caption };
-    setImages(nextImgs);
+
+    // Update UI immediately
+    setImages(prev => {
+      const next = prev.slice();
+      next[idx] = { ...prev[idx], caption };
+      return next;
+    });
+
+    // Save to local fallback
+    const local = readLocalCaps(uid);
+    local[img.path] = caption;
+    writeLocalCaps(uid, local);
+
+    // Try to upsert to Supabase (cross-device persistence)
     try {
-      await supabase.from("vision_images").upsert(
-        { user_id: uid, path: img.path, caption },
-        { onConflict: "user_id,path" } as any
-      );
-    } catch {}
+      const { error } = await supabase
+        .from("vision_images")
+        .upsert(
+          { user_id: uid, path: img.path, caption },
+          { onConflict: "user_id,path" } as any
+        );
+      if (error) throw error;
+    } catch {
+      // ignore — local fallback already saved
+    }
   }
 
   async function removeAt(idx: number) {
@@ -284,6 +329,11 @@ export default function VisionBoardScreen() {
     try {
       await supabase.storage.from(VISION_BUCKET).remove([img.path]);
       try { await supabase.from("vision_images").delete().eq("user_id", userId).eq("path", img.path); } catch {}
+      // remove from local fallback too
+      const local = readLocalCaps(userId);
+      delete local[img.path];
+      writeLocalCaps(userId, local);
+
       const next = images.filter((_, i) => i !== idx);
       setImages(next);
       setSelected(Math.max(0, Math.min(selected, next.length - 1)));
