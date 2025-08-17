@@ -112,10 +112,22 @@ export default function VisionBoardScreen() {
   const canAddMore = images.length < 6;
   const current = images[selected] || null;
 
-  /* ----- make sure our contain style wins even if a global CSS used cover ----- */
+  /* ----- local CSS to keep icons perfectly centered ----- */
   const styleTag = (
     <style>{`
       .vb-viewer-img { object-fit: contain !important; }
+      .vb-circle-btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 36px; height: 36px; border-radius: 999px;
+        border: 1px solid #d1d5db; background: #fff; padding: 0;
+        line-height: 1; cursor: pointer; color: #111827;
+      }
+      .vb-circle-btn--sm {
+        width: 26px; height: 26px;
+      }
+      .vb-circle-btn svg { display: block; width: 18px; height: 18px; }
+      .vb-circle-btn--sm svg { width: 14px; height: 14px; }
+      .vb-circle-btn:hover { background: #f8fafc; }
     `}</style>
   );
 
@@ -394,20 +406,24 @@ export default function VisionBoardScreen() {
                 onClick={prev}
                 title="Previous"
                 aria-label="Previous"
-                style={{
-                  position: "absolute", top: "50%", left: 8, transform: "translateY(-50%)",
-                  width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db", background: "#fff"
-                }}
-              >←</button>
+                className="vb-circle-btn"
+                style={{ position: "absolute", top: "50%", left: 8, transform: "translateY(-50%)" }}
+              >
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 4 L7 10 L12 16" />
+                </svg>
+              </button>
               <button
                 onClick={next}
                 title="Next"
                 aria-label="Next"
-                style={{
-                  position: "absolute", top: "50%", right: 8, transform: "translateY(-50%)",
-                  width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db", background: "#fff"
-                }}
-              >→</button>
+                className="vb-circle-btn"
+                style={{ position: "absolute", top: "50%", right: 8, transform: "translateY(-50%)" }}
+              >
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M8 4 L13 10 L8 16" />
+                </svg>
+              </button>
 
               {current && (
                 <img
@@ -426,7 +442,7 @@ export default function VisionBoardScreen() {
               )}
             </div>
 
-            {/* Caption editor for selected — ONLY the input (no extra line above) */}
+            {/* Caption editor for selected — input only */}
             {current && (
               <div>
                 <input
@@ -461,11 +477,14 @@ export default function VisionBoardScreen() {
                     onClick={() => removeAt(i)}
                     title="Remove"
                     aria-label="Remove"
-                    style={{
-                      position: "absolute", top: 6, right: 6, width: 26, height: 26,
-                      borderRadius: 999, border: "1px solid #d1d5db", background: "#fff"
-                    }}
-                  >✕</button>
+                    className="vb-circle-btn vb-circle-btn--sm"
+                    style={{ position: "absolute", top: 6, right: 6 }}
+                  >
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+                      <path d="M5 5 L15 15" />
+                      <path d="M15 5 L5 15" />
+                    </svg>
+                  </button>
                 </div>
               ))}
             </div>
