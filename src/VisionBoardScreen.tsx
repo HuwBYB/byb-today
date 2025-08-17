@@ -103,7 +103,7 @@ function VisionHelpContent() {
       <ul style={{ paddingLeft: 18, margin: 0 }}>
         <li>Specific beats vague: “Run 5k on Saturdays” beats “Get fitter”.</li>
         <li>Keep it visible—open the Vision Board when you start your day.</li>
-        <li>Tiny actions compound. Consistency > intensity.</li>
+        <li>Tiny actions compound. Consistency &gt; intensity.</li>
       </ul>
 
       <h4 style={{ margin: 0 }}>Make it a habit</h4>
@@ -271,7 +271,6 @@ export default function VisionBoardScreen() {
       const newOnes: VBImage[] = [];
 
       for (const file of toUpload) {
-        the
         const safeName = `${Date.now()}-${file.name.replace(/\s+/g, "_")}`;
         const path = (prefix === "user" ? `${uid}/` : "") + safeName;
 
