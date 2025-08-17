@@ -67,25 +67,15 @@ function Modal({
 }
 
 function CalendarHelpContent() {
-  // You can replace this copy with the attached Calendar help text whenever you like.
+  // Replace this with your attached Calendar help copy if you want exact wording.
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
-      <p><em>Welcome to your Calendar — click any day to highlight it and see that day’s tasks. Stay on this page; no navigation needed.</em></p>
-
+      <p><em>Click any day to highlight it and see that day’s tasks. Stay on this page; no navigation needed.</em></p>
       <h4 style={{ margin: "8px 0" }}>Quick tips</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Use the arrows (←/→) to change months, or press <strong>Today</strong> to jump back.</li>
-        <li>Click a date to select it; the list updates below.</li>
+        <li>Use ← / → to change months, or press <strong>Today</strong>.</li>
         <li>Add tasks straight to the selected date — set category, priority, and frequency.</li>
       </ul>
-
-      <h4 style={{ margin: "8px 0" }}>Frequencies</h4>
-      <p>
-        Choose how often a task repeats: <strong>Once</strong>, <strong>Daily</strong>, <strong>Weekly</strong>, <strong>Monthly</strong>, or <strong>Annually</strong>.
-        Set the number of times to repeat and we’ll create the occurrences for you.
-      </p>
-
-      <p className="muted">P.S. If you share a new help doc, I can paste the exact copy here.</p>
     </div>
   );
 }
@@ -279,7 +269,6 @@ export default function CalendarScreen({
         for (const t of data as Task[]) {
           const day = (t.due_date || "").slice(0, 10);
           if (!day) continue;
-          // Only show immediately if within current month view
           if (day >= first && day <= last) {
             (map[day] ||= []).push(t);
           }
@@ -290,7 +279,6 @@ export default function CalendarScreen({
       setNewTitle("");
       setNewFreq("once");
       setRepeatCount(1);
-      // stay on calendar
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -302,19 +290,17 @@ export default function CalendarScreen({
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      {/* Top bar with Alfred */}
+      {/* Title card with Alfred */}
       <div
         className="card"
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          justifyContent: "space-between",
-          flexWrap: "wrap",
           position: "relative",
+          display: "grid",
+          gap: 6,
+          paddingRight: 64, // breathing room so the image doesn't overlap the title
         }}
       >
-        {/* Calendar Alfred — top-right */}
+        {/* Alfred — top-right */}
         <button
           onClick={() => setShowHelp(true)}
           aria-label="Open Calendar help"
@@ -355,20 +341,32 @@ export default function CalendarScreen({
           )}
         </button>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <button onClick={goToday}>Today</button>
-          <button onClick={prevMonth}>←</button>
-          <strong>{monthLabel}</strong>
-          <button onClick={nextMonth}>→</button>
-        </div>
-        {loading ? (
-          <div className="muted">Loading…</div>
-        ) : (
-          <div className="muted">
-            {Object.values(tasksByDay).reduce((a, b) => a + b.length, 0)} tasks
-            this month
+        <h1 style={{ margin: 0 }}>Calendar</h1>
+
+        {/* Month controls + month label and count */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={goToday}>Today</button>
+            <button onClick={prevMonth}>←</button>
+            <strong>{monthLabel}</strong>
+            <button onClick={nextMonth}>→</button>
           </div>
-        )}
+          {loading ? (
+            <div className="muted">Loading…</div>
+          ) : (
+            <div className="muted">
+              {Object.values(tasksByDay).reduce((a, b) => a + b.length, 0)} tasks this month
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Weekday header (Mon..Sun) */}
