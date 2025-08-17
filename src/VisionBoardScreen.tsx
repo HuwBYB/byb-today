@@ -367,8 +367,20 @@ export default function VisionBoardScreen() {
           <div className="muted">No images yet. Use <strong>Upload image</strong> above to add your first one.</div>
         ) : (
           <>
-            {/* Main image with arrows */}
-            <div style={{ position: "relative", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", minHeight: 280 }}>
+            {/* Main image with arrows — no cropping, centered */}
+            <div
+              style={{
+                position: "relative",
+                border: "1px solid var(--border)",
+                borderRadius: 12,
+                overflow: "hidden",
+                height: 360,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "#f8fafc",
+              }}
+            >
               <button
                 onClick={prev}
                 title="Previous"
@@ -393,7 +405,14 @@ export default function VisionBoardScreen() {
                   key={current.path}
                   src={current.url}
                   alt=""
-                  style={{ width: "100%", height: 360, objectFit: "cover", display: "block" }}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    maxWidth: "100%",
+                    maxHeight: "100%",
+                    objectFit: "contain",   // show the whole image
+                    display: "block",
+                  }}
                 />
               )}
             </div>
@@ -401,7 +420,7 @@ export default function VisionBoardScreen() {
             {/* Caption editor for selected */}
             {current && (
               <label style={{ display: "grid", gap: 6 }}>
-                <div className="muted">Personalise this image (optional)</div>
+                <div className="muted">Add text for this image (optional)</div>
                 <input
                   value={current.caption}
                   onChange={e => {
@@ -413,7 +432,7 @@ export default function VisionBoardScreen() {
                     });
                   }}
                   onBlur={e => saveCaption(selected, e.target.value)}
-                  placeholder="Add a short line that makes this image yours…"
+                  placeholder="Add text for this image here"
                 />
               </label>
             )}
