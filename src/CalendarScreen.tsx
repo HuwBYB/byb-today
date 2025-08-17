@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 type Task = {
@@ -25,9 +25,76 @@ type CatKey = typeof CATS[number]["key"];
 const colorOf = (k: CatKey | null | undefined) =>
   CATS.find(c => c.key === k)?.color || "#6b7280";
 
+/** Public path helper (Vite/CRA/Vercel/GH Pages) */
+function publicPath(p: string) {
+  // @ts-ignore
+  const base =
+    (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
+    (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
+    "";
+  const withSlash = p.startsWith("/") ? p : `/${p}`;
+  return `${base.replace(/\/$/, "")}${withSlash}`;
+}
+const CAL_ALFRED_SRC = publicPath("/alfred/Calendar_Alfred.png");
+
+/* ---------- Alfred modal components ---------- */
+function Modal({
+  open, onClose, title, children,
+}: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    if (open) window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+  useEffect(() => { if (open && closeRef.current) closeRef.current.focus(); }, [open]);
+  if (!open) return null;
+  return (
+    <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 2000,
+               display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 760, width: "100%", background: "#fff", borderRadius: 12,
+                 boxShadow: "0 10px 30px rgba(0,0,0,0.2)", padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+          <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
+          <button ref={closeRef} onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>✕</button>
+        </div>
+        <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function CalendarHelpContent() {
+  // You can replace this copy with the attached Calendar help text whenever you like.
+  return (
+    <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
+      <p><em>Welcome to your Calendar — click any day to highlight it and see that day’s tasks. Stay on this page; no navigation needed.</em></p>
+
+      <h4 style={{ margin: "8px 0" }}>Quick tips</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Use the arrows (←/→) to change months, or press <strong>Today</strong> to jump back.</li>
+        <li>Click a date to select it; the list updates below.</li>
+        <li>Add tasks straight to the selected date — set category, priority, and frequency.</li>
+      </ul>
+
+      <h4 style={{ margin: "8px 0" }}>Frequencies</h4>
+      <p>
+        Choose how often a task repeats: <strong>Once</strong>, <strong>Daily</strong>, <strong>Weekly</strong>, <strong>Monthly</strong>, or <strong>Annually</strong>.
+        Set the number of times to repeat and we’ll create the occurrences for you.
+      </p>
+
+      <p className="muted">P.S. If you share a new help doc, I can paste the exact copy here.</p>
+    </div>
+  );
+}
+
+/* ========================== MAIN SCREEN ========================== */
+
 export default function CalendarScreen({
   onSelectDate,
-  navigateOnSelect = false, // new: default to staying on the calendar
+  navigateOnSelect = false, // default to staying on the calendar
 }: {
   onSelectDate?: (iso: string) => void;
   /** When true, clicking a date or "Today" will call onSelectDate (navigation). */
@@ -89,15 +156,18 @@ export default function CalendarScreen({
   const [newTitle, setNewTitle] = useState("");
   const [newCat, setNewCat] = useState<CatKey>("other");
   const [newPriority, setNewPriority] = useState<number>(2);
+  const [newFreq, setNewFreq] = useState<"once" | "daily" | "weekly" | "monthly" | "annually">("once");
+  const [repeatCount, setRepeatCount] = useState<number>(1); // number of occurrences (including the first)
   const [adding, setAdding] = useState(false);
+
+  // Alfred modal
+  const [showHelp, setShowHelp] = useState(false);
+  const [imgOk, setImgOk] = useState(true);
 
   // auth
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
-      if (error) {
-        setErr(error.message);
-        return;
-      }
+      if (error) { setErr(error.message); return; }
       setUserId(data.user?.id ?? null);
     });
   }, []);
@@ -161,41 +231,66 @@ export default function CalendarScreen({
 
   function isSameMonth(iso: string) {
     const d = fromISO(iso);
-    return (
-      d.getMonth() === cursor.getMonth() && d.getFullYear() === cursor.getFullYear()
-    );
+    return d.getMonth() === cursor.getMonth() && d.getFullYear() === cursor.getFullYear();
+  }
+
+  function addInterval(baseISO: string, step: "once" | "daily" | "weekly" | "monthly" | "annually", i: number) {
+    if (step === "once" || i === 0) return baseISO;
+    const d = fromISO(baseISO);
+    if (step === "daily") d.setDate(d.getDate() + i);
+    else if (step === "weekly") d.setDate(d.getDate() + 7 * i);
+    else if (step === "monthly") d.setMonth(d.getMonth() + i);
+    else if (step === "annually") d.setFullYear(d.getFullYear() + i);
+    return toISO(d);
   }
 
   async function addTaskToSelected() {
     if (!userId) return;
     const title = newTitle.trim();
     if (!title) return;
+
+    const count = Math.max(1, Number.isFinite(repeatCount) ? repeatCount : 1);
     setAdding(true); setErr(null);
     try {
       const category = newCat;
       const category_color = colorOf(category);
+
+      // Build rows for bulk insert
+      const rows = Array.from({ length: count }, (_, i) => ({
+        user_id: userId,
+        title,
+        due_date: addInterval(selectedISO, newFreq, i),
+        priority: newPriority,
+        category,
+        category_color,
+        source: newFreq === "once" ? "calendar_manual" : `calendar_repeat_${newFreq}`,
+      }));
+
       const { data, error } = await supabase
         .from("tasks")
-        .insert({
-          user_id: userId,
-          title,
-          due_date: selectedISO,
-          priority: newPriority,
-          category,
-          category_color,
-          source: "calendar_manual",
-        })
-        .select()
-        .single();
+        .insert(rows)
+        .select();
       if (error) throw error;
 
-      // Update local state so it appears immediately
-      setTasksByDay(prev => ({
-        ...prev,
-        [selectedISO]: [...(prev[selectedISO] || []), data as Task],
-      }));
+      // Update local state (only dates currently in view)
+      const first = toISO(firstDayOfMonth), last = toISO(lastDayOfMonth);
+      setTasksByDay(prev => {
+        const map = { ...prev };
+        for (const t of data as Task[]) {
+          const day = (t.due_date || "").slice(0, 10);
+          if (!day) continue;
+          // Only show immediately if within current month view
+          if (day >= first && day <= last) {
+            (map[day] ||= []).push(t);
+          }
+        }
+        return map;
+      });
+
       setNewTitle("");
-      // keep user on calendar; no navigation
+      setNewFreq("once");
+      setRepeatCount(1);
+      // stay on calendar
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -207,6 +302,7 @@ export default function CalendarScreen({
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
+      {/* Top bar with Alfred */}
       <div
         className="card"
         style={{
@@ -215,8 +311,50 @@ export default function CalendarScreen({
           gap: 8,
           justifyContent: "space-between",
           flexWrap: "wrap",
+          position: "relative",
         }}
       >
+        {/* Calendar Alfred — top-right */}
+        <button
+          onClick={() => setShowHelp(true)}
+          aria-label="Open Calendar help"
+          title="Need a hand? Ask Alfred"
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            cursor: "pointer",
+            lineHeight: 0,
+            zIndex: 10,
+          }}
+        >
+          {imgOk ? (
+            <img
+              src={CAL_ALFRED_SRC}
+              alt="Calendar Alfred — open help"
+              style={{ width: 48, height: 48 }}
+              onError={() => setImgOk(false)}
+            />
+          ) : (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 36, height: 36, borderRadius: 999,
+                border: "1px solid #d1d5db",
+                background: "#f9fafb",
+                fontWeight: 700,
+              }}
+            >
+              ?
+            </span>
+          )}
+        </button>
+
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <button onClick={goToday}>Today</button>
           <button onClick={prevMonth}>←</button>
@@ -274,10 +412,7 @@ export default function CalendarScreen({
                 key={iso}
                 onClick={() => {
                   setSelectedISO(iso);
-                  // If the user clicked a trailing/leading day, move the month view too.
-                  if (!inMonth) {
-                    setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
-                  }
+                  if (!inMonth) setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
                   if (navigateOnSelect && onSelectDate) onSelectDate(iso);
                 }}
                 className="cal-day"
@@ -348,6 +483,33 @@ export default function CalendarScreen({
               <option value={2}>Normal</option>
               <option value={3}>Low</option>
             </select>
+
+            {/* Frequency (after Priority) */}
+            <select value={newFreq} onChange={e => setNewFreq(e.target.value as any)} title="Frequency">
+              <option value="once">Once</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="annually">Annually</option>
+            </select>
+
+            {/* Repeat count (only if repeating) */}
+            {newFreq !== "once" && (
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span className="muted">Repeat</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={repeatCount}
+                  onChange={e => setRepeatCount(Math.max(1, Math.min(365, Number(e.target.value) || 1)))}
+                  style={{ width: 70 }}
+                  title="Number of occurrences (including the first)"
+                />
+                <span className="muted">times</span>
+              </label>
+            )}
+
             <button className="btn-primary" onClick={addTaskToSelected} disabled={!newTitle.trim() || adding} style={{ borderRadius: 8 }}>
               {adding ? "Adding…" : "Add"}
             </button>
@@ -378,15 +540,21 @@ export default function CalendarScreen({
         </ul>
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
+
+      {/* Help modal */}
+      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Calendar — Help">
+        <div style={{ display: "flex", gap: 16 }}>
+          {imgOk && <img src={CAL_ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
+          <CalendarHelpContent />
+        </div>
+      </Modal>
     </div>
   );
 }
 
 /* ===== date utils ===== */
 function toISO(d: Date) {
-  const y = d.getFullYear(),
-    m = String(d.getMonth() + 1).padStart(2, "0"),
-    dd = String(d.getDate()).padStart(2, "0");
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
 function fromISO(s: string) {
