@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /** Public path helper (Vite/CRA/Vercel/GH Pages) */
@@ -20,18 +20,21 @@ const VB_ALFRED_CANDIDATES = [
   "/alfred/Vision_Alfred.webp",
 ].map(publicPath);
 
+/** ← your storage bucket name */
+const VISION_BUCKET = "vision";
+
 /** Types */
 type VBImage = {
-  path: string;
-  url: string;
-  caption: string;
+  path: string;       // storage path
+  url: string;        // public URL
+  caption: string;    // optional text
   created_at?: string;
 };
 
 /* ---------- Modal shell ---------- */
 function Modal({
   open, onClose, title, children,
-}: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+}: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -57,7 +60,7 @@ function Modal({
   );
 }
 
-/* ---------- Inline help content (placed directly on page) ---------- */
+/* ---------- Inline help content ---------- */
 function VisionHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
@@ -90,8 +93,7 @@ function VisionHelpContent() {
 export default function VisionBoardScreen() {
   const [userId, setUserId] = useState<string | null>(null);
 
-  // storage detection
-  const [bucket, setBucket] = useState<string | null>(null);
+  // storage prefix detection
   const [prefix, setPrefix] = useState<"" | "user">(""); // "" = root, "user" = {userId}/
   const [storageReady, setStorageReady] = useState(false);
 
@@ -107,7 +109,6 @@ export default function VisionBoardScreen() {
   const VB_ALFRED_SRC = VB_ALFRED_CANDIDATES[imgIdx] ?? "";
 
   const fileRef = useRef<HTMLInputElement>(null);
-
   const canAddMore = images.length < 6;
   const current = images[selected] || null;
 
@@ -119,59 +120,22 @@ export default function VisionBoardScreen() {
     });
   }, []);
 
-  /* ----- helpers ----- */
-  const getEnvBucket = () =>
-    (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_VISION_BUCKET) ||
-    (typeof process !== "undefined" && (process as any).env?.VITE_VISION_BUCKET) ||
-    "";
-
-  async function bucketExists(name: string) {
-    try {
-      // Use "" (empty string) to list the root
-      const { error } = await supabase.storage.from(name).list("", { limit: 1 });
-      return !error;
-    } catch {
-      return false;
-    }
-  }
-
-  /* ----- detect bucket + folder prefix, then load images ----- */
+  /* ----- detect folder prefix, then load images ----- */
   useEffect(() => {
     if (!userId) return;
 
     const uid = userId as string;
 
-    // Allow user override (saved in browser) if detection failed before
-    const override = localStorage.getItem("vision.bucketOverride") || "";
-
-    const candidates = Array.from(
-      new Set(
-        [
-          override,
-          getEnvBucket(),
-          "visionboard",
-          "vision_board",
-          "vision",
-          "vision-board",
-        ].filter(Boolean)
-      )
-    );
-
-    async function detect() {
+    async function detectAndLoad() {
       setErr(null);
       setStorageReady(false);
 
-      // 1) find a bucket that exists
-      let chosen: string | null = null;
-      for (const name of candidates) {
-        if (await bucketExists(name)) { chosen = name; break; }
-      }
-      if (!chosen) {
-        setErr(
-          `Storage bucket not found. Tried: ${candidates.map((b) => `"${b}"`).join(", ")}. ` +
-          `If you know your bucket id, enter it below.`
-        );
-        setBucket(null);
+      // 1) sanity check: bucket exists
+      try {
+        const { error: be } = await supabase.storage.from(VISION_BUCKET).list(undefined, { limit: 1 });
+        if (be) throw be;
+      } catch (e: any) {
+        setErr(`Bucket "${VISION_BUCKET}" not found. Create it (Public) in Supabase → Storage.`);
         setImages([]);
         setStorageReady(true);
         return;
@@ -180,12 +144,12 @@ export default function VisionBoardScreen() {
       // 2) decide prefix: under {userId}/ or root
       let usePrefix: "" | "user" = "user";
       try {
-        const resUser = await supabase.storage.from(chosen).list(uid, { limit: 1 });
+        const resUser = await supabase.storage.from(VISION_BUCKET).list(uid, { limit: 1 });
         if (resUser.error) throw resUser.error;
 
         const hasInUser = (resUser.data || []).some((f: any) => !("id" in f && (f as any).id === null));
         if (!hasInUser) {
-          const resRoot = await supabase.storage.from(chosen).list("", { limit: 1 });
+          const resRoot = await supabase.storage.from(VISION_BUCKET).list(undefined, { limit: 1 });
           if (!resRoot.error && (resRoot.data || []).length > 0) {
             usePrefix = "";
           }
@@ -194,13 +158,12 @@ export default function VisionBoardScreen() {
         usePrefix = "";
       }
 
-      setBucket(chosen);
       setPrefix(usePrefix);
 
       // 3) load images (up to 6)
       try {
-        const listPath: string = usePrefix === "user" ? uid : "";
-        const { data, error } = await supabase.storage.from(chosen).list(listPath, {
+        const listPath: string | undefined = usePrefix === "user" ? uid : undefined;
+        const { data, error } = await supabase.storage.from(VISION_BUCKET).list(listPath, {
           sortBy: { column: "created_at", order: "asc" },
         });
         if (error) throw error;
@@ -208,7 +171,7 @@ export default function VisionBoardScreen() {
         const files = (data || []).filter((f: any) => !("id" in f && (f as any).id === null));
         const rows: VBImage[] = files.map((f: any) => {
           const path = usePrefix === "user" ? `${uid}/${f.name}` : f.name;
-          const { data: pub } = supabase.storage.from(chosen).getPublicUrl(path);
+          const { data: pub } = supabase.storage.from(VISION_BUCKET).getPublicUrl(path);
           return { path, url: pub.publicUrl, caption: "", created_at: (f as any)?.created_at };
         });
 
@@ -234,7 +197,7 @@ export default function VisionBoardScreen() {
       }
     }
 
-    detect();
+    detectAndLoad();
   }, [userId]);
 
   /* ----- slideshow every 30s ----- */
@@ -245,11 +208,11 @@ export default function VisionBoardScreen() {
   }, [playing, images.length]);
 
   /* ----- actions ----- */
-  const prev = () => { if (images.length) setSelected(i => (i - 1 + images.length) % images.length); };
-  const next = () => { if (images.length) setSelected(i => (i + 1) % images.length); };
+  function prev() { if (images.length) setSelected(i => (i - 1 + images.length) % images.length); }
+  function next() { if (images.length) setSelected(i => (i + 1) % images.length); }
 
   async function handleUpload(files: FileList | null) {
-    if (!userId || !files || files.length === 0 || !bucket) return;
+    if (!userId || !files || files.length === 0) return;
     const uid = userId as string;
     setBusy(true); setErr(null);
     try {
@@ -261,21 +224,13 @@ export default function VisionBoardScreen() {
         const safeName = `${Date.now()}-${file.name.replace(/\s+/g, "_")}`;
         const path = (prefix === "user" ? `${uid}/` : "") + safeName;
 
-        const { error: uerr } = await supabase.storage.from(bucket).upload(path, file, { upsert: false });
-        if (uerr) {
-          const msg = (uerr.message || "").toLowerCase();
-          if (msg.includes("bucket") && msg.includes("not") && msg.includes("found")) {
-            setErr(
-              `Bucket "${bucket}" not found. Enter your actual bucket id below (we’ll remember it) or set VITE_VISION_BUCKET.`
-            );
-            break;
-          }
-          throw uerr;
-        }
+        const { error: uerr } = await supabase.storage.from(VISION_BUCKET).upload(path, file, { upsert: false });
+        if (uerr) throw uerr;
 
-        const { data: pub } = supabase.storage.from(bucket).getPublicUrl(path);
+        const { data: pub } = supabase.storage.from(VISION_BUCKET).getPublicUrl(path);
         newOnes.push({ path, url: pub.publicUrl, caption: "" });
 
+        // best-effort: persist caption row
         try { await supabase.from("vision_images").insert({ user_id: uid, path, caption: "" }); } catch {}
       }
 
@@ -304,15 +259,15 @@ export default function VisionBoardScreen() {
   }
 
   async function removeAt(idx: number) {
-    if (!userId || !bucket) return;
+    if (!userId) return;
     const img = images[idx]; if (!img) return;
     setBusy(true); setErr(null);
     try {
-      await supabase.storage.from(bucket).remove([img.path]);
+      await supabase.storage.from(VISION_BUCKET).remove([img.path]);
       try { await supabase.from("vision_images").delete().eq("user_id", userId).eq("path", img.path); } catch {}
-      const nextList = images.filter((_, i) => i !== idx);
-      setImages(nextList);
-      setSelected(Math.max(0, Math.min(selected, nextList.length - 1)));
+      const next = images.filter((_, i) => i !== idx);
+      setImages(next);
+      setSelected(Math.max(0, Math.min(selected, next.length - 1)));
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -325,19 +280,6 @@ export default function VisionBoardScreen() {
     const d = new Date();
     return d.toLocaleString(undefined, { month: "long", year: "numeric" });
   }, []);
-
-  /* ----- bucket override UI ----- */
-  const [overrideInput, setOverrideInput] = useState("");
-  function saveOverride() {
-    const v = overrideInput.trim();
-    if (!v) return;
-    localStorage.setItem("vision.bucketOverride", v);
-    window.location.reload();
-  }
-  function clearOverride() {
-    localStorage.removeItem("vision.bucketOverride");
-    window.location.reload();
-  }
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
@@ -388,7 +330,7 @@ export default function VisionBoardScreen() {
         <div className="muted">{monthLabel}</div>
       </div>
 
-      {/* Info + Upload live BELOW the title */}
+      {/* Info + Upload BELOW the title */}
       <div className="card" style={{ display: "grid", gap: 10 }}>
         <div className="muted">
           You can upload up to <strong>6 images</strong> for your vision board.
@@ -401,11 +343,11 @@ export default function VisionBoardScreen() {
             multiple
             onChange={e => handleUpload(e.target.files)}
             style={{ display: "none" }}
-            disabled={!userId || !storageReady || !bucket || !canAddMore || busy}
+            disabled={!userId || !storageReady || !canAddMore || busy}
           />
           <button
             onClick={() => fileRef.current?.click()}
-            disabled={!userId || !storageReady || !bucket || !canAddMore || busy}
+            disabled={!userId || !storageReady || !canAddMore || busy}
             className="btn-primary"
             style={{ borderRadius: 8 }}
           >
@@ -416,23 +358,7 @@ export default function VisionBoardScreen() {
             {playing ? "Pause" : "Play 30s"}
           </button>
         </div>
-
-        {/* If storage not detected, show quick fix controls */}
-        {(!bucket || err) && (
-          <div style={{ marginTop: 6 }}>
-            <div style={{ color: err ? "red" : "#64748b" }}>{err || "Storage initialising…"}</div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-              <input
-                value={overrideInput}
-                onChange={e => setOverrideInput(e.target.value)}
-                placeholder="Enter your bucket id (e.g. visionboard)"
-                style={{ minWidth: 260 }}
-              />
-              <button onClick={saveOverride}>Use this bucket</button>
-              <button onClick={clearOverride}>Clear override</button>
-            </div>
-          </div>
-        )}
+        {err && <div style={{ color: "red", marginTop: 6 }}>{err}</div>}
       </div>
 
       {/* Viewer */}
