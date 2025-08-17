@@ -31,7 +31,7 @@ type VBImage = {
 /* ---------- Modal shell ---------- */
 function Modal({
   open, onClose, title, children,
-}: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+}: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -57,7 +57,7 @@ function Modal({
   );
 }
 
-/* ---------- Inline help content ---------- */
+/* ---------- Inline help content (placed directly on page) ---------- */
 function VisionHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
@@ -136,7 +136,7 @@ export default function VisionBoardScreen() {
 
     async function bucketExists(name: string) {
       try {
-        // IMPORTANT: use "" (empty string) to list the root
+        // Use "" (empty string) to list the root
         const { error } = await supabase.storage.from(name).list("", { limit: 1 });
         return !error;
       } catch {
@@ -232,8 +232,8 @@ export default function VisionBoardScreen() {
   }, [playing, images.length]);
 
   /* ----- actions ----- */
-  function prev() { if (images.length) setSelected(i => (i - 1 + images.length) % images.length); }
-  function next() { if (images.length) setSelected(i => (i + 1) % images.length); }
+  const prev = () => { if (images.length) setSelected(i => (i - 1 + images.length) % images.length); };
+  const next = () => { if (images.length) setSelected(i => (i + 1) % images.length); };
 
   async function handleUpload(files: FileList | null) {
     if (!userId || !files || files.length === 0 || !bucket) return;
@@ -295,9 +295,9 @@ export default function VisionBoardScreen() {
     try {
       await supabase.storage.from(bucket).remove([img.path]);
       try { await supabase.from("vision_images").delete().eq("user_id", userId).eq("path", img.path); } catch {}
-      const next = images.filter((_, i) => i !== idx);
-      setImages(next);
-      setSelected(Math.max(0, Math.min(selected, next.length - 1)));
+      const nextList = images.filter((_, i) => i !== idx);
+      setImages(nextList);
+      setSelected(Math.max(0, Math.min(selected, nextList.length - 1)));
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -404,7 +404,7 @@ export default function VisionBoardScreen() {
             {/* Main image with arrows */}
             <div style={{ position: "relative", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", minHeight: 280 }}>
               <button
-                onClick={() => setSelected(i => (i - 1 + images.length) % images.length)}
+                onClick={prev}
                 title="Previous"
                 aria-label="Previous"
                 style={{
@@ -413,7 +413,7 @@ export default function VisionBoardScreen() {
                 }}
               >←</button>
               <button
-                onClick={() => setSelected(i => (i + 1) % images.length)}
+                onClick={next}
                 title="Next"
                 aria-label="Next"
                 style={{
