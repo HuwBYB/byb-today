@@ -1,6 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { supabase } from "./lib/supabaseClient";
 import BigGoalWizard from "./BigGoalWizard";
+
+/** Public path helper:
+ * - Vite: import.meta.env.BASE_URL
+ * - CRA / GH Pages: process.env.PUBLIC_URL
+ * - Fallback: '' (root)
+ */
+function publicPath(p: string) {
+  // @ts-ignore
+  const base =
+    (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
+    (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
+    "";
+  return `${base}${p.startsWith("/") ? p : `/${p}`}`;
+}
+const ALFRED_SRC = publicPath("/alfred/goals-alfred.png");
 
 /* ---------- Categories + colours (match DB constraint) ---------- */
 const CATS = [
@@ -62,6 +77,104 @@ function normalizeCat(x: string | null | undefined): CatKey {
   return (["personal","health","career","financial","other"] as const).includes(s as any) ? (s as CatKey) : "other";
 }
 
+/* ---------- Alfred modal components ---------- */
+function Modal({
+  open, onClose, title, children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+}) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    if (open) window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    if (open && closeRef.current) closeRef.current.focus();
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.35)",
+        zIndex: 1000,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: 720,
+          width: "100%",
+          background: "#fff",
+          borderRadius: 12,
+          boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+          padding: 20,
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+          <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
+          <button ref={closeRef} onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>
+            ✕
+          </button>
+        </div>
+        <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function GoalsHelpContent() {
+  return (
+    <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
+      <p><em>“A dream with a well thought out plan on how to achieve it becomes a goal…”</em></p>
+
+      <h4 style={{ margin: "8px 0" }}>Step-by-Step Guidance</h4>
+      <ol style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Write down your dream</li>
+        <li>Consider what you must do to achieve it</li>
+        <li>Decide a realistic deadline</li>
+        <li>Picture the halfway point</li>
+        <li>Turn it into monthly / weekly / daily commitments</li>
+        <li>Work on it every day</li>
+      </ol>
+
+      <h4 style={{ margin: "8px 0" }}>Alfred’s Tips</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Every small step counts</li>
+        <li>Consistency beats intensity</li>
+        <li>Celebrate progress, not just results</li>
+      </ul>
+
+      <h4 style={{ margin: "8px 0" }}>How it appears in the app</h4>
+      <p>
+        Set your dream as a Big Goal, define the halfway milestone, add monthly/weekly/daily commitments.
+        The steps appear on your Today screen as top priorities so you’re always moving forward.
+      </p>
+
+      <p><strong>Closing Note:</strong> You’ve turned a dream into a plan — now we make it real.</p>
+    </div>
+  );
+}
+
+/* ========================== MAIN SCREEN ========================== */
+
 export default function GoalsScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -83,6 +196,9 @@ export default function GoalsScreen() {
 
   // category editor for selected
   const [editCat, setEditCat] = useState<CatKey>("other");
+
+  // Alfred modal
+  const [showHelp, setShowHelp] = useState(false);
 
   /* ----- auth ----- */
   useEffect(() => {
@@ -333,7 +449,34 @@ export default function GoalsScreen() {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 12 }}>
       {/* Left: list + creators */}
-      <div className="card" style={{ display: "grid", gap: 12 }}>
+      <div className="card" style={{ display: "grid", gap: 12, position: "relative" }}>
+        {/* Alfred button — top-right of the Goals page (left card) */}
+        <button
+          onClick={() => setShowHelp(true)}
+          aria-label="Open Alfred help"
+          title="Need a hand? Ask Alfred"
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            cursor: "pointer",
+            lineHeight: 0,
+          }}
+        >
+          <img
+            src={ALFRED_SRC}
+            alt="Alfred — open help"
+            style={{ width: 56, height: 56 }}
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).style.display = "none";
+              console.warn("Alfred image not found at:", ALFRED_SRC);
+            }}
+          />
+        </button>
+
         <h1>Goals</h1>
 
         {/* Simple goal creator */}
@@ -486,6 +629,14 @@ export default function GoalsScreen() {
           </div>
         )}
       </div>
+
+      {/* Help modal at page level */}
+      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Goals — Help">
+        <div style={{ display: "flex", gap: 16 }}>
+          <img src={ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />
+          <GoalsHelpContent />
+        </div>
+      </Modal>
     </div>
   );
 }
