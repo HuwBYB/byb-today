@@ -225,7 +225,7 @@ export default function VisionBoardScreen() {
     try {
       const remaining = Math.max(0, 6 - images.length);
       const toUpload = Array.from(files).slice(0, remaining);
-      const newOnes: VBImage[] = []
+      const newOnes: VBImage[] = [];
 
       for (const file of toUpload) {
         const safeName = `${Date.now()}-${file.name.replace(/\s+/g, "_")}`;
@@ -426,10 +426,9 @@ export default function VisionBoardScreen() {
               )}
             </div>
 
-            {/* Caption editor for selected */}
+            {/* Caption editor for selected — ONLY the input (no extra line above) */}
             {current && (
-              <label style={{ display: "grid", gap: 6 }}>
-                <div className="muted">Add text for this image here</div>
+              <div>
                 <input
                   value={current.caption}
                   onChange={e => {
@@ -442,8 +441,9 @@ export default function VisionBoardScreen() {
                   }}
                   onBlur={e => saveCaption(selected, e.target.value)}
                   placeholder="Add text for this image here"
+                  aria-label="Image caption"
                 />
-              </label>
+              </div>
             )}
 
             {/* Thumbnails */}
