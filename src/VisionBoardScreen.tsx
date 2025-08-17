@@ -80,30 +80,37 @@ function Modal({
   );
 }
 
-/* ---------- Inline help content ---------- */
+/* ---------- Refreshed, positive help content ---------- */
 function VisionHelpContent() {
   return (
-    <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
-      <h4 style={{ margin: 0 }}>Introduction / Motivation</h4>
-      <p><em>“If you look at what you want every day and really imagine it you can make it your reality, well if you believe some sort of secret. We don’t believe that but if you vision what you want and actually take steps to get there then it is possible”</em></p>
+    <div style={{ display: "grid", gap: 12, lineHeight: 1.6 }}>
+      <h4 style={{ margin: 0 }}>Why a Vision Board?</h4>
+      <p>
+        Pictures make goals feel real. When you see what you want every day and pair it with
+        small, consistent actions, you stay focused and build momentum.
+      </p>
 
-      <h4 style={{ margin: 0 }}>Step-by-Step Guidance</h4>
+      <h4 style={{ margin: 0 }}>How to use it</h4>
       <ol style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Upload some images of things you would like to have in your life</li>
-        <li>You can add some text to each picture that makes it more personal to you</li>
-        <li>Once you have your images in place you can either scroll through by pressing the left and right arrows on the top image</li>
-        <li>You can watch it as a slide show by pressing <strong>Play 30s</strong> (this will scroll the images every 30 seconds)</li>
-        <li>When you look at each image you should imagine they are already in your life, really vividly imagine yourself in the picture with whatever items are there.</li>
+        <li>Upload images that represent what you’re moving toward.</li>
+        <li>Add a short line beneath each image that makes it personal and specific.</li>
+        <li>Use the arrows or <strong>Play 30s</strong> to cycle through your board daily.</li>
+        <li>Take 10–20 seconds per image to imagine the scene as if it’s already part of your life.</li>
+        <li>Ask, “What’s one small step I can take today toward this?” Then do that step.</li>
       </ol>
 
-      <h4 style={{ margin: 0 }}>Alfred’s Tips</h4>
+      <h4 style={{ margin: 0 }}>Alfred’s tips</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>You can make dreams come to your reality if you imagine what it will be like to already have them</li>
-        <li>Think about what you will need to do to make it real and start doing the things it will take</li>
+        <li>Specific beats vague: “Run 5k on Saturdays” beats “Get fitter”.</li>
+        <li>Keep it visible—open the Vision Board when you start your day.</li>
+        <li>Tiny actions compound. Consistency > intensity.</li>
       </ul>
 
-      <h4 style={{ margin: 0 }}>Closing Note</h4>
-      <p><em>“You can manifest what you want if you work hard enough to get it. Seeing the things you want every day should be your motivation”</em></p>
+      <h4 style={{ margin: 0 }}>Make it a habit</h4>
+      <p>
+        A few focused minutes each day is enough. Let the images spark motivation—and let your
+        daily actions create results.
+      </p>
     </div>
   );
 }
@@ -132,7 +139,7 @@ export default function VisionBoardScreen() {
   const canAddMore = images.length < 6;
   const current = images[selected] || null;
 
-  /* ----- local CSS to keep icons perfectly centered + contain viewer ----- */
+  /* ----- local CSS: perfect icon centering + contain viewer ----- */
   const styleTag = (
     <style>{`
       .vb-viewer-img { object-fit: contain !important; }
@@ -264,6 +271,7 @@ export default function VisionBoardScreen() {
       const newOnes: VBImage[] = [];
 
       for (const file of toUpload) {
+        the
         const safeName = `${Date.now()}-${file.name.replace(/\s+/g, "_")}`;
         const path = (prefix === "user" ? `${uid}/` : "") + safeName;
 
