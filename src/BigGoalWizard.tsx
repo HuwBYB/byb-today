@@ -1,5 +1,13 @@
-import { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import { supabase } from "./lib/supabaseClient";
+
+/* -------- Alfred image path --------
+   If your image lives at a different URL, change this string.
+   Example alternatives:
+   - "/assets/alfred/goals-alfred.png"
+   - "/images/goals-alfred.png"
+------------------------------------- */
+const ALFRED_SRC = "/alfred/goals-alfred.png";
 
 /* -------- categories + colours (match DB constraint) --------
    Allowed in DB: 'health' | 'personal' | 'financial' | 'career' | 'other'
@@ -36,6 +44,109 @@ function addMonthsClamped(base: Date, months: number, anchorDay?: number) {
   return new Date(first.getFullYear(), first.getMonth(), Math.min(anchor, ld));
 }
 
+/* -------- lightweight modal + help content -------- */
+function Modal({
+  open,
+  onClose,
+  title,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+}) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    if (open) window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    if (open && closeRef.current) closeRef.current.focus();
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.35)",
+        zIndex: 1000,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          maxWidth: 720,
+          width: "100%",
+          background: "#fff",
+          borderRadius: 12,
+          boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+          padding: 20,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+          <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
+          <button ref={closeRef} onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>
+            ✕
+          </button>
+        </div>
+        <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function AlfredHelp() {
+  return (
+    <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
+      <p><em>“A dream with a well thought out plan on how to achieve it becomes a goal. We want to help you achieve your dreams. The best way to help you on your journey is to set it as a goal and plan your route to get to that destination.”</em></p>
+
+      <h4 style={{ margin: "8px 0" }}>Step-by-Step Guidance</h4>
+      <ol style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Write down your dream</li>
+        <li>Really consider this dream and what you need to do to achieve it.</li>
+        <li>Decide on a realistic deadline</li>
+        <li>Imagine where you will be halfway there</li>
+        <li>Break that into commitments (yearly, monthly, weekly, daily)</li>
+        <li>Work on it every day and your dreams can become reality</li>
+      </ol>
+
+      <h4 style={{ margin: "8px 0" }}>Alfred’s Tips</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Remember, every small step counts!</li>
+        <li>Consistency is the key to turning dreams into reality.</li>
+        <li>Be proud of progress, not just results.</li>
+      </ul>
+
+      <h4 style={{ margin: "8px 0" }}>How it appears in the app</h4>
+      <p>
+        In this app you set your dream as your big goal. You then note where you’ll be when you’re halfway through.
+        Next you make commitments of what you will do yearly, monthly, weekly and daily. Once you lock this, the steps
+        will be transferred to your calendar. When the steps are due they will show on your “Today” screen as top priority –
+        after all, fulfilling our dreams should always be a top priority.
+      </p>
+
+      <p><strong>Closing Note:</strong> “You’ve turned a dream into a goal, created a plan — now let’s turn it into action together!”</p>
+    </div>
+  );
+}
+
 type Props = { onClose: () => void; onCreated: () => void };
 
 export default function BigGoalWizard({ onClose, onCreated }: Props) {
@@ -50,6 +161,8 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
   const [dailyCommit, setDailyCommit] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const [showHelp, setShowHelp] = useState(false);
 
   const catColor = colorOf(category);
 
@@ -189,7 +302,38 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
   }
 
   return (
-    <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 16, background: "#fff" }}>
+    <div
+      style={{
+        border: "1px solid #ddd",
+        borderRadius: 12,
+        padding: 16,
+        background: "#fff",
+        position: "relative", // allow top-right Alfred
+      }}
+    >
+      {/* Alfred in the top-right */}
+      <button
+        onClick={() => setShowHelp(true)}
+        aria-label="Open Alfred help"
+        title="Need a hand? Ask Alfred"
+        style={{
+          position: "absolute",
+          top: 8,
+          right: 8,
+          border: "none",
+          background: "transparent",
+          padding: 0,
+          cursor: "pointer",
+          lineHeight: 0,
+        }}
+      >
+        <img
+          src={ALFRED_SRC}
+          alt="Alfred — open help"
+          style={{ width: 56, height: 56 }}
+        />
+      </button>
+
       <h2 style={{ fontSize: 18, marginBottom: 8 }}>Create a Big Goal (guided)</h2>
 
       <div style={{ display: "grid", gap: 10 }}>
@@ -255,6 +399,19 @@ export default function BigGoalWizard({ onClose, onCreated }: Props) {
           <button onClick={onClose} disabled={busy}>Cancel</button>
         </div>
       </div>
+
+      {/* Help modal */}
+      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Goals — Help">
+        <div style={{ display: "flex", gap: 16 }}>
+          <img
+            src={ALFRED_SRC}
+            alt=""
+            aria-hidden="true"
+            style={{ width: 72, height: 72, flex: "0 0 auto" }}
+          />
+          <AlfredHelp />
+        </div>
+      </Modal>
     </div>
   );
 }
