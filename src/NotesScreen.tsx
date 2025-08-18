@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 type Note = {
@@ -32,6 +32,88 @@ function stringToTags(s: string) {
     .slice(0, 20);
 }
 
+/** Public path helper (works with Vite/CRA/Vercel/GH Pages) */
+function publicPath(p: string) {
+  // @ts-ignore
+  const base =
+    (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
+    (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
+    "";
+  const withSlash = p.startsWith("/") ? p : `/${p}`;
+  return `${base.replace(/\/$/, "")}${withSlash}`;
+}
+const NOTES_ALFRED_SRC = publicPath("/alfred/Notes_Alfred.png");
+
+/* ---------- Lightweight modal ---------- */
+function Modal({
+  open, onClose, title, children,
+}: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    if (open) window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+  useEffect(() => { if (open && closeRef.current) closeRef.current.focus(); }, [open]);
+  if (!open) return null;
+  return (
+    <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 2000,
+               display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 780, width: "100%", background: "#fff", borderRadius: 12,
+                 boxShadow: "0 10px 30px rgba(0,0,0,0.2)", padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+          <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
+          <button ref={closeRef} onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>✕</button>
+        </div>
+        <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Inlined help content ---------- */
+function NotesHelpContent() {
+  return (
+    <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
+      <p><em>Notes keeps everything in one place — ideas, meeting minutes, brain dumps, and plans — so you can find and act on them later.</em></p>
+
+      <h4 style={{ margin: 0 }}>Quick start</h4>
+      <ol style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Click <b>New</b> to create a note.</li>
+        <li>Add a <b>Title</b> (or leave it blank — we’ll use the first line).</li>
+        <li>Write in the editor. Changes are <b>auto-saved</b> within a second.</li>
+        <li>Optional: set a <b>Folder</b> (e.g., Work, Personal) and add <b>Tags</b> like <code>meeting, idea</code>.</li>
+        <li>Use <b>Search</b> and the <b>folder filter</b> on the left to find notes fast.</li>
+      </ol>
+
+      <h4 style={{ margin: 0 }}>Folders vs Tags</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li><b>Folder</b> = one home (good for simple grouping like Work/Personal).</li>
+        <li><b>Tags</b> = many labels (great for themes: <i>meeting, client-x, follow-up</i>).</li>
+      </ul>
+
+      <h4 style={{ margin: 0 }}>Pin, Archive, Delete</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li><b>Pin</b> bubbles important notes to the top.</li>
+        <li><b>Archive</b> hides a note from your active list without deleting it.</li>
+        <li><b>Delete</b> removes it permanently (use with care).</li>
+      </ul>
+
+      <h4 style={{ margin: 0 }}>Tips from Alfred</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Start messy. Capture first, tidy later with folders/tags.</li>
+        <li>One note per meeting/topic keeps history clean and easier to search.</li>
+        <li>Use consistent tag names (e.g., <code>follow-up</code> not <code>follow up</code>).</li>
+        <li>Pin your “Today” note in the morning; unpin at day’s end.</li>
+      </ul>
+
+      <p><strong>Closing note:</strong> Notes turn thoughts into assets. Capture daily — future you will thank you.</p>
+    </div>
+  );
+}
+
 export default function NotesScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -50,6 +132,10 @@ export default function NotesScreen() {
   // search & folder filter
   const [q, setQ] = useState("");
   const [folderFilter, setFolderFilter] = useState<string>("");
+
+  // Alfred
+  const [showHelp, setShowHelp] = useState(false);
+  const [imgOk, setImgOk] = useState(true);
 
   const saveTimer = useRef<number | null>(null);
   const activeNote = useMemo(() => notes.find(n => n.id === activeId) || null, [notes, activeId]);
@@ -173,13 +259,57 @@ export default function NotesScreen() {
   }, [notes, q, folderFilter]);
 
   return (
-    <div className="page-notes">
+    <div className="page-notes" style={{ display: "grid", gap: 12 }}>
+      {/* Title + Alfred */}
+      <div className="card" style={{ position: "relative", paddingRight: 64 }}>
+        <button
+          onClick={() => setShowHelp(true)}
+          aria-label="Open Notes help"
+          title="Need a hand? Ask Alfred"
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            cursor: "pointer",
+            lineHeight: 0,
+            zIndex: 10,
+          }}
+        >
+          {imgOk ? (
+            <img
+              src={NOTES_ALFRED_SRC}
+              alt="Notes Alfred — open help"
+              style={{ width: 48, height: 48 }}
+              onError={() => setImgOk(false)}
+            />
+          ) : (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 36, height: 36, borderRadius: 999,
+                border: "1px solid #d1d5db",
+                background: "#f9fafb",
+                fontWeight: 700,
+              }}
+            >
+              ?
+            </span>
+          )}
+        </button>
+        <h1 style={{ margin: 0 }}>Notes</h1>
+      </div>
+
       <div className="container">
         <div className="notes-layout">
           {/* Sidebar */}
           <aside className="card" style={{ display:"grid", gridTemplateRows:"auto auto auto 1fr auto", gap:10, minWidth:0 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
-              <h2 style={{ margin:0 }}>Notes</h2>
+              <h2 style={{ margin:0 }}>All notes</h2>
               <button className="btn-primary" onClick={createNote} style={{ borderRadius:8 }}>New</button>
             </div>
 
@@ -281,6 +411,16 @@ export default function NotesScreen() {
           </main>
         </div>
       </div>
+
+      {/* Help modal */}
+      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Notes — Help">
+        <div style={{ display: "flex", gap: 16 }}>
+          {imgOk && <img src={NOTES_ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
+          <div style={{ flex: 1 }}>
+            <NotesHelpContent />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
