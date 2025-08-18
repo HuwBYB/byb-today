@@ -13,9 +13,6 @@ function publicPath(p: string) {
 const FOCUS_ALFRED_SRC = publicPath("/alfred/imer_Alfred.png");
 
 /* ---------- Tiny helpers ---------- */
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
-}
 function mmss(sec: number) {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
@@ -134,7 +131,7 @@ export default function FocusAlfredScreen() {
       });
     }, 1000);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exdirectives
   }, [running, phase, currentPreset.focusMin, currentPreset.shortMin, currentPreset.longMin, currentPreset.cyclesBeforeLong]);
 
   function advancePhase() {
@@ -272,7 +269,7 @@ export default function FocusAlfredScreen() {
           </div>
         </div>
 
-        {/* Simple guidance card (optional, nice for empty page feel) */}
+        {/* Simple guidance card */}
         <div className="card" style={{ display: "grid", gap: 8 }}>
           <div className="section-title">How to use</div>
           <ul className="list" style={{ margin: 0 }}>
