@@ -142,7 +142,7 @@ export default function ConfidenceScreen() {
   return (
     <div className="page-confidence">
       <div className="container" style={{ display: "grid", gap: 12 }}>
-        {/* Top bar with Alfred help button */}
+        {/* Title card with Alfred help button (no controls here) */}
         <div className="card" style={{ position: "relative" }}>
           <button
             onClick={() => setShowHelp(true)}
@@ -175,25 +175,21 @@ export default function ConfidenceScreen() {
             )}
           </button>
 
-          <div
-            className="confidence-toolbar"
-            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}
-          >
-            <div>
-              <h1 style={{ margin: 0 }}>Confidence Moves</h1>
-              <div className="muted">A focused minute before your meeting or interview.</div>
-            </div>
+          <div style={{ display: "grid", gap: 4 }}>
+            <h1 style={{ margin: 0 }}>Confidence Moves</h1>
+            <div className="muted">A focused minute before your meeting or interview.</div>
+          </div>
+        </div>
 
-            <div className="confidence-toolbar" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <button onClick={startOneMinute} className="btn-primary" style={{ borderRadius: 8 }}>
-                Start 1-minute
-              </button>
-              <button onClick={stop}>Pause</button>
-              <button onClick={reset}>Reset</button>
-              <div className="muted" style={{ width: 64, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                {countdown}s
-              </div>
-            </div>
+        {/* NEW: separate timer controls card under the title */}
+        <div className="card" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <button onClick={startOneMinute} className="btn-primary" style={{ borderRadius: 8 }}>
+            Start 1-minute
+          </button>
+          <button onClick={stop}>Pause</button>
+          <button onClick={reset}>Reset</button>
+          <div className="muted" style={{ marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>
+            {countdown}s
           </div>
         </div>
 
