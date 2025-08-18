@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 type EntryRow = {
@@ -23,6 +23,73 @@ function fromISO(s: string) {
   return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
 
+// Public path helper (Vite/CRA/Vercel/GH Pages)
+function publicPath(p: string) {
+  // @ts-ignore
+  const base =
+    (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
+    (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
+    "";
+  const withSlash = p.startsWith("/") ? p : `/${p}`;
+  return `${base.replace(/\/$/, "")}${withSlash}`;
+}
+
+const GRAT_ALFRED_SRC = publicPath("/alfred/Gratitude_Alfred.png");
+
+// ---------- Lightweight modal ----------
+function Modal({
+  open, onClose, title, children,
+}: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    if (open) window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+  useEffect(() => { if (open && closeRef.current) closeRef.current.focus(); }, [open]);
+  if (!open) return null;
+  return (
+    <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 2000,
+               display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 760, width: "100%", background: "#fff", borderRadius: 12,
+                 boxShadow: "0 10px 30px rgba(0,0,0,0.2)", padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+          <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
+          <button ref={closeRef} onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>✕</button>
+        </div>
+        <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Inline help content ----------
+function GratitudeHelpContent() {
+  return (
+    <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
+      <h4 style={{ margin: 0 }}>Introduction / Motivation</h4>
+      <p><em>“A gratitude Journal is an amazing tool for your well being. Writing down things that you are grateful for can greatly enhance your positivity.”</em></p>
+
+      <h4 style={{ margin: 0 }}>Step-by-Step Guidance</h4>
+      <ol style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Write something you are grateful for.</li>
+        <li>Write something else you are grateful for.</li>
+        <li>Write something… this one is quite simple!</li>
+      </ol>
+
+      <h4 style={{ margin: 0 }}>Alfred’s Tips</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li>If you sometimes focus on things that you are grateful to yourself for it can help your self esteem.</li>
+      </ul>
+
+      <h4 style={{ margin: 0 }}>Closing Note</h4>
+      <p><em>“Reflecting on what you are grateful for can improve mindfulness.”</em></p>
+    </div>
+  );
+}
+
 type Idx = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 const INDEXES: Idx[] = [1, 2, 3, 4, 5, 6, 7, 8];
 
@@ -40,6 +107,10 @@ export default function GratitudeScreen() {
   const [err, setErr] = useState<string | null>(null);
 
   const [history, setHistory] = useState<Record<string, EntryRow[]>>({});
+
+  // Alfred modal
+  const [showHelp, setShowHelp] = useState(false);
+  const [imgOk, setImgOk] = useState(true);
 
   // prevent setState-after-unmount warnings/crashes
   const alive = useRef(true);
@@ -167,14 +238,57 @@ export default function GratitudeScreen() {
   }
 
   return (
-    <div className="page-gratitude">
+    <div className="page-gratitude" style={{ display: "grid", gap: 12 }}>
+      {/* Title card with Alfred */}
+      <div className="card" style={{ position: "relative", paddingRight: 64 }}>
+        <button
+          onClick={() => setShowHelp(true)}
+          aria-label="Open Gratitude help"
+          title="Need a hand? Ask Alfred"
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            cursor: "pointer",
+            lineHeight: 0,
+            zIndex: 10,
+          }}
+        >
+          {imgOk ? (
+            <img
+              src={GRAT_ALFRED_SRC}
+              alt="Gratitude Alfred — open help"
+              style={{ width: 48, height: 48 }}
+              onError={() => setImgOk(false)}
+            />
+          ) : (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 36, height: 36, borderRadius: 999,
+                border: "1px solid #d1d5db",
+                background: "#f9fafb",
+                fontWeight: 700,
+              }}
+            >
+              ?
+            </span>
+          )}
+        </button>
+        <h1 style={{ margin: 0 }}>Gratitude Journal</h1>
+      </div>
+
+      {/* Main layout */}
       <div className="gratitude-layout">
         {/* Left: editor */}
         <div className="card card--wash">
-          <h1>Gratitude Journal</h1>
-
           {/* toolbar */}
-          <div className="gratitude-toolbar" style={{ marginTop: 8, marginBottom: 12 }}>
+          <div className="gratitude-toolbar" style={{ marginTop: 0, marginBottom: 12 }}>
             <button onClick={gotoToday}>Today</button>
             <button onClick={gotoPrev}>←</button>
             <input type="date" value={dateISO} onChange={e => setDateISO(e.target.value)} />
@@ -193,7 +307,7 @@ export default function GratitudeScreen() {
                   placeholder={SIMPLE_PLACEHOLDER}
                   value={draft[idx] ?? ""}
                   onChange={(e) => {
-                    const v = e.currentTarget.value; // avoid any event pooling issues
+                    const v = e.currentTarget.value;
                     safeSet(setDraft, (d: any) => ({ ...d, [idx]: v }));
                   }}
                   onBlur={() => saveIdx(idx)}
@@ -235,6 +349,16 @@ export default function GratitudeScreen() {
           </div>
         </aside>
       </div>
+
+      {/* Help modal */}
+      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Gratitude — Help">
+        <div style={{ display: "flex", gap: 16 }}>
+          {imgOk && <img src={GRAT_ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
+          <div style={{ flex: 1 }}>
+            <GratitudeHelpContent />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
