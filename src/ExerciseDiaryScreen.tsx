@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* ---------- Types ---------- */
@@ -35,7 +35,18 @@ type PrevEntry = {
   sets: Array<{ weight_kg: number | null; reps: number | null; duration_sec: number | null }>;
 };
 
-/* ---------- Helpers ---------- */
+/* ---------- Path + date helpers ---------- */
+function publicPath(p: string) {
+  // @ts-ignore
+  const base =
+    (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
+    (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
+    "";
+  const withSlash = p.startsWith("/") ? p : `/${p}`;
+  return `${base.replace(/\/$/, "")}${withSlash}`;
+}
+const EX_ALFRED_SRC = publicPath("/alfred/Exercise_Alfred.png");
+
 function toISO(d: Date) {
   const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
@@ -56,6 +67,83 @@ function paceStr(distanceKm?: number, durSec?: number) {
   return `${secondsToMMSS(secPerKm)}/km`;
 }
 const FIN_KEY = (sid: number, dateISO: string) => `byb_session_finished_${sid}_${dateISO}`;
+
+/* ---------- Lightweight modal ---------- */
+function Modal({
+  open, onClose, title, children,
+}: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    if (open) window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+  useEffect(() => { if (open && closeRef.current) closeRef.current.focus(); }, [open]);
+  if (!open) return null;
+  return (
+    <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 2000,
+               display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 780, width: "100%", background: "#fff", borderRadius: 12,
+                 boxShadow: "0 10px 30px rgba(0,0,0,0.2)", padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+          <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
+          <button ref={closeRef} onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>✕</button>
+        </div>
+        <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Inlined help content (edited) ---------- */
+function ExerciseHelpContent() {
+  return (
+    <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
+      <p><em>“Exercise should be part of everyone’s life — whether that’s a short walk or a full workout.”</em></p>
+
+      <h4 style={{ margin: 0 }}>Quick start</h4>
+      <ol style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Pick a day (or tap <b>Today</b>) and hit <b>Start session</b>.</li>
+        <li>Use <b>Quick add</b> to log what you’re doing:
+          <ul style={{ margin: "6px 0 0 0", paddingLeft: 18 }}>
+            <li><b>Weights</b>: type the exercise name and add sets.</li>
+            <li><b>Run/Jog/Walk/Yoga/Class</b>: add <i>duration</i> and (optionally) <i>distance</i>.</li>
+          </ul>
+        </li>
+        <li>When you’re done, tap <b>Complete session</b>.</li>
+      </ol>
+
+      <h4 style={{ margin: 0 }}>Weights workflow</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Enter a clear exercise title (e.g., “Bench Press”). Titles are <b>case-sensitive</b> when matching history.</li>
+        <li>Add sets, then record <b>kg</b> and <b>reps</b>. Use “Show previous” to view past sessions for the same title and “Copy last sets” to prefill.</li>
+      </ul>
+
+      <h4 style={{ margin: 0 }}>Cardio & classes</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Log <b>duration</b> (mm:ss) and <b>distance</b> (km) if relevant — pace is calculated automatically.</li>
+        <li>For classes, give it a title (e.g., “Spin Class”) so you can find it later.</li>
+      </ul>
+
+      <h4 style={{ margin: 0 }}>Notes & history</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Use <b>Notes</b> to capture how it felt, form cues, or injuries.</li>
+        <li>The <b>Recent</b> panel lets you reopen past days quickly.</li>
+      </ul>
+
+      <h4 style={{ margin: 0 }}>Tips from Alfred</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Small sessions count. Five minutes is better than zero.</li>
+        <li>Be consistent with exercise names to keep history tidy.</li>
+        <li>Progress ≠ heavier every time; better form and more reps also win.</li>
+      </ul>
+
+      <p><strong>Closing note:</strong> Log honestly, celebrate consistency, and let the data nudge you forward.</p>
+    </div>
+  );
+}
 
 /* ---------- Main ---------- */
 export default function ExerciseDiaryScreen() {
@@ -91,6 +179,10 @@ export default function ExerciseDiaryScreen() {
 
   // sticky quick-add (weights)
   const [stickyTitle, setStickyTitle] = useState("");
+
+  // Alfred modal
+  const [showHelp, setShowHelp] = useState(false);
+  const [imgOk, setImgOk] = useState(true);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
@@ -226,7 +318,6 @@ export default function ExerciseDiaryScreen() {
   }
 
   async function completeSession() {
-    // UI collapse + single success log
     markLocalFinished();
     await ensureWinForSession();
   }
@@ -481,13 +572,56 @@ export default function ExerciseDiaryScreen() {
   }, [items, setsByItem]);
 
   return (
-    <div className="page-exercise">
+    <div className="page-exercise" style={{ display: "grid", gap: 12 }}>
+      {/* Title card with Alfred */}
+      <div className="card" style={{ position: "relative", paddingRight: 64 }}>
+        <button
+          onClick={() => setShowHelp(true)}
+          aria-label="Open Exercise help"
+          title="Need a hand? Ask Alfred"
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            cursor: "pointer",
+            lineHeight: 0,
+            zIndex: 10,
+          }}
+        >
+          {imgOk ? (
+            <img
+              src={EX_ALFRED_SRC}
+              alt="Exercise Alfred — open help"
+              style={{ width: 48, height: 48 }}
+              onError={() => setImgOk(false)}
+            />
+          ) : (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 36, height: 36, borderRadius: 999,
+                border: "1px solid #d1d5db",
+                background: "#f9fafb",
+                fontWeight: 700,
+              }}
+            >
+              ?
+            </span>
+          )}
+        </button>
+        <h1 style={{ margin: 0 }}>Exercise Diary</h1>
+      </div>
+
+      {/* Main layout */}
       <div className="container">
         <div className="exercise-layout">
           {/* Left: editor */}
           <div className="card" style={{ display: "grid", gap: 12 }}>
-            <h1 style={{ margin: 0 }}>Exercise Diary</h1>
-
             {/* Date bar */}
             <div className="exercise-toolbar" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <button onClick={gotoToday}>Today</button>
@@ -497,43 +631,15 @@ export default function ExerciseDiaryScreen() {
               <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
                 {session ? <span className="muted">Session #{session.id}</span> : (
                   <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius: 8 }}>
-                    {busy ? "Creating…" : "Create session"}
+                    {busy ? "Starting…" : "Start session"}
                   </button>
                 )}
                 {session && finished && <button onClick={reopenSession}>Reopen</button>}
               </div>
             </div>
 
-            {/* Sticky weights bar (only when session exists and not finished) */}
-            {session && !finished && (
-              <div
-                style={{
-                  position: "sticky", top: 0, zIndex: 5,
-                  background: "#fff", border: "1px solid var(--border)", borderRadius: 10,
-                  padding: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap"
-                }}
-              >
-                <span className="badge">Weights</span>
-                <input
-                  placeholder="Enter exercise name here"
-                  value={stickyTitle}
-                  onChange={e => setStickyTitle(e.target.value)}
-                  style={{ flex: "1 1 200px", minWidth: 0 }}
-                />
-                <button
-                  className="btn-soft"
-                  onClick={async () => { await addWeightsExercise(stickyTitle.trim()); setStickyTitle(""); }}
-                >
-                  Add exercise
-                </button>
-                <button className="btn-primary" onClick={completeSession} style={{ marginLeft: "auto", borderRadius: 8 }}>
-                  Complete session
-                </button>
-              </div>
-            )}
-
             {!session ? (
-              <div className="muted">No session for this day yet. Click <b>Create session</b> to start logging.</div>
+              <div className="muted">No session for this day yet. Click <b>Start session</b> to begin.</div>
             ) : finished ? (
               <div className="card card--wash" style={{ display: "grid", gap: 10 }}>
                 <h2 style={{ margin: 0 }}>Session complete</h2>
@@ -548,14 +654,41 @@ export default function ExerciseDiaryScreen() {
               </div>
             ) : (
               <>
-                {/* Full quick add (kept for cardio etc.) */}
+                {/* 👉 Quick add FIRST (above weights sticky) */}
                 <QuickAddCard
                   onAddWeights={(name) => addWeightsExercise(name)}
                   onAddCardio={(kind, title, km, mmss) => addCardio(kind, title, km, mmss)}
                 />
 
+                {/* Sticky weights bar (appears as you scroll) */}
+                <div
+                  style={{
+                    position: "sticky", top: 0, zIndex: 5,
+                    background: "#fff", border: "1px solid var(--border)", borderRadius: 10,
+                    padding: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap"
+                  }}
+                >
+                  <span className="badge">Weights</span>
+                  <input
+                    placeholder="Enter exercise name here"
+                    value={stickyTitle}
+                    onChange={e => setStickyTitle(e.target.value)}
+                    style={{ flex: "1 1 200px", minWidth: 0 }}
+                  />
+                  <button
+                    className="btn-soft"
+                    onClick={async () => { await addWeightsExercise(stickyTitle.trim()); setStickyTitle(""); }}
+                  >
+                    Add exercise
+                  </button>
+                  <button className="btn-primary" onClick={completeSession} style={{ marginLeft: "auto", borderRadius: 8 }}>
+                    Complete session
+                  </button>
+                </div>
+
+                {/* Items */}
                 <div style={{ display: "grid", gap: 10 }}>
-                  {items.length === 0 && <div className="muted">No items yet. Add your first exercise above.</div>}
+                  {items.length === 0 && <div className="muted">No items yet. Add your first entry above.</div>}
                   {items.map(it => (
                     <div key={it.id} style={{ border: "1px solid #eee", borderRadius: 10, padding: 10 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
@@ -660,10 +793,20 @@ export default function ExerciseDiaryScreen() {
         </div>
       </div>
 
+      {/* Help modal */}
+      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Exercise — Help">
+        <div style={{ display: "flex", gap: 16 }}>
+          {imgOk && <img src={EX_ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
+          <div style={{ flex: 1 }}>
+            <ExerciseHelpContent />
+          </div>
+        </div>
+      </Modal>
+
       {/* History Modal */}
       {modalOpen && (
         <div
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "grid", placeItems: "center", zIndex: 100 }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "grid", placeItems: "center", zIndex: 2100 }}
           onClick={closeModal}
         >
           <div className="card" style={{ width: "min(720px, 92vw)", maxHeight: "80vh", overflow: "auto" }} onClick={e => e.stopPropagation()}>
