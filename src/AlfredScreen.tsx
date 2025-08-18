@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 type Mode = "business" | "finance" | "health" | "friend";
@@ -11,6 +11,85 @@ const MODES: { key: Mode; label: string; emoji: string }[] = [
   { key: "friend",   label: "Friend",            emoji: "🧑‍🤝‍🧑" },
 ];
 
+/* ---------- Public path helper ---------- */
+function publicPath(p: string) {
+  // @ts-ignore
+  const base =
+    (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
+    (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
+    "";
+  const withSlash = p.startsWith("/") ? p : `/${p}`;
+  return `${base.replace(/\/$/, "")}${withSlash}`;
+}
+const TODAY_ALFRED_SRC = publicPath("/alfred/Today_Alfred.png");
+
+/* ---------- Modal ---------- */
+function Modal({
+  open, onClose, title, children,
+}: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    if (open) window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+  useEffect(() => { if (open && closeRef.current) closeRef.current.focus(); }, [open]);
+  if (!open) return null;
+  return (
+    <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 2000 }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 760, width: "100%", background: "#fff", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.2)", padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+          <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
+          <button ref={closeRef} onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>✕</button>
+        </div>
+        <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Alfred help content (inline) ---------- */
+function AlfredHelpContent() {
+  return (
+    <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
+      <p><em>Alfred turns vague thoughts into clear next actions — and can drop them straight onto Today.</em></p>
+
+      <h4 style={{ margin: 0 }}>How to use Alfred</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li><b>Pick a persona</b>: Business, Finance, Health, or Friend. This nudges Alfred’s tone and focus.</li>
+        <li><b>Ask clearly</b>: “Help me plan 3 sales actions for today.” “Draft a 20-minute strength plan.”</li>
+        <li><b>Quick add</b>: Alfred’s bullet points appear under the chat. Click <i>＋ Add</i> to send them to Today.</li>
+      </ul>
+
+      <h4 style={{ margin: 0 }}>Prompts that work well</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li>“Prioritise my top 5 tasks for the day based on urgency and impact.”</li>
+        <li>“Turn this into steps: launch email campaign for Product A.”</li>
+        <li>“Health: give me a 30-min gym plan (dumbbells only).”</li>
+        <li>“Friend: I’m overwhelmed; help me pick one easy win.”</li>
+      </ul>
+
+      <h4 style={{ margin: 0 }}>Tips from Alfred</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Ask for numbered lists to get clean <b>Quick add</b> bullets.</li>
+        <li>Finish with “restrict to today” if you only want immediate actions.</li>
+        <li>Use the Friend persona when you need encouragement, not just a plan.</li>
+      </ul>
+
+      <h4 style={{ margin: 0 }}>Privacy & limits</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li>Your messages here are stored locally for each persona so you don’t lose context on refresh.</li>
+        <li>アルフレッド won’t see your private data unless you paste it here.</li>
+        <li>Always sanity-check advice, especially finance/health.</li>
+      </ul>
+
+      <p><strong>Bottom line:</strong> Chat, capture the bullets, and move — Alfred is your friction-free bridge to action.</p>
+    </div>
+  );
+}
+
 export default function AlfredScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("business");
@@ -19,6 +98,10 @@ export default function AlfredScreen() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Help modal
+  const [showHelp, setShowHelp] = useState(false);
+  const [imgOk, setImgOk] = useState(true);
 
   // auth
   useEffect(() => {
@@ -73,11 +156,9 @@ export default function AlfredScreen() {
     const last = [...messages].reverse().find(m => m.role === "assistant");
     if (!last) return [];
     const lines = last.content.split(/\r?\n/).map(l => l.trim());
-    // pick bullet-ish lines
     const bullets = lines.filter(l =>
       /^[-*•]\s+/.test(l) || /^\d+\.\s+/.test(l)
     ).map(l => l.replace(/^([-*•]\s+|\d+\.\s+)/, "").trim());
-    // limit to 6 to keep UI compact
     return bullets.slice(0, 6);
   }, [messages]);
 
@@ -125,7 +206,48 @@ export default function AlfredScreen() {
       </aside>
 
       {/* Chat pane */}
-      <main className="card" style={{ display: "grid", gridTemplateRows: "auto 1fr auto", gap: 10, minHeight: 360 }}>
+      <main className="card" style={{ position: "relative", display: "grid", gridTemplateRows: "auto 1fr auto", gap: 10, minHeight: 360, paddingRight: 64 }}>
+        {/* Alfred help button (top-right) */}
+        <button
+          onClick={() => setShowHelp(true)}
+          aria-label="Open Alfred help"
+          title="Need a hand? Ask Alfred"
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            cursor: "pointer",
+            lineHeight: 0,
+            zIndex: 10,
+          }}
+        >
+          {imgOk ? (
+            <img
+              src={TODAY_ALFRED_SRC}
+              alt="Alfred — open help"
+              style={{ width: 48, height: 48 }}
+              onError={() => setImgOk(false)}
+            />
+          ) : (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 36, height: 36, borderRadius: 999,
+                border: "1px solid #d1d5db",
+                background: "#f9fafb",
+                fontWeight: 700,
+              }}
+            >
+              ?
+            </span>
+          )}
+        </button>
+
         {/* Header */}
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
           <h3 style={{ margin: 0 }}>{MODES.find(m => m.key === mode)?.label}</h3>
@@ -191,6 +313,16 @@ export default function AlfredScreen() {
           </div>
         </div>
       </main>
+
+      {/* Help modal */}
+      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Alfred — Help">
+        <div style={{ display: "flex", gap: 16 }}>
+          {imgOk && <img src={TODAY_ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
+          <div style={{ flex: 1 }}>
+            <AlfredHelpContent />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
