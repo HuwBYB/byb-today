@@ -10,7 +10,8 @@ import ExerciseDiaryScreen from "./ExerciseDiaryScreen";
 import WinsScreen from "./WinsScreen";
 import AlfredScreen from "./AlfredScreen";
 import ConfidenceScreen from "./ConfidenceScreen";
-import NotesScreen from "./NotesScreen"; // ⬅️ NEW
+import NotesScreen from "./NotesScreen";
+import FocusAlfredScreen from "./FocusAlfredScreen"; // ⬅️ NEW
 
 type Tab =
   | "today"
@@ -19,9 +20,10 @@ type Tab =
   | "vision"
   | "gratitude"
   | "exercise"
-  | "notes"      // ⬅️ NEW
+  | "notes"
   | "wins"
   | "alfred"
+  | "focus"        // ⬅️ NEW
   | "confidence";
 
 export default function App() {
@@ -42,9 +44,10 @@ export default function App() {
         { key: "vision",     label: "Vision",     icon: "🖼️" },
         { key: "gratitude",  label: "Gratitude",  icon: "🙏" },
         { key: "exercise",   label: "Exercise",   icon: "🏋️" },
-        { key: "notes",      label: "Notes",      icon: "📝" }, // ⬅️ NEW
+        { key: "notes",      label: "Notes",      icon: "📝" },
         { key: "wins",       label: "Successes",  icon: "🏆" },
         { key: "alfred",     label: "Alfred",     icon: "🤖" },
+        { key: "focus",      label: "Focus",      icon: "⏱️" }, // ⬅️ NEW
         { key: "confidence", label: "Confidence", icon: "⚡" },
       ] as Array<{ key: Tab; label: string; icon: string }>,
     []
@@ -107,11 +110,13 @@ export default function App() {
 
           {tab === "exercise" && <ExerciseDiaryScreen />}
 
-          {tab === "notes" && <NotesScreen />}{/* ⬅️ NEW */}
+          {tab === "notes" && <NotesScreen />}
 
           {tab === "wins" && <WinsScreen />}
 
           {tab === "alfred" && <AlfredScreen />}
+
+          {tab === "focus" && <FocusAlfredScreen />}{/* ⬅️ NEW */}
 
           {tab === "confidence" && <ConfidenceScreen />}
         </div>
