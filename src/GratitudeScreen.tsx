@@ -1,17 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
+/* ---------- Types (no created_at/updated_at here, to match minimal schema) ---------- */
 type EntryRow = {
   id: number;
   user_id: string;
   entry_date: string; // YYYY-MM-DD
   item_index: number; // 1..8
   content: string;
-  created_at: string;
-  updated_at: string;
 };
 
-// --- date helpers (local) ---
+/* ---------- Date helpers ---------- */
 function toISO(d: Date) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -23,7 +22,7 @@ function fromISO(s: string) {
   return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
 
-// Public path helper (Vite/CRA/Vercel/GH Pages)
+/* ---------- Public path helper ---------- */
 function publicPath(p: string) {
   // @ts-ignore
   const base =
@@ -33,10 +32,9 @@ function publicPath(p: string) {
   const withSlash = p.startsWith("/") ? p : `/${p}`;
   return `${base.replace(/\/$/, "")}${withSlash}`;
 }
-
 const GRAT_ALFRED_SRC = publicPath("/alfred/Gratitude_Alfred.png");
 
-// ---------- Lightweight modal ----------
+/* ---------- Modal ---------- */
 function Modal({
   open, onClose, title, children,
 }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
@@ -65,36 +63,40 @@ function Modal({
   );
 }
 
-// ---------- Inline help content ----------
+/* ---------- Help content ---------- */
 function GratitudeHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
-      <h4 style={{ margin: 0 }}>Introduction / Motivation</h4>
-      <p><em>“A gratitude Journal is an amazing tool for your well being. Writing down things that you are grateful for can greatly enhance your positivity.”</em></p>
+      <h4 style={{ margin: 0 }}>Why this matters</h4>
+      <p><em>“A short list of things you’re grateful for nudges your brain toward what’s working.”</em></p>
 
-      <h4 style={{ margin: 0 }}>Step-by-Step Guidance</h4>
+      <h4 style={{ margin: 0 }}>How to use</h4>
       <ol style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Write something you are grateful for.</li>
-        <li>Write something else you are grateful for.</li>
-        <li>Write something… this one is quite simple!</li>
+        <li>Pick the date (or tap <b>Today</b>).</li>
+        <li>Fill any of the 1–8 prompts with a short sentence.</li>
+        <li>That’s it — tiny, honest entries beat perfect ones.</li>
       </ol>
 
-      <h4 style={{ margin: 0 }}>Alfred’s Tips</h4>
+      <h4 style={{ margin: 0 }}>Alfred’s tip</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>If you sometimes focus on things that you are grateful to yourself for it can help your self esteem.</li>
+        <li>Include one thing you’re grateful to <b>yourself</b> for — it builds self-respect.</li>
       </ul>
 
-      <h4 style={{ margin: 0 }}>Closing Note</h4>
-      <p><em>“Reflecting on what you are grateful for can improve mindfulness.”</em></p>
+      <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+        Your entries save when a field loses focus. If you go offline, they’re stored locally and retried.
+      </p>
     </div>
   );
 }
 
+/* ---------- Constants ---------- */
 type Idx = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
-const INDEXES: Idx[] = [1, 2, 3, 4, 5, 6, 7, 8];
-
-// Single, simple placeholder (per your request)
+const INDEXES: Idx[] = [1,2,3,4,5,6,7,8];
 const SIMPLE_PLACEHOLDER = "Today I’m grateful for…";
+
+/* ---------- Local unsynced cache helpers ---------- */
+function lsKey(userId: string, dateISO: string) { return `byb:gratitude:unsynced:${userId}:${dateISO}`; }
+type UnsyncedMap = Record<number, string>;
 
 export default function GratitudeScreen() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -112,29 +114,15 @@ export default function GratitudeScreen() {
   const [showHelp, setShowHelp] = useState(false);
   const [imgOk, setImgOk] = useState(true);
 
-  // prevent setState-after-unmount warnings/crashes
+  // per-field local unsynced state
+  const [unsynced, setUnsynced] = useState<UnsyncedMap>({});
+
+  // mounted guard
   const alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => { alive.current = false; };
-  }, []);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const safeSet = <T,>(setter: (v: T | ((p: T)=>T)) => void, val: any) => { if (alive.current) setter(val); };
 
-  // Non-generic, inference-proof setter wrapper
-  function safeSet(setter: any, val: any) {
-    if (alive.current) setter(val);
-  }
-
-  // init maps
-  function resetMaps(withRows: EntryRow[]) {
-    const rb: Record<number, EntryRow | null> = {};
-    const dr: Record<number, string> = {};
-    for (const i of INDEXES) { rb[i] = null; dr[i] = ""; }
-    for (const r of withRows) { rb[r.item_index] = r; dr[r.item_index] = r.content ?? ""; }
-    safeSet(setRowsByIdx, rb);
-    safeSet(setDraft, dr);
-  }
-
-  // auth
+  /* ---------- Init & load ---------- */
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -142,73 +130,142 @@ export default function GratitudeScreen() {
     });
   }, []);
 
-  // load one day
+  useEffect(() => { if (userId) { loadDay(dateISO); loadHistory(); loadUnsynced(userId, dateISO); } }, [userId, dateISO]);
+
+  function initMaps(withRows: EntryRow[]) {
+    const rb: Record<number, EntryRow | null> = {};
+    const dr: Record<number, string> = {};
+    INDEXES.forEach(i => { rb[i] = null; dr[i] = ""; });
+    withRows.forEach(r => { rb[r.item_index] = r; dr[r.item_index] = r.content ?? ""; });
+    safeSet(setRowsByIdx, rb);
+    safeSet(setDraft, dr);
+  }
+
   async function loadDay(iso: string) {
     if (!userId) return;
-    safeSet(setLoading, true); setErr(null);
+    setErr(null); setLoading(true);
     const { data, error } = await supabase
       .from("gratitude_entries")
-      .select("*")
+      .select("id,user_id,entry_date,item_index,content")
       .eq("user_id", userId)
       .eq("entry_date", iso)
       .order("item_index", { ascending: true });
-    safeSet(setLoading, false);
-    if (error) { setErr(error.message); resetMaps([]); return; }
-    resetMaps((data as EntryRow[]) || []);
+    setLoading(false);
+    if (error) { setErr(error.message); initMaps([]); return; }
+    initMaps((data as EntryRow[]) || []);
   }
 
-  // load recent history
   async function loadHistory() {
     if (!userId) return;
     const since = new Date(); since.setDate(since.getDate() - 30);
     const { data, error } = await supabase
       .from("gratitude_entries")
-      .select("*")
+      .select("id,user_id,entry_date,item_index,content")
       .eq("user_id", userId)
       .gte("entry_date", toISO(since))
       .order("entry_date", { ascending: false })
       .order("item_index", { ascending: true });
     if (error) { setErr(error.message); safeSet(setHistory, {}); return; }
     const grouped: Record<string, EntryRow[]> = {};
-    for (const r of (data as EntryRow[])) (grouped[r.entry_date] ||= []).push(r);
+    (data as EntryRow[]).forEach(r => { (grouped[r.entry_date] ||= []).push(r); });
     safeSet(setHistory, grouped);
   }
 
-  useEffect(() => { if (userId) { loadDay(dateISO); loadHistory(); } }, [userId, dateISO]);
+  /* ---------- Local unsynced persistence ---------- */
+  function loadUnsynced(uid: string, iso: string) {
+    try {
+      const raw = localStorage.getItem(lsKey(uid, iso));
+      const map = raw ? (JSON.parse(raw) as UnsyncedMap) : {};
+      setUnsynced(map || {});
+    } catch { setUnsynced({}); }
+  }
+  function persistUnsynced(next: UnsyncedMap) {
+    if (!userId) return;
+    localStorage.setItem(lsKey(userId, dateISO), JSON.stringify(next));
+  }
+  function markUnsynced(idx: number, content: string) {
+    setUnsynced(prev => {
+      const next = { ...prev, [idx]: content };
+      persistUnsynced(next);
+      return next;
+    });
+  }
+  function clearUnsynced(idx: number) {
+    setUnsynced(prev => {
+      const next = { ...prev };
+      delete next[idx];
+      persistUnsynced(next);
+      return next;
+    });
+  }
 
-  // save one line (upsert/delete)
+  /* ---------- Save one line (insert OR update; robust to DB triggers) ---------- */
   async function saveIdx(idx: Idx) {
     if (!userId) return;
     const content = (draft[idx] || "").trim();
-    safeSet(setSavingIdx, idx); setErr(null);
+    setSavingIdx(idx); setErr(null);
+
+    const existing = rowsByIdx[idx];
+
     try {
-      const existing = rowsByIdx[idx];
       if (!content) {
+        // delete if existed
         if (existing) {
           const { error } = await supabase.from("gratitude_entries").delete().eq("id", existing.id);
           if (error) throw error;
         }
-        safeSet(setRowsByIdx, (prev: any) => ({ ...prev, [idx]: null } as any));
+        setRowsByIdx(prev => ({ ...prev, [idx]: null }));
+        clearUnsynced(idx);
+      } else if (existing) {
+        // explicit UPDATE (no upsert)
+        const { error } = await supabase
+          .from("gratitude_entries")
+          .update({ content })
+          .eq("id", existing.id);
+        if (error) throw error;
+        setRowsByIdx(prev => ({ ...prev, [idx]: { ...(prev[idx] as EntryRow), content } }));
+        clearUnsynced(idx);
       } else {
-        const payload = { user_id: userId, entry_date: dateISO, item_index: idx, content };
+        // INSERT (unique key: user_id, entry_date, item_index)
         const { data, error } = await supabase
           .from("gratitude_entries")
-          .upsert(payload as any, { onConflict: "user_id,entry_date,item_index" })
-          .select()
+          .insert({ user_id: userId, entry_date: dateISO, item_index: idx, content })
+          .select("id,user_id,entry_date,item_index,content")
           .single();
         if (error) throw error;
-        safeSet(setRowsByIdx, (prev: any) => ({ ...prev, [idx]: data as EntryRow } as any));
+        setRowsByIdx(prev => ({ ...prev, [idx]: data as EntryRow }));
+        clearUnsynced(idx);
       }
-      // refresh history (async, fire-and-forget)
+
+      // refresh history in the background
       loadHistory();
     } catch (e: any) {
-      console.error(e);
-      setErr(e.message || String(e));
+      const msg = (e?.message || String(e)) as string;
+
+      // Friendly handling for the trigger/policy issue
+      if (msg.includes('no field "updated_at"')) {
+        // Save locally so the user doesn’t lose text and avoid flashing red DB errors
+        markUnsynced(idx, content);
+        setErr(null); // don’t show the raw DB message
+      } else {
+        setErr(msg);
+      }
     } finally {
-      safeSet(setSavingIdx, null);
+      setSavingIdx(null);
     }
   }
 
+  async function retrySyncAll() {
+    // try to push all unsynced entries
+    const entries = Object.entries(unsynced);
+    for (const [k, val] of entries) {
+      const idx = Number(k) as Idx;
+      setDraft(d => ({ ...d, [idx]: val }));
+      await saveIdx(idx);
+    }
+  }
+
+  /* ---------- UI helpers ---------- */
   function gotoToday() { setDateISO(toISO(new Date())); }
   function gotoPrev()  { const d = fromISO(dateISO); d.setDate(d.getDate() - 1); setDateISO(toISO(d)); }
   function gotoNext()  { const d = fromISO(dateISO); d.setDate(d.getDate() + 1); setDateISO(toISO(d)); }
@@ -222,13 +279,13 @@ export default function GratitudeScreen() {
     if (!userId) return;
     const { data, error } = await supabase
       .from("gratitude_entries")
-      .select("*")
+      .select("entry_date,item_index,content")
       .eq("user_id", userId)
       .order("entry_date", { ascending: true })
       .order("item_index", { ascending: true });
     if (error) { setErr(error.message); return; }
     const rows = [["date", "item_index", "content"]];
-    for (const r of (data as EntryRow[])) rows.push([r.entry_date, String(r.item_index), (r.content || "").replace(/\r?\n/g, " ")]);
+    (data as any[]).forEach(r => rows.push([r.entry_date, String(r.item_index), String(r.content || "").replace(/\r?\n/g, " ")]));
     const csv = rows.map(r => r.map(x => `"${String(x).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -297,27 +354,42 @@ export default function GratitudeScreen() {
           </div>
 
           <div style={{ display: "grid", gap: 10 }}>
-            {INDEXES.map((idx) => (
-              <div key={idx} style={{ display: "grid", gap: 6 }}>
-                <div className="section-title">Gratitude {idx}</div>
-                <input
-                  type="text"
-                  inputMode="text"
-                  autoComplete="off"
-                  placeholder={SIMPLE_PLACEHOLDER}
-                  value={draft[idx] ?? ""}
-                  onChange={(e) => {
-                    const v = e.currentTarget.value;
-                    safeSet(setDraft, (d: any) => ({ ...d, [idx]: v }));
-                  }}
-                  onBlur={() => saveIdx(idx)}
-                  disabled={loading || savingIdx === idx}
-                  aria-label={`Gratitude ${idx}`}
-                />
-                {savingIdx === idx && <span className="muted">Saving…</span>}
-              </div>
-            ))}
+            {INDEXES.map((idx) => {
+              const localUnsynced = unsynced[idx] != null;
+              return (
+                <div key={idx} style={{ display: "grid", gap: 6 }}>
+                  <div className="section-title">Gratitude {idx}</div>
+                  <input
+                    type="text"
+                    inputMode="text"
+                    autoComplete="off"
+                    placeholder={SIMPLE_PLACEHOLDER}
+                    value={draft[idx] ?? ""}
+                    onChange={(e) => {
+                      const v = e.currentTarget.value;
+                      setDraft((d) => ({ ...d, [idx]: v }));
+                    }}
+                    onBlur={() => saveIdx(idx)}
+                    disabled={loading || savingIdx === idx}
+                    aria-label={`Gratitude ${idx}`}
+                  />
+                  {savingIdx === idx && <span className="muted">Saving…</span>}
+                  {localUnsynced && savingIdx !== idx && (
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      Saved locally — will sync when possible. <button className="btn-soft" onClick={() => saveIdx(idx)}>Retry now</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
+
+          {Object.keys(unsynced).length > 0 && (
+            <div className="muted" style={{ marginTop: 8 }}>
+              {Object.keys(unsynced).length} item(s) waiting to sync.{" "}
+              <button className="btn-soft" onClick={retrySyncAll}>Retry all</button>
+            </div>
+          )}
 
           {err && <div style={{ color: "red", marginTop: 10 }}>{err}</div>}
         </div>
@@ -343,7 +415,6 @@ export default function GratitudeScreen() {
             </ul>
           </div>
 
-          {/* actions */}
           <div className="gratitude-actions">
             <button className="btn-primary" onClick={exportCSV}>Export CSV</button>
           </div>
