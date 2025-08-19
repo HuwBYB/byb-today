@@ -85,7 +85,7 @@ function NotesHelpContent() {
         <li>Add a <b>Title</b> (or leave it blank — we’ll use the first line).</li>
         <li>Write in the editor. Changes are <b>auto-saved</b> within a second.</li>
         <li>Optional: set a <b>Folder</b> (e.g., Work, Personal) and add <b>Tags</b> like <code>meeting, idea</code>.</li>
-        <li>Use <b>Search</b> and the <b>folder filter</b> on the left to find notes fast.</li>
+        <li>Use <b>Search</b>, <b>Folder</b>, and <b>Status</b> filters on the left to find notes fast.</li>
       </ol>
 
       <h4 style={{ margin: 0 }}>Folders vs Tags</h4>
@@ -97,19 +97,11 @@ function NotesHelpContent() {
       <h4 style={{ margin: 0 }}>Pin, Archive, Delete</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
         <li><b>Pin</b> bubbles important notes to the top.</li>
-        <li><b>Archive</b> hides a note from your active list without deleting it.</li>
-        <li><b>Delete</b> removes it permanently (use with care).</li>
+        <li><b>Archive</b> moves a note to the <b>Archived</b> view (Status filter).</li>
+        <li><b>Delete</b> removes it permanently.</li>
       </ul>
 
-      <h4 style={{ margin: 0 }}>Tips from Alfred</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Start messy. Capture first, tidy later with folders/tags.</li>
-        <li>One note per meeting/topic keeps history clean and easier to search.</li>
-        <li>Use consistent tag names (e.g., <code>follow-up</code> not <code>follow up</code>).</li>
-        <li>Pin your “Today” note in the morning; unpin at day’s end.</li>
-      </ul>
-
-      <p><strong>Closing note:</strong> Notes turn thoughts into assets. Capture daily — future you will thank you.</p>
+      <p><strong>Pro tip:</strong> Use <b>Save & Close</b> to finish a note and return to your list quickly.</p>
     </div>
   );
 }
@@ -129,9 +121,10 @@ export default function NotesScreen() {
   const [pinned, setPinned] = useState(false);
   const [archived, setArchived] = useState(false);
 
-  // search & folder filter
+  // filters
   const [q, setQ] = useState("");
   const [folderFilter, setFolderFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<"active" | "archived">("active");
 
   // Alfred
   const [showHelp, setShowHelp] = useState(false);
@@ -147,7 +140,7 @@ export default function NotesScreen() {
     });
   }, []);
 
-  useEffect(() => { if (userId) loadNotes(); }, [userId]);
+  useEffect(() => { if (userId) loadNotes(); }, [userId, statusFilter]);
 
   async function loadNotes() {
     if (!userId) return;
@@ -157,7 +150,7 @@ export default function NotesScreen() {
         .from("notes")
         .select("*")
         .eq("user_id", userId)
-        .eq("archived", false)
+        .eq("archived", statusFilter === "archived")
         .order("pinned", { ascending: false })
         .order("updated_at", { ascending: false })
         .limit(500);
@@ -168,8 +161,7 @@ export default function NotesScreen() {
       if (!stillThere) setActiveId((data as Note[] || [])[0]?.id ?? null);
     } catch (e: any) {
       setErr(e.message || String(e));
-      setNotes([]);
-      setActiveId(null);
+      setNotes([]); setActiveId(null);
     } finally {
       setLoading(false);
     }
@@ -186,23 +178,26 @@ export default function NotesScreen() {
     setArchived(activeNote.archived || false);
   }, [activeNote?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  function buildPatch() {
+    return {
+      title: title ?? "",
+      content: content ?? "",
+      folder: folder || null,
+      tags: stringToTags(tagsInput),
+      pinned,
+      archived
+    };
+  }
+
   // debounced auto-save on any draft changes
   useEffect(() => {
     if (!activeNote) return;
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
       if (!userId) return;
-      const patch = {
-        title: title ?? "",
-        content: content ?? "",
-        folder: folder || null,
-        tags: stringToTags(tagsInput),
-        pinned,
-        archived
-      };
+      const patch = buildPatch();
       supabase.from("notes").update(patch).eq("id", activeNote.id).then(({ error }) => {
         if (error) { setErr(error.message); return; }
-        // reflect updated fields + updated_at locally
         setNotes(prev => prev.map(n => n.id === activeNote.id ? { ...n, ...patch, updated_at: new Date().toISOString() } : n));
       });
     }, 600) as unknown as number;
@@ -210,6 +205,21 @@ export default function NotesScreen() {
     return () => { if (saveTimer.current) window.clearTimeout(saveTimer.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, content, folder, tagsInput, pinned, archived, activeNote?.id, userId]);
+
+  async function saveNow(): Promise<boolean> {
+    if (!activeNote || !userId) return false;
+    if (saveTimer.current) { window.clearTimeout(saveTimer.current); saveTimer.current = null; }
+    const patch = buildPatch();
+    const { error } = await supabase.from("notes").update(patch).eq("id", activeNote.id);
+    if (error) { setErr(error.message); return false; }
+    setNotes(prev => prev.map(n => n.id === activeNote.id ? { ...n, ...patch, updated_at: new Date().toISOString() } : n));
+    return true;
+  }
+
+  async function saveAndClose() {
+    const ok = await saveNow();
+    if (ok) setActiveId(null);
+  }
 
   async function createNote() {
     if (!userId) return;
@@ -229,6 +239,14 @@ export default function NotesScreen() {
 
   async function archiveNote(n: Note) {
     const { error } = await supabase.from("notes").update({ archived: true }).eq("id", n.id);
+    if (error) { setErr(error.message); return; }
+    // remove from current list (we're filtering by status)
+    setNotes(prev => prev.filter(x => x.id !== n.id));
+    if (activeId === n.id) setActiveId(null);
+  }
+
+  async function unarchiveNote(n: Note) {
+    const { error } = await supabase.from("notes").update({ archived: false }).eq("id", n.id);
     if (error) { setErr(error.message); return; }
     setNotes(prev => prev.filter(x => x.id !== n.id));
     if (activeId === n.id) setActiveId(null);
@@ -307,9 +325,9 @@ export default function NotesScreen() {
       <div className="container">
         <div className="notes-layout">
           {/* Sidebar */}
-          <aside className="card" style={{ display:"grid", gridTemplateRows:"auto auto auto 1fr auto", gap:10, minWidth:0 }}>
+          <aside className="card" style={{ display:"grid", gridTemplateRows:"auto auto auto auto 1fr auto", gap:10, minWidth:0 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
-              <h2 style={{ margin:0 }}>All notes</h2>
+              <h2 style={{ margin:0 }}>{statusFilter === "archived" ? "Archived notes" : "All notes"}</h2>
               <button className="btn-primary" onClick={createNote} style={{ borderRadius:8 }}>New</button>
             </div>
 
@@ -324,6 +342,10 @@ export default function NotesScreen() {
               <select value={folderFilter} onChange={e=>setFolderFilter(e.target.value)} style={{ flex:1 }}>
                 <option value="">All folders</option>
                 {folders.map(f => <option key={f} value={f}>{f}</option>)}
+              </select>
+              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as "active" | "archived")}>
+                <option value="active">Active</option>
+                <option value="archived">Archived</option>
               </select>
               <button onClick={loadNotes} disabled={loading}>{loading?"…": "↻"}</button>
             </div>
@@ -342,6 +364,7 @@ export default function NotesScreen() {
                   >
                     <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                       {n.pinned && <span className="badge">Pinned</span>}
+                      {n.archived && <span className="badge">Archived</span>}
                       <div style={{ fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                         {n.title || firstLine(n.content)}
                       </div>
@@ -360,7 +383,7 @@ export default function NotesScreen() {
           {/* Editor */}
           <main className="card" style={{ display:"grid", gap:10, minWidth:0 }}>
             {!activeNote ? (
-              <div className="muted">Select a note or create a new one.</div>
+              <div className="muted">Select a note or create a new one. Use the Status filter to view archived notes.</div>
             ) : (
               <>
                 <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
@@ -400,8 +423,21 @@ export default function NotesScreen() {
 
                 <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
                   <button onClick={()=>togglePin(activeNote)} className="btn-soft">{pinned ? "Unpin" : "Pin"}</button>
-                  <button onClick={()=>archiveNote(activeNote)}>Archive</button>
-                  <button onClick={()=>deleteNote(activeNote)} style={{ borderColor:"#fca5a5", color:"#b91c1c", background:"#fff5f5" }}>Delete</button>
+
+                  {statusFilter === "archived" || archived ? (
+                    <button onClick={()=>unarchiveNote(activeNote)}>Unarchive</button>
+                  ) : (
+                    <button onClick={()=>archiveNote(activeNote)}>Archive</button>
+                  )}
+
+                  <button onClick={saveAndClose} className="btn-primary" style={{ borderRadius:8 }}>
+                    Save & Close
+                  </button>
+
+                  <button onClick={()=>deleteNote(activeNote)} style={{ borderColor:"#fca5a5", color:"#b91c1c", background:"#fff5f5" }}>
+                    Delete
+                  </button>
+
                   <div className="muted" style={{ marginLeft:"auto" }}>
                     Created {formatDate(activeNote.created_at)} · Updated {formatDate(activeNote.updated_at)}
                   </div>
