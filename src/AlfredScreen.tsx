@@ -184,12 +184,48 @@ export default function AlfredScreen() {
 
   return (
     <div className="two-col" style={{ alignItems: "start" }}>
-      {/* Sidebar (stacks on mobile) */}
-      <aside className="card sidebar-sticky" style={{ display: "grid", gap: 8 }}>
+      {/* Sidebar (stacks on mobile) — help button pinned in this header card */}
+      <aside
+        className="card sidebar-sticky"
+        style={{ position: "relative", display: "grid", gap: 8, paddingRight: 64 }}
+      >
+        <button
+          onClick={() => setShowHelp(true)}
+          aria-label="Open Alfred help"
+          title="Need a hand? Ask Alfred"
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            cursor: "pointer",
+            lineHeight: 0,
+          }}
+        >
+          {imgOk ? (
+            <img
+              src={TODAY_ALFRED_SRC}
+              alt="Alfred — open help"
+              style={{ width: 44, height: 44 }}
+              onError={() => setImgOk(false)}
+            />
+          ) : (
+            <span
+              style={{
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                width: 32, height: 32, borderRadius: 999,
+                border: "1px solid #d1d5db", background: "#f9fafb", fontWeight: 700,
+              }}
+            >
+              ?
+            </span>
+          )}
+        </button>
+
         <h2 style={{ margin: 0 }}>Alfred</h2>
-        <div className="muted" style={{ fontSize: 12 }}>
-          Choose a persona
-        </div>
+        <div className="muted" style={{ fontSize: 12 }}>Choose a persona</div>
         <div style={{ display: "grid", gap: 6 }}>
           {MODES.map(m => (
             <button
@@ -205,39 +241,12 @@ export default function AlfredScreen() {
         </div>
       </aside>
 
-      {/* Chat pane */}
+      {/* Chat pane (no help button here anymore) */}
       <main className="card" style={{ display: "grid", gridTemplateRows: "auto 1fr auto", gap: 10, minHeight: 360 }}>
-        {/* Header WITH help button pinned top-right */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <h3 style={{ margin: 0 }}>{MODES.find(m => m.key === mode)?.label}</h3>
-            <span className="muted">/ chat</span>
-          </div>
-          <button
-            onClick={() => setShowHelp(true)}
-            aria-label="Open Alfred help"
-            title="Need a hand? Ask Alfred"
-            style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0 }}
-          >
-            {imgOk ? (
-              <img
-                src={TODAY_ALFRED_SRC}
-                alt="Alfred — open help"
-                style={{ width: 40, height: 40 }}
-                onError={() => setImgOk(false)}
-              />
-            ) : (
-              <span
-                style={{
-                  display: "inline-flex", alignItems: "center", justifyContent: "center",
-                  width: 32, height: 32, borderRadius: 999,
-                  border: "1px solid #d1d5db", background: "#f9fafb", fontWeight: 700,
-                }}
-              >
-                ?
-              </span>
-            )}
-          </button>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <h3 style={{ margin: 0 }}>{MODES.find(m => m.key === mode)?.label}</h3>
+          <span className="muted">/ chat</span>
         </div>
 
         {/* Messages */}
@@ -271,9 +280,7 @@ export default function AlfredScreen() {
             <div style={{ display: "grid", gap: 6 }}>
               {quickAdds.map((t, idx) => (
                 <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{
-                    flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
-                  }}>{t}</div>
+                  <div style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t}</div>
                   <button onClick={() => addToToday(t)}>＋ Add</button>
                 </div>
               ))}
