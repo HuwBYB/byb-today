@@ -206,52 +206,38 @@ export default function AlfredScreen() {
       </aside>
 
       {/* Chat pane */}
-      <main className="card" style={{ position: "relative", display: "grid", gridTemplateRows: "auto 1fr auto", gap: 10, minHeight: 360, paddingRight: 64 }}>
-        {/* Alfred help button (top-right) */}
-        <button
-          onClick={() => setShowHelp(true)}
-          aria-label="Open Alfred help"
-          title="Need a hand? Ask Alfred"
-          style={{
-            position: "absolute",
-            top: 8,
-            right: 8,
-            border: "none",
-            background: "transparent",
-            padding: 0,
-            cursor: "pointer",
-            lineHeight: 0,
-            zIndex: 10,
-          }}
-        >
-          {imgOk ? (
-            <img
-              src={TODAY_ALFRED_SRC}
-              alt="Alfred — open help"
-              style={{ width: 48, height: 48 }}
-              onError={() => setImgOk(false)}
-            />
-          ) : (
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 36, height: 36, borderRadius: 999,
-                border: "1px solid #d1d5db",
-                background: "#f9fafb",
-                fontWeight: 700,
-              }}
-            >
-              ?
-            </span>
-          )}
-        </button>
-
-        {/* Header */}
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <h3 style={{ margin: 0 }}>{MODES.find(m => m.key === mode)?.label}</h3>
-          <span className="muted">/ chat</span>
+      <main className="card" style={{ display: "grid", gridTemplateRows: "auto 1fr auto", gap: 10, minHeight: 360 }}>
+        {/* Header WITH help button pinned top-right */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <h3 style={{ margin: 0 }}>{MODES.find(m => m.key === mode)?.label}</h3>
+            <span className="muted">/ chat</span>
+          </div>
+          <button
+            onClick={() => setShowHelp(true)}
+            aria-label="Open Alfred help"
+            title="Need a hand? Ask Alfred"
+            style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0 }}
+          >
+            {imgOk ? (
+              <img
+                src={TODAY_ALFRED_SRC}
+                alt="Alfred — open help"
+                style={{ width: 40, height: 40 }}
+                onError={() => setImgOk(false)}
+              />
+            ) : (
+              <span
+                style={{
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  width: 32, height: 32, borderRadius: 999,
+                  border: "1px solid #d1d5db", background: "#f9fafb", fontWeight: 700,
+                }}
+              >
+                ?
+              </span>
+            )}
+          </button>
         </div>
 
         {/* Messages */}
