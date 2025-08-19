@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* ---------- Types ---------- */
@@ -183,6 +183,36 @@ export default function ExerciseDiaryScreen() {
   // Alfred modal
   const [showHelp, setShowHelp] = useState(false);
   const [imgOk, setImgOk] = useState(true);
+
+  /* === Debounced saver for workout_sets (makes inputs snappy) === */
+  const DEBOUNCE_MS = 300;
+  const setTimers = useRef<Record<number, number>>({});
+  const pendingSetPatches = useRef<Record<number, Partial<WSet>>>({});
+
+  const commitSetPatch = useCallback(async (id: number) => {
+    const patch = pendingSetPatches.current[id];
+    delete pendingSetPatches.current[id];
+    if (!patch) return;
+    const { error } = await supabase.from("workout_sets").update(patch).eq("id", id);
+    if (error) setErr(error.message);
+  }, []);
+
+  const queueSetSave = useCallback((id: number, patch: Partial<WSet>) => {
+    pendingSetPatches.current[id] = { ...(pendingSetPatches.current[id] || {}), ...patch };
+    if (setTimers.current[id]) window.clearTimeout(setTimers.current[id]);
+    setTimers.current[id] = window.setTimeout(() => { commitSetPatch(id); }, DEBOUNCE_MS) as unknown as number;
+  }, [commitSetPatch]);
+
+  const flushSetSaves = useCallback(async (id?: number) => {
+    const ids = id == null ? Object.keys(pendingSetPatches.current).map(Number) : [id];
+    for (const k of ids) {
+      if (setTimers.current[k]) window.clearTimeout(setTimers.current[k]);
+      await commitSetPatch(k);
+    }
+  }, [commitSetPatch]);
+
+  // flush pending saves on unmount/nav
+  useEffect(() => () => { flushSetSaves().catch(() => {}); }, [flushSetSaves]);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
@@ -389,11 +419,15 @@ export default function ExerciseDiaryScreen() {
     setSetsByItem({ ...setsByItem, [itemId]: [...current, ...((data as WSet[]) || [])] });
   }
 
-  async function updateSet(set: WSet, patch: Partial<WSet>) {
-    const { error } = await supabase.from("workout_sets").update(patch).eq("id", set.id);
-    if (error) { setErr(error.message); return; }
-    const list = (setsByItem[set.item_id] || []).map(s => s.id === set.id ? { ...s, ...patch } as WSet : s);
-    setSetsByItem({ ...setsByItem, [set.item_id]: list });
+  // OPTIMISTIC + DEBOUNCED
+  function updateSet(set: WSet, patch: Partial<WSet>) {
+    // local instant update
+    setSetsByItem(prev => {
+      const list = (prev[set.item_id] || []).map(s => s.id === set.id ? ({ ...s, ...patch }) as WSet : s);
+      return { ...prev, [set.item_id]: list };
+    });
+    // queue remote save
+    queueSetSave(set.id, patch);
   }
 
   async function deleteSet(set: WSet) {
@@ -719,6 +753,7 @@ export default function ExerciseDiaryScreen() {
                             onAdd={() => addSet(it.id)}
                             onChange={(set, patch) => updateSet(set, patch)}
                             onDelete={(set) => deleteSet(set)}
+                            flush={(id) => flushSetSaves(id)}
                           />
                           {openHistoryFor[it.id] && (
                             <div className="muted" style={{ border: "1px dashed #e5e7eb", borderRadius: 8, padding: 8, marginTop: 8 }}>
@@ -757,7 +792,7 @@ export default function ExerciseDiaryScreen() {
 
                 <div style={{ borderTop: "1px solid #eee", paddingTop: 8 }}>
                   <div className="section-title">Notes</div>
-                  <textarea rows={3} value={session.notes || ""} onChange={e => saveSessionNotes(e.target.value)} />
+                  <textarea rows={3} value={session?.notes || ""} onChange={e => saveSessionNotes(e.target.value)} />
                 </div>
               </>
             )}
@@ -850,8 +885,8 @@ function KindBadge({ kind }: { kind: Item["kind"] }) {
   return <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 999, background: bg, border: "1px solid #e5e7eb" }}>{label}</span>;
 }
 
-function WeightsEditor({ sets, onAdd, onChange, onDelete }: {
-  sets: WSet[]; onAdd: () => void; onChange: (s: WSet, patch: Partial<WSet>) => void; onDelete: (s: WSet) => void;
+function WeightsEditor({ sets, onAdd, onChange, onDelete, flush }: {
+  sets: WSet[]; onAdd: () => void; onChange: (s: WSet, patch: Partial<WSet>) => void; onDelete: (s: WSet) => void; flush: (id?: number) => void;
 }) {
   return (
     <div>
@@ -864,10 +899,23 @@ function WeightsEditor({ sets, onAdd, onChange, onDelete }: {
         {sets.map(s => (
           <div key={s.id} style={{ display: "grid", gridTemplateColumns: "68px minmax(0,1fr) minmax(0,1fr) 32px", gap: 6, alignItems: "center" }}>
             <div className="muted">Set {s.set_number}</div>
-            <input type="number" inputMode="decimal" step="0.5" placeholder="kg"
-              value={s.weight_kg ?? ""} onChange={e => onChange(s, { weight_kg: e.target.value === "" ? null : Number(e.target.value) })} />
-            <input type="number" inputMode="numeric" placeholder="reps"
-              value={s.reps ?? ""} onChange={e => onChange(s, { reps: e.target.value === "" ? null : Number(e.target.value) })} />
+            <input
+              type="number"
+              inputMode="decimal"
+              step="0.5"
+              placeholder="kg"
+              value={s.weight_kg ?? ""}
+              onChange={(e) => onChange(s, { weight_kg: e.currentTarget.value === "" ? null : Number(e.currentTarget.value) })}
+              onBlur={() => flush(s.id)}
+            />
+            <input
+              type="number"
+              inputMode="numeric"
+              placeholder="reps"
+              value={s.reps ?? ""}
+              onChange={(e) => onChange(s, { reps: e.currentTarget.value === "" ? null : Number(e.currentTarget.value) })}
+              onBlur={() => flush(s.id)}
+            />
             <button onClick={() => onDelete(s)} title="Delete set">×</button>
           </div>
         ))}
