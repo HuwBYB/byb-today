@@ -361,6 +361,40 @@ export default function ExerciseDiaryScreen() {
     if (s) loadItems(s.id);
   }
 
+  // NEW: cancel/delete current session if empty
+  async function cancelCurrentSession() {
+    if (!session) return;
+    if (items.length > 0) {
+      setErr("This session has exercises, so it can’t be cancelled. Delete the items first if you really want to remove it.");
+      return;
+    }
+    setBusy(true); setErr(null);
+    try {
+      const sid = session.id;
+      const { error } = await supabase.from("workout_sessions").delete().eq("id", sid);
+      if (error) throw error;
+
+      // remove local finished flag
+      localStorage.removeItem(FIN_KEY(sid, dateISO));
+
+      // update local lists + choose next active
+      setSessionsToday(prev => {
+        const next = prev.filter(s => s.id !== sid);
+        const nextActive = next.length ? next[next.length - 1] : null;
+        setSession(nextActive);
+        if (nextActive) loadItems(nextActive.id);
+        else { setItems([]); setSetsByItem({}); }
+        return next;
+      });
+
+      await loadRecent();
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // Ensure exactly ONE "success" per weights session (logs to tasks)
   async function ensureWinForSession() {
     if (!userId || !session) return;
@@ -841,7 +875,7 @@ export default function ExerciseDiaryScreen() {
         <div className="exercise-layout">
           {/* Left: editor */}
           <div className="card" style={{ display: "grid", gap: 12 }}>
-            {/* Top controls — NO date bar; just New session / switcher / reopen */}
+            {/* Top controls — NO date bar; just New/Cancel/Switch */}
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "space-between" }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 {!session ? (
@@ -863,6 +897,14 @@ export default function ExerciseDiaryScreen() {
                     ) : (
                       <span className="muted">Session #{session.id}</span>
                     )}
+
+                    {/* Show Cancel when the session is empty and not finished */}
+                    {!finished && items.length === 0 && (
+                      <button className="btn-soft" onClick={cancelCurrentSession} title="Delete this empty session">
+                        Cancel session
+                      </button>
+                    )}
+
                     {finished && <button onClick={reopenSession}>Reopen</button>}
                     <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius: 8 }}>
                       {busy ? "Starting…" : "New session"}
