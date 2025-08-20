@@ -173,6 +173,9 @@ export default function ExerciseDiaryScreen() {
   const quickAddRef = useRef<HTMLDivElement>(null);
   const [scrollToQuickAdd, setScrollToQuickAdd] = useState(false);
 
+  // NEW: when clicking from "Recent", remember the exact session to open
+  const desiredSessionIdRef = useRef<number | null>(null);
+
   /* === Debounced saver for workout_sets === */
   const DEBOUNCE_MS = 300;
   const setTimers = useRef<Record<number, number>>({});
@@ -274,7 +277,14 @@ export default function ExerciseDiaryScreen() {
     }
     const list = (data as Session[]) || [];
     setSessionsToday(list);
-    const active = list.length ? list[list.length - 1] : null; // newest
+
+    // Prefer the specific session (e.g., clicked from Recent); else newest
+    const desired = desiredSessionIdRef.current;
+    const active = desired
+      ? (list.find(x => x.id === desired) || (list.length ? list[list.length - 1] : null))
+      : (list.length ? list[list.length - 1] : null);
+    desiredSessionIdRef.current = null;
+
     setSession(active);
     if (active) await loadItems(active.id); else { setItems([]); setSetsByItem({}); }
   }
@@ -824,6 +834,12 @@ export default function ExerciseDiaryScreen() {
     return { weightsCount: weightsItems.length, cardioCount: cardioItems.length, totalSets, cardioLabels };
   }, [items, setsByItem]);
 
+  // click handler for RECENT: open that exact session (not just the date)
+  function openRecentSession(s: Session) {
+    desiredSessionIdRef.current = s.id;
+    setDateISO(s.session_date);
+  }
+
   return (
     <div className="page-exercise" style={{ display: "grid", gap: 12 }}>
       {/* Title card with Alfred */}
@@ -1033,7 +1049,7 @@ export default function ExerciseDiaryScreen() {
               {recent.length === 0 && <li className="muted">No recent sessions.</li>}
               {recent.map(s => (
                 <li key={s.id} className="item">
-                  <button onClick={() => { setDateISO(s.session_date); }} style={{ textAlign: "left", width: "100%" }}>
+                  <button onClick={() => openRecentSession(s)} style={{ textAlign: "left", width: "100%" }}>
                     <div style={{ fontWeight: 600 }}>{s.session_date}</div>
                     {s.notes && <div className="muted" style={{ marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.notes}</div>}
                   </button>
