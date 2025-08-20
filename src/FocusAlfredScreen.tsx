@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 /* ---------- Public path helper ---------- */
 function publicPath(p: string) {
@@ -15,7 +15,7 @@ const FOCUS_ALFRED_SRC = publicPath("/alfred/imer_Alfred.png");
 /* ---------- Tiny helpers ---------- */
 function mmss(sec: number) {
   const m = Math.floor(sec / 60);
-  const s = sec % 60;
+  const s = Math.max(0, sec % 60);
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
@@ -95,15 +95,69 @@ function FocusHelpContent() {
   );
 }
 
-/* ---------- Page ---------- */
+/* ---------- Persisted state ---------- */
 type Phase = "focus" | "short" | "long";
+type SavedState = {
+  v: 1;
+  presetKey: PresetKey;
+  phase: Phase;
+  running: boolean;
+  cycle: number;
+  targetAt: number | null; // epoch ms when current phase ends (if running)
+  remaining: number;        // seconds remaining when last saved (used if paused)
+};
+const LS_KEY = "byb:focus_timer_state:v1";
 
+/* ---- utils: sound + notifications ---- */
+function playBeep(times = 2) {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    let t = ctx.currentTime;
+    for (let i = 0; i < times; i++) {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "sine";
+      o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.2, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+      o.connect(g).connect(ctx.destination);
+      o.start(t);
+      o.stop(t + 0.26);
+      t += 0.32;
+    }
+  } catch {}
+}
+
+async function ensureNotifPermission(): Promise<boolean> {
+  if (typeof window === "undefined" || !("Notification" in window)) return false;
+  if (Notification.permission === "granted") return true;
+  if (Notification.permission === "denied") return false;
+  const res = await Notification.requestPermission();
+  return res === "granted";
+}
+function sendNotification(title: string, body: string) {
+  if (!("Notification" in window)) return;
+  if (Notification.permission !== "granted") return;
+  try {
+    new Notification(title, {
+      body,
+      icon: FOCUS_ALFRED_SRC,
+      badge: FOCUS_ALFRED_SRC,
+    });
+  } catch {}
+}
+
+/* ---------- Page ---------- */
 export default function FocusAlfredScreen() {
   const [presetKey, setPresetKey] = useState<PresetKey>("pomodoro");
   const [phase, setPhase] = useState<Phase>("focus");
   const [remaining, setRemaining] = useState(() => presetByKey("pomodoro").focusMin * 60);
   const [running, setRunning] = useState(false);
-  const [cycle, setCycle] = useState(0); // completed focus blocks within the current long-break set
+  const [cycle, setCycle] = useState(0); // completed focus blocks in the current set
+
+  // deadline for current phase (epoch ms). Used to keep time while backgrounded.
+  const [targetAt, setTargetAt] = useState<number | null>(null);
 
   // Help button
   const [showHelp, setShowHelp] = useState(false);
@@ -111,77 +165,200 @@ export default function FocusAlfredScreen() {
 
   const currentPreset = presetByKey(presetKey);
 
-  // Whenever preset changes, reset to a clean focus block (not running)
-  useEffect(() => {
-    setRunning(false);
-    setPhase("focus");
-    setRemaining(currentPreset.focusMin * 60);
-    setCycle(0);
-  }, [presetKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // timers/handles
+  const tickRef = useRef<number | null>(null);
+  const notifTimeoutRef = useRef<number | null>(null);
 
-  // Timer tick
-  useEffect(() => {
-    if (!running) return;
-    const id = setInterval(() => {
-      setRemaining((r) => {
-        if (r > 1) return r - 1;
-        // phase finished
-        advancePhase();
-        return r; // value ignored because advancePhase sets a new remaining
-      });
-    }, 1000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exdirectives
-  }, [running, phase, currentPreset.focusMin, currentPreset.shortMin, currentPreset.longMin, currentPreset.cyclesBeforeLong]);
-
-  function advancePhase() {
-    setRunning(false); // stop for a beat so UI can breathe; user can hit Start again
-    setRemaining(0);
-
-    setTimeout(() => {
-      setRunning(true); // auto-continue next phase unless user pauses
-      setPhase((ph) => {
-        if (ph === "focus") {
-          // completed a focus cycle
-          setCycle((c) => {
-            const next = c + 1;
-            const needsLong = next >= currentPreset.cyclesBeforeLong;
-            setRemaining((needsLong ? currentPreset.longMin : currentPreset.shortMin) * 60);
-            if (needsLong) {
-              return 0; // reset counter, next phase is long break
-            } else {
-              return next; // short break next
-            }
-          });
-          return "short"; // might be "long" depending on counter; remaining already set above
-        }
-        if (ph === "short") {
-          // after a short break, always go to focus
-          setRemaining(currentPreset.focusMin * 60);
-          return "focus";
-        }
-        // after a long break, go to focus
-        setRemaining(currentPreset.focusMin * 60);
-        return "focus";
-      });
-    }, 200); // tiny delay so the progress bar hits 100% visibly
+  /* ====== persistence ====== */
+  function saveState(toSave?: Partial<SavedState>) {
+    const snapshot: SavedState = {
+      v: 1,
+      presetKey,
+      phase,
+      running,
+      cycle,
+      targetAt,
+      remaining,
+      ...toSave,
+    } as SavedState;
+    localStorage.setItem(LS_KEY, JSON.stringify(snapshot));
   }
 
-  function start() { if (remaining <= 0) setRemaining(targetSecs(phase, currentPreset)); setRunning(true); }
-  function pause() { setRunning(false); }
+  function durationFor(ph: Phase, p: Preset) {
+    return (ph === "focus" ? p.focusMin : ph === "short" ? p.shortMin : p.longMin) * 60;
+  }
+
+  // On mount: restore state if any, and catch up if we passed deadlines
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as SavedState;
+      if (!parsed || parsed.v !== 1) return;
+
+      setPresetKey(parsed.presetKey);
+      setPhase(parsed.phase);
+      setCycle(parsed.cycle);
+      setRunning(parsed.running);
+
+      const now = Date.now();
+      if (parsed.running && parsed.targetAt) {
+        // Catch up across missed boundaries
+        let ph = parsed.phase;
+        let cyc = parsed.cycle;
+        let tgt = parsed.targetAt;
+
+        // Safety guard: don't loop forever
+        let guard = 0;
+        while (tgt <= now && guard < 20) {
+          // the phase ended in the past — advance
+          ({ nextPhase: ph, nextCycle: cyc, nextTargetAt: tgt } = computeNextPhase(ph, cyc, presetByKey(parsed.presetKey), tgt));
+          guard++;
+        }
+
+        setPhase(ph);
+        setCycle(cyc);
+        setTargetAt(tgt);
+        const rem = Math.max(0, Math.ceil((tgt - now) / 1000));
+        setRemaining(rem);
+        // schedule notification for upcoming boundary
+        scheduleBoundaryNotification(tgt, ph);
+      } else {
+        // paused state
+        setTargetAt(null);
+        setRemaining(Math.max(0, parsed.remaining || durationFor(parsed.phase, presetByKey(parsed.presetKey))));
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist on key changes
+  useEffect(() => { saveState(); }, [presetKey, phase, running, cycle, targetAt, remaining]);
+
+  /* ====== main tick (deadline-based) ====== */
+  useEffect(() => {
+    if (!running || !targetAt) {
+      if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
+      return;
+    }
+    tickRef.current = window.setInterval(() => {
+      const now = Date.now();
+      const rem = Math.max(0, Math.ceil((targetAt - now) / 1000));
+      setRemaining(rem);
+      if (rem <= 0) {
+        onPhaseEnd(); // handles advancing + new target
+      }
+    }, 1000) as unknown as number;
+    return () => { if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; } };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, targetAt]);
+
+  // Update document title while running
+  useEffect(() => {
+    const label = phase === "focus" ? "Focus" : phase === "short" ? "Short break" : "Long break";
+    document.title = running ? `${mmss(remaining)} • ${label}` : "Focus Timer";
+  }, [running, remaining, phase]);
+
+  // When preset changes, reset cleanly (but keep persistence)
+  useEffect(() => {
+    // Reset to start of a focus block
+    setRunning(false);
+    setPhase("focus");
+    setCycle(0);
+    setTargetAt(null);
+    setRemaining(currentPreset.focusMin * 60);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetKey]);
+
+  /* ====== notifications scheduling ====== */
+  function clearBoundaryNotification() {
+    if (notifTimeoutRef.current) {
+      clearTimeout(notifTimeoutRef.current);
+      notifTimeoutRef.current = null;
+    }
+  }
+  function scheduleBoundaryNotification(tgt: number, nextPhaseBaseOn?: Phase) {
+    clearBoundaryNotification();
+    const ms = Math.max(0, tgt - Date.now());
+    notifTimeoutRef.current = window.setTimeout(() => {
+      // if in background or not focused, also notify
+      const label = nextPhaseBaseOn || phase;
+      const next = label === "focus" ? "Break time!" : "Back to focus!";
+      sendNotification(next, label === "focus" ? "Focus block complete" : "Break finished");
+      playBeep(2);
+    }, ms) as unknown as number;
+  }
+
+  /* ====== phase transitions ====== */
+  function computeNextPhase(ph: Phase, cyc: number, p: Preset, endedAtMs: number) {
+    if (ph === "focus") {
+      const nextCycle = cyc + 1;
+      const useLong = nextCycle >= p.cyclesBeforeLong;
+      const nextPhase: Phase = useLong ? "long" : "short";
+      const dur = useLong ? p.longMin * 60 : p.shortMin * 60;
+      const nextTargetAt = endedAtMs + dur * 1000;
+      return { nextPhase, nextCycle: useLong ? 0 : nextCycle, nextTargetAt };
+    }
+    // from short/long -> focus
+    const nextPhase: Phase = "focus";
+    const dur = p.focusMin * 60;
+    const nextTargetAt = endedAtMs + dur * 1000;
+    return { nextPhase, nextCycle: cyc, nextTargetAt };
+  }
+
+  function onPhaseEnd() {
+    // Alarm for the phase that just ended
+    const justEnded = phase;
+    if (document.visibilityState !== "visible") {
+      // try to notify if user granted permission
+      sendNotification(justEnded === "focus" ? "Break time!" : "Back to focus!", justEnded === "focus" ? "Focus block complete" : "Break finished");
+    }
+    playBeep(2);
+
+    const now = Date.now();
+    const { nextPhase, nextCycle, nextTargetAt } = computeNextPhase(justEnded, cycle, currentPreset, now);
+
+    setPhase(nextPhase);
+    setCycle(nextCycle);
+    setTargetAt(nextTargetAt);
+    setRunning(true);
+    setRemaining(Math.max(0, Math.ceil((nextTargetAt - now) / 1000)));
+    scheduleBoundaryNotification(nextTargetAt, nextPhase);
+  }
+
+  /* ====== controls ====== */
+  async function start() {
+    if (!(await ensureNotifPermission())) {
+      // non-blocking: user can still run without notifications
+    }
+    const base = remaining > 0 ? remaining : durationFor(phase, currentPreset);
+    const tgt = Date.now() + base * 1000;
+    setTargetAt(tgt);
+    setRunning(true);
+    scheduleBoundaryNotification(tgt, phase);
+  }
+
+  function pause() {
+    if (running && targetAt) {
+      const rem = Math.max(0, Math.ceil((targetAt - Date.now()) / 1000));
+      setRemaining(rem);
+    }
+    setRunning(false);
+    setTargetAt(null);
+    clearBoundaryNotification();
+  }
+
   function resetAll() {
     setRunning(false);
     setPhase("focus");
     setCycle(0);
+    setTargetAt(null);
     setRemaining(currentPreset.focusMin * 60);
-  }
-
-  function targetSecs(ph: Phase, p: Preset) {
-    return (ph === "focus" ? p.focusMin : ph === "short" ? p.shortMin : p.longMin) * 60;
+    clearBoundaryNotification();
   }
 
   function progressPct(ph: Phase, rem: number, p: Preset) {
-    const total = targetSecs(ph, p);
+    const total = (ph === "focus" ? p.focusMin : ph === "short" ? p.shortMin : p.longMin) * 60;
     if (total <= 0) return 0;
     const done = Math.max(0, Math.min(1, 1 - rem / total));
     return Math.round(done * 100);
