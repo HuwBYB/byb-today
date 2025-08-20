@@ -65,7 +65,6 @@ function toISO(d: Date) {
   const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
-function fromISO(s: string) { const [y, m, d] = s.split("-").map(Number); return new Date(y, (m ?? 1) - 1, d ?? 1); }
 function secondsToMMSS(sec?: number | null) {
   if (!sec || sec <= 0) return "00:00";
   const m = Math.floor(sec / 60), s = sec % 60;
