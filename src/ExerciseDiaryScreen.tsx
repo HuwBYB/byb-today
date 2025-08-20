@@ -533,7 +533,7 @@ export default function ExerciseDiaryScreen() {
   function openTemplateModal() {
     setTplOpen(true);
     setTplName("");
-    setTplIncludeWeights(false);
+       setTplIncludeWeights(false);
     setTplIncludeReps(false);
   }
 
@@ -574,6 +574,47 @@ export default function ExerciseDiaryScreen() {
       setErr(e.message || String(e));
     } finally {
       setTplSaving(false);
+    }
+  }
+
+  /* ----- Backup/export ----- */
+  async function downloadBackup() {
+    if (!userId) return;
+    setBackingUp(true);
+    try {
+      const { data: sessions, error: se } = await supabase
+        .from("workout_sessions").select("*").eq("user_id", userId)
+        .order("session_date", { ascending: true });
+      if (se) throw se;
+
+      const sessionIds = (sessions as Session[]).map(s => s.id);
+      const { data: itemsRows, error: ie } = await supabase
+        .from("workout_items").select("*").in("session_id", sessionIds);
+      if (ie) throw ie;
+
+      const itemIds = (itemsRows as Item[]).map(i => i.id);
+      const { data: setsRows, error: te } = await supabase
+        .from("workout_sets").select("*").in("item_id", itemIds);
+      if (te) throw te;
+
+      const payload = {
+        exported_at: new Date().toISOString(),
+        user_id: userId,
+        sessions,
+        items: itemsRows,
+        sets: setsRows,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `workout_backup_${toISO(new Date()).replace(/-/g, "")}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setBackingUp(false);
     }
   }
 
@@ -756,7 +797,7 @@ export default function ExerciseDiaryScreen() {
                     Add exercise
                   </button>
 
-                  {/* Save template option BEFORE "Complete session" */}
+                  {/* Save template option */}
                   <button className="btn-soft" onClick={openTemplateModal}>Save as template</button>
 
                   <button className="btn-primary" onClick={completeSession} style={{ marginLeft: "auto", borderRadius: 8 }}>
