@@ -35,6 +35,20 @@ type PrevEntry = {
   sets: Array<{ weight_kg: number | null; reps: number | null; duration_sec: number | null }>;
 };
 
+/* Templates */
+type TemplateRow = {
+  id: number;
+  name: string;
+  data: {
+    items: Array<{
+      title: string;
+      sets: number;
+      weights?: (number | null)[];
+      reps?: (number | null)[];
+    }>;
+  };
+};
+
 /* ---------- Path + date helpers ---------- */
 function publicPath(p: string) {
   // @ts-ignore
@@ -600,6 +614,91 @@ export default function ExerciseDiaryScreen() {
     }
   }
 
+  /* ----- Template LOAD (new) ----- */
+  const [loadTplOpen, setLoadTplOpen] = useState(false);
+  const [loadTplLoading, setLoadTplLoading] = useState(false);
+  const [tplList, setTplList] = useState<TemplateRow[]>([]);
+  const [useTplWeights, setUseTplWeights] = useState(true);
+  const [useTplReps, setUseTplReps] = useState(false);
+
+  async function fetchTemplates() {
+    if (!userId) return;
+    setLoadTplLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("workout_templates")
+        .select("id,name,data")
+        .eq("user_id", userId)
+        .order("name", { ascending: true });
+      if (error) throw error;
+      setTplList((data as TemplateRow[]) || []);
+    } catch {
+      // Fallback to localStorage
+      const key = `byb:workout_templates:${userId}`;
+      const ls = JSON.parse(localStorage.getItem(key) || "[]");
+      setTplList(ls as TemplateRow[]);
+    } finally {
+      setLoadTplLoading(false);
+    }
+  }
+
+  function openLoadTemplate() {
+    setUseTplWeights(true);
+    setUseTplReps(false);
+    setLoadTplOpen(true);
+    fetchTemplates();
+  }
+
+  async function insertTemplate(tpl: TemplateRow, opts: { weights: boolean; reps: boolean }) {
+    if (!userId || !session) return;
+
+    let nextOrder = items.length ? Math.max(...items.map(i => i.order_index)) + 1 : 0;
+
+    try {
+      for (const it of tpl.data.items) {
+        const { data: newItem, error: iErr } = await supabase
+          .from("workout_items")
+          .insert({
+            session_id: session.id,
+            user_id: userId,
+            kind: "weights",
+            title: it.title,
+            order_index: nextOrder++,
+            metrics: {},
+          })
+          .select()
+          .single();
+        if (iErr) throw iErr;
+
+        const itemId = (newItem as Item).id;
+
+        const count = Math.max(
+          it.sets || 0,
+          opts.weights && it.weights ? it.weights.length : 0,
+          opts.reps && it.reps ? it.reps.length : 0
+        );
+
+        if (count > 0) {
+          const rows = Array.from({ length: count }, (_, idx) => ({
+            item_id: itemId,
+            user_id: userId,
+            set_number: idx + 1,
+            weight_kg: opts.weights && it.weights ? (it.weights[idx] ?? null) : null,
+            reps: opts.reps && it.reps ? (it.reps[idx] ?? null) : null,
+            duration_sec: null,
+          }));
+          const { error: sErr } = await supabase.from("workout_sets").insert(rows);
+          if (sErr) throw sErr;
+        }
+      }
+
+      await loadItems(session.id);
+      setLoadTplOpen(false);
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    }
+  }
+
   /* ----- Backup/export ----- */
   async function downloadBackup() {
     if (!userId) return;
@@ -845,8 +944,9 @@ export default function ExerciseDiaryScreen() {
                     Add exercise
                   </button>
 
-                  {/* Save template option */}
+                  {/* Save / Load template options */}
                   <button className="btn-soft" onClick={openTemplateModal}>Save as template</button>
+                  <button className="btn-soft" onClick={openLoadTemplate}>Load template</button>
 
                   <button className="btn-primary" onClick={completeSession} style={{ marginLeft: "auto", borderRadius: 8 }}>
                     Complete session
@@ -1039,6 +1139,55 @@ export default function ExerciseDiaryScreen() {
               {tplSaving ? "Saving…" : "Save template"}
             </button>
           </div>
+        </div>
+      </Modal>
+
+      {/* Load Template Modal (NEW) */}
+      <Modal open={loadTplOpen} onClose={() => setLoadTplOpen(false)} title="Load template">
+        <div style={{ display: "grid", gap: 10 }}>
+          <div className="muted">Insert a saved <b>weights</b> template into this session.</div>
+
+          <div style={{ display: "grid", gap: 6 }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={useTplWeights}
+                onChange={e => setUseTplWeights(e.target.checked)}
+              />
+              <span>Apply saved <b>weights</b> (kg)</span>
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={useTplReps}
+                onChange={e => setUseTplReps(e.target.checked)}
+              />
+              <span>Apply saved <b>reps</b></span>
+            </label>
+          </div>
+
+          {loadTplLoading ? (
+            <div className="muted">Loading templates…</div>
+          ) : tplList.length === 0 ? (
+            <div className="muted">No templates yet. Create one via “Save as template”.</div>
+          ) : (
+            <ul className="list">
+              {tplList.map(t => (
+                <li key={t.id} className="item" style={{ alignItems: "center" }}>
+                  <div style={{ fontWeight: 600 }}>{t.name}</div>
+                  <div className="muted" style={{ flex: 1 }}>
+                    {t.data?.items?.length || 0} exercise{(t.data?.items?.length || 0) === 1 ? "" : "s"}
+                  </div>
+                  <button
+                    className="btn-primary"
+                    onClick={() => insertTemplate(t, { weights: useTplWeights, reps: useTplReps })}
+                  >
+                    Insert
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </Modal>
     </div>
