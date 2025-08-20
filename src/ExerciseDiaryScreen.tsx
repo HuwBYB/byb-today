@@ -119,42 +119,21 @@ function ExerciseHelpContent() {
 
       <h4 style={{ margin: 0 }}>Quick start</h4>
       <ol style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Pick a day (or tap <b>Today</b>) and hit <b>Start session</b>.</li>
-        <li>Use <b>Quick add</b> to log what you’re doing:
-          <ul style={{ margin: "6px 0 0 0", paddingLeft: 18 }}>
-            <li><b>Weights</b>: type the exercise name and add sets.</li>
-            <li><b>Run/Jog/Walk/Yoga/Class</b>: add <i>duration</i> and (optionally) <i>distance</i>.</li>
-          </ul>
-        </li>
+        <li>Tap <b>New session</b>.</li>
+        <li>Use <b>Quick add</b> to log what you’re doing.</li>
         <li>When you’re done, tap <b>Complete session</b>.</li>
       </ol>
 
       <h4 style={{ margin: 0 }}>Weights workflow</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Enter a clear exercise title (e.g., “Bench Press”). Titles are <b>case-sensitive</b> when matching history.</li>
-        <li>Add sets, then record <b>kg</b> and <b>reps</b>. Use “Show previous” to view past sessions for the same title and “Copy last sets” to prefill.</li>
+        <li>Add an exercise, then name it in the row input.</li>
+        <li>Add sets, record <b>kg</b> and <b>reps</b>. Use history to copy last sets.</li>
       </ul>
 
       <h4 style={{ margin: 0 }}>Cardio & classes</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Log <b>duration</b> (mm:ss) and <b>distance</b> (km) if relevant — pace is calculated automatically.</li>
-        <li>For classes, give it a title (e.g., “Spin Class”) so you can find it later.</li>
+        <li>Log <b>duration</b> (mm:ss) and <b>distance</b> (km) if relevant — pace is automatic.</li>
       </ul>
-
-      <h4 style={{ margin: 0 }}>Notes & history</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Use <b>Notes</b> to capture how it felt, form cues, or injuries.</li>
-        <li>The <b>Recent</b> panel lets you reopen past days quickly.</li>
-      </ul>
-
-      <h4 style={{ margin: 0 }}>Tips from Alfred</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Small sessions count. Five minutes is better than zero.</li>
-        <li>Be consistent with exercise names to keep history tidy.</li>
-        <li>Progress ≠ heavier every time; better form and more reps also win.</li>
-      </ul>
-
-      <p><strong>Closing note:</strong> Log honestly, celebrate consistency, and let the data nudge you forward.</p>
     </div>
   );
 }
@@ -164,7 +143,7 @@ export default function ExerciseDiaryScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [dateISO, setDateISO] = useState(() => toISO(new Date()));
 
-  // NEW: keep all sessions for the selected day + the active one
+  // keep all sessions for the selected day + the active one
   const [sessionsToday, setSessionsToday] = useState<Session[]>([]);
   const [session, setSession] = useState<Session | null>(null);
 
@@ -191,8 +170,9 @@ export default function ExerciseDiaryScreen() {
   const [offerBackup, setOfferBackup] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
 
-  // sticky quick-add (weights)
-  const [stickyTitle, setStickyTitle] = useState("");
+  // when we create a new session, scroll quick add into view
+  const quickAddRef = useRef<HTMLDivElement>(null);
+  const [scrollToQuickAdd, setScrollToQuickAdd] = useState(false);
 
   /* === Debounced saver for workout_sets === */
   const DEBOUNCE_MS = 300;
@@ -269,6 +249,14 @@ export default function ExerciseDiaryScreen() {
     }
   }, [session?.id, dateISO]);
 
+  // scroll Quick add into view right after creating a session
+  useEffect(() => {
+    if (scrollToQuickAdd && session && !finished) {
+      quickAddRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setScrollToQuickAdd(false);
+    }
+  }, [scrollToQuickAdd, session, finished]);
+
   /* ----- Loaders ----- */
   async function loadSessionsForDay(iso: string) {
     if (!userId) return;
@@ -287,7 +275,7 @@ export default function ExerciseDiaryScreen() {
     }
     const list = (data as Session[]) || [];
     setSessionsToday(list);
-    const active = list.length ? list[list.length - 1] : null; // pick the newest (highest id)
+    const active = list.length ? list[list.length - 1] : null; // newest
     setSession(active);
     if (active) await loadItems(active.id); else { setItems([]); setSetsByItem({}); }
   }
@@ -345,12 +333,12 @@ export default function ExerciseDiaryScreen() {
         .select().single();
       if (error) throw error;
       const newS = data as Session;
-      // add to today's list and make active
       setSessionsToday(prev => [...prev, newS]);
       setSession(newS);
       localStorage.setItem(FIN_KEY(newS.id, dateISO), "0");
       await loadItems(newS.id);
       await loadRecent();
+      setScrollToQuickAdd(true);
     } catch (e: any) { setErr(e.message || String(e)); }
     finally { setBusy(false); }
   }
@@ -794,12 +782,7 @@ export default function ExerciseDiaryScreen() {
   function closeModal() { setModalOpen(false); setModalTitle(""); setModalEntries([]); setModalForItemId(null); }
   async function copySetsFromModal(entry: PrevEntry) { if (modalForItemId) await addSetsBulk(modalForItemId, entry.sets); }
 
-  /* ----- UI helpers ----- */
-  function gotoToday() { setDateISO(toISO(new Date())); }
-  function prevDay() { const d = fromISO(dateISO); d.setDate(d.getDate() - 1); setDateISO(toISO(d)); }
-  function nextDay() { const d = fromISO(dateISO); d.setDate(d.getDate() + 1); setDateISO(toISO(d)); }
-
-  // summary for collapsed view
+  // summary for collapsed/complete view
   const summary = useMemo(() => {
     const weightsItems = items.filter(i => i.kind === "weights");
     const cardioItems = items.filter(i => i.kind !== "weights");
@@ -859,16 +842,14 @@ export default function ExerciseDiaryScreen() {
         <div className="exercise-layout">
           {/* Left: editor */}
           <div className="card" style={{ display: "grid", gap: 12 }}>
-            {/* Date bar */}
-            <div className="exercise-toolbar" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <button onClick={gotoToday}>Today</button>
-              <button onClick={prevDay}>←</button>
-              <input type="date" value={dateISO} onChange={e => setDateISO(e.target.value)} style={{ flex: "1 1 180px", minWidth: 0 }} />
-              <button onClick={nextDay}>→</button>
-
-              <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                {/* Show selector if multiple sessions; otherwise just the label */}
-                {session ? (
+            {/* Top controls — NO date bar; just New session / switcher / reopen */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                {!session ? (
+                  <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius: 8 }}>
+                    {busy ? "Starting…" : "New session"}
+                  </button>
+                ) : (
                   <>
                     {sessionsToday.length > 1 ? (
                       <select
@@ -884,21 +865,17 @@ export default function ExerciseDiaryScreen() {
                       <span className="muted">Session #{session.id}</span>
                     )}
                     {finished && <button onClick={reopenSession}>Reopen</button>}
-                    {/* Always offer a brand new session */}
                     <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius: 8 }}>
                       {busy ? "Starting…" : "New session"}
                     </button>
                   </>
-                ) : (
-                  <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius: 8 }}>
-                    {busy ? "Starting…" : "Start session"}
-                  </button>
                 )}
               </div>
             </div>
 
+            {/* Body */}
             {!session ? (
-              <div className="muted">No session for this day yet. Click <b>Start session</b> to begin.</div>
+              <div className="muted">Tap <b>New session</b> to begin.</div>
             ) : finished ? (
               <div className="card card--wash" style={{ display: "grid", gap: 10 }}>
                 <h2 style={{ margin: 0 }}>Session complete</h2>
@@ -916,52 +893,26 @@ export default function ExerciseDiaryScreen() {
               </div>
             ) : (
               <>
-                {/* 👉 Quick add FIRST (above weights sticky) */}
-                <QuickAddCard
-                  onAddWeights={(name) => addWeightsExercise(name)}
-                  onAddCardio={(kind, title, km, mmss) => addCardio(kind, title, km, mmss)}
-                />
-
-                {/* Sticky weights bar */}
-                <div
-                  style={{
-                    position: "sticky", top: 0, zIndex: 5,
-                    background: "#fff", border: "1px solid var(--border)", borderRadius: 10,
-                    padding: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap"
-                  }}
-                >
-                  <span className="badge">Weights</span>
-                  <input
-                    placeholder="Enter exercise name here"
-                    value={stickyTitle}
-                    onChange={e => setStickyTitle(e.target.value)}
-                    style={{ flex: "1 1 200px", minWidth: 0 }}
+                {/* 👉 Quick add FIRST */}
+                <div ref={quickAddRef}>
+                  <QuickAddCard
+                    onAddWeights={(name) => addWeightsExercise(name)}
+                    onAddCardio={(kind, title, km, mmss) => addCardio(kind, title, km, mmss)}
+                    onOpenLoadTemplate={openLoadTemplate}
+                    onOpenSaveTemplate={openTemplateModal}
+                    onCompleteSession={completeSession}
                   />
-                  <button
-                    className="btn-soft"
-                    onClick={async () => { await addWeightsExercise(stickyTitle.trim()); setStickyTitle(""); }}
-                  >
-                    Add exercise
-                  </button>
-
-                  {/* Save / Load template options */}
-                  <button className="btn-soft" onClick={openTemplateModal}>Save as template</button>
-                  <button className="btn-soft" onClick={openLoadTemplate}>Load template</button>
-
-                  <button className="btn-primary" onClick={completeSession} style={{ marginLeft: "auto", borderRadius: 8 }}>
-                    Complete session
-                  </button>
                 </div>
 
                 {/* Items */}
                 <div style={{ display: "grid", gap: 10 }}>
-                  {items.length === 0 && <div className="muted">No items yet. Add your first entry above.</div>}
+                  {items.length === 0 && <div className="muted">No items yet. Use Quick add above.</div>}
                   {items.map(it => (
                     <div key={it.id} style={{ border: "1px solid #eee", borderRadius: 10, padding: 10 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                         <KindBadge kind={it.kind} />
                         <input
-                          placeholder={it.kind === "weights" ? "Enter exercise name here" : "Title"}
+                          placeholder={it.kind === "weights" ? "Exercise name" : "Title"}
                           value={it.title}
                           onChange={e => renameItemLocal(it, e.target.value)}
                           onBlur={() => flushTitleSaves(it.id)}
@@ -1142,8 +1093,8 @@ export default function ExerciseDiaryScreen() {
         </div>
       </Modal>
 
-      {/* Load Template Modal (NEW) */}
-      <Modal open={loadTplOpen} onClose={() => setLoadTplOpen(false)} title="Load template">
+      {/* Load Template Modal */}
+      <Modal open={loadTplOpen} onClose={() => setLoadTplOpen(false)} title="Add template">
         <div style={{ display: "grid", gap: 10 }}>
           <div className="muted">Insert a saved <b>weights</b> template into this session.</div>
 
@@ -1250,21 +1201,24 @@ function CardioSummary({ item }: { item: Item }) {
   return <div className="muted">{d ? `${d} km` : ""}{(d && sec) ? " • " : ""}{sec ? secondsToMMSS(sec) : ""}{pace ? ` • ${pace}` : ""}</div>;
 }
 
+/* ---------- Quick Add (updated) ---------- */
 function QuickAddCard({
-  onAddWeights, onAddCardio
+  onAddWeights, onAddCardio, onOpenLoadTemplate, onOpenSaveTemplate, onCompleteSession
 }: {
   onAddWeights: (name: string) => void;
   onAddCardio: (kind: Item["kind"], title: string, distanceKm: number | null, mmss: string) => void;
+  onOpenLoadTemplate: () => void;
+  onOpenSaveTemplate: () => void;
+  onCompleteSession: () => void;
 }) {
   const [kind, setKind] = useState<Item["kind"]>("weights");
   const [title, setTitle] = useState("");
   const [dist, setDist] = useState<string>("");
   const [dur, setDur] = useState<string>("");
 
-  function add() {
-    if (kind === "weights") { onAddWeights(title.trim()); setTitle(""); }
-    else onAddCardio(kind, title || (kind === "class" ? "Class" : kind[0].toUpperCase() + kind.slice(1)), dist ? Number(dist) : null, dur || "00:00");
-    if (kind !== "weights") { setTitle(""); setDist(""); setDur(""); }
+  function addCardio() {
+    onAddCardio(kind, title || (kind === "class" ? "Class" : kind[0].toUpperCase() + kind.slice(1)), dist ? Number(dist) : null, dur || "00:00");
+    setTitle(""); setDist(""); setDur("");
   }
 
   return (
@@ -1282,15 +1236,19 @@ function QuickAddCard({
 
         {kind === "weights" ? (
           <>
-            <input placeholder="Enter exercise name here" value={title} onChange={e => setTitle(e.target.value)} />
-            <button className="btn-primary" onClick={add}>Add Weights Exercise</button>
+            <button className="btn-soft" onClick={() => onAddWeights("")}>Add exercise</button>
+            <button className="btn-soft" onClick={onOpenLoadTemplate}>Add template</button>
+            <button className="btn-soft" onClick={onOpenSaveTemplate}>Save as template</button>
+            <button className="btn-primary" onClick={onCompleteSession} style={{ marginLeft: "auto", borderRadius: 8 }}>
+              Complete session
+            </button>
           </>
         ) : (
           <>
             <input placeholder={kind === "class" ? "Class title" : "Title (optional)"} value={title} onChange={e => setTitle(e.target.value)} />
             <input type="number" inputMode="decimal" step="0.1" placeholder="Distance (km)" value={dist} onChange={e => setDist(e.target.value)} />
             <input placeholder="Duration mm:ss" value={dur} onChange={e => setDur(e.target.value)} />
-            <button className="btn-primary" onClick={add}>Add {kind[0].toUpperCase() + kind.slice(1)}</button>
+            <button className="btn-primary" onClick={addCardio}>Add {kind[0].toUpperCase() + kind.slice(1)}</button>
           </>
         )}
       </div>
