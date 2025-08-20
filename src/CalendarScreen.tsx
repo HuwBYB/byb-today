@@ -352,8 +352,13 @@ export default function CalendarScreen({
             border: "none", background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10,
           }}
         >
-          {CAL_ALFRED_CANDIDATES[imgIdx] ? (
-            <img src={CAL_ALFRED_CANDIDATES[imgIdx]} alt="Calendar Alfred — open help" style={{ width: 48, height: 48 }} onError={() => setImgIdx(i => i + 1)} />
+          {ALFRED_SRC ? (
+            <img
+              src={ALFRED_SRC}
+              alt="Calendar Alfred — open help"
+              style={{ width: 48, height: 48 }}
+              onError={() => setImgIdx(i => i + 1)}
+            />
           ) : (
             <span style={{
               display: "inline-flex", alignItems: "center", justifyContent: "center",
@@ -539,7 +544,7 @@ export default function CalendarScreen({
                     flex: "0 0 auto",
                     width: 10,
                     height: 10,
-                    marginTop: 6,             // keeps it visually centered on first line
+                    marginTop: 6,
                     borderRadius: 999,
                     background: t.category_color || "#e5e7eb",
                     border: "1px solid #d1d5db",
@@ -558,9 +563,9 @@ export default function CalendarScreen({
       {/* Help modal */}
       <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Calendar — Help">
         <div style={{ display: "flex", gap: 16 }}>
-          {CAL_ALFRED_CANDIDATES[imgIdx] && (
+          {ALFRED_SRC && (
             <img
-              src={CAL_ALFRED_CANDIDATES[imgIdx]}
+              src={ALFRED_SRC}
               alt=""
               aria-hidden="true"
               style={{ width: 72, height: 72, flex: "0 0 auto" }}
