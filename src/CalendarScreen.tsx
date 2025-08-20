@@ -488,10 +488,10 @@ export default function CalendarScreen({
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
             <h2 style={{ margin: 0 }}>{selectedISO}</h2>
-            <span className="muted">{(tasksByDay[selectedISO] || []).length} task{(tasksByDay[selectedISO] || []).length === 1 ? "" : "s"}</span>
+            <span className="muted">{dayTasks.length} task{dayTasks.length === 1 ? "" : "s"}</span>
           </div>
 
-        {/* Add task */}
+          {/* Add task */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <input
               value={newTitle}
@@ -526,9 +526,9 @@ export default function CalendarScreen({
           </div>
         </div>
 
-        {(tasksByDay[selectedISO] || []).length === 0 && <div className="muted">Nothing scheduled.</div>}
+        {dayTasks.length === 0 && <div className="muted">Nothing scheduled.</div>}
         <ul className="list">
-          {(tasksByDay[selectedISO] || []).map((t) => (
+          {dayTasks.map((t) => (
             <li key={t.id} className="item">
               <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
                 {/* perfectly round dot that never stretches */}
@@ -539,7 +539,7 @@ export default function CalendarScreen({
                     flex: "0 0 auto",
                     width: 10,
                     height: 10,
-                    marginTop: 6,
+                    marginTop: 6,             // keeps it visually centered on first line
                     borderRadius: 999,
                     background: t.category_color || "#e5e7eb",
                     border: "1px solid #d1d5db",
@@ -578,7 +578,7 @@ export default function CalendarScreen({
 
 /* ===== date utils ===== */
 function toISO(d: Date) {
-  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
+  const y = d.getFullYear(), m = String(d.getMonth() + 1,).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
 function fromISO(s: string) {
