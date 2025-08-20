@@ -21,7 +21,16 @@ function publicPath(p: string) {
   const withSlash = p.startsWith("/") ? p : `/${p}`;
   return `${base.replace(/\/$/, "")}${withSlash}`;
 }
-const TODAY_ALFRED_SRC = publicPath("/alfred/Today_Alfred.png");
+
+/* Try multiple filenames (underscore vs space, formats) */
+const ALFRED_CANDIDATES = [
+  "/alfred/Today_Alfred.png",
+  "/alfred/Today Alfred.png",
+  "/alfred/Today_Alfred.webp",
+  "/alfred/Today Alfred.webp",
+  "/alfred/Today_Alfred.jpg",
+  "/alfred/Today Alfred.jpg",
+].map(publicPath);
 
 /* ---------- Modal ---------- */
 function Modal({
@@ -33,7 +42,7 @@ function Modal({
     if (open) window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
-  useEffect(() => { if (open && closeRef.current) closeRef.current.focus(); }, [open]);
+  useEffect(() => { if (open && closeRef.current) closeRef.current?.focus(); }, [open]);
   if (!open) return null;
   return (
     <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
@@ -50,7 +59,7 @@ function Modal({
   );
 }
 
-/* ---------- Alfred help content (inline) ---------- */
+/* ---------- Alfred help content ---------- */
 function AlfredHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
@@ -101,6 +110,8 @@ export default function AlfredScreen() {
 
   // Help modal
   const [showHelp, setShowHelp] = useState(false);
+  const [imgIdx, setImgIdx] = useState(0);
+  const src = ALFRED_CANDIDATES[imgIdx] ?? "";
   const [imgOk, setImgOk] = useState(true);
 
   // auth
@@ -111,7 +122,7 @@ export default function AlfredScreen() {
     });
   }, []);
 
-  // persist conversations per mode in localStorage so mobile refresh doesn't lose context
+  // persist conversations per mode
   useEffect(() => {
     const saved = localStorage.getItem(lsKey(mode));
     setMessages(saved ? JSON.parse(saved) : []);
@@ -119,7 +130,6 @@ export default function AlfredScreen() {
 
   useEffect(() => {
     localStorage.setItem(lsKey(mode), JSON.stringify(messages));
-    // auto scroll to bottom
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, mode]);
 
@@ -141,7 +151,7 @@ export default function AlfredScreen() {
         body: JSON.stringify({ mode, messages: newMsgs }),
       });
       if (!res.ok) throw new Error(`Alfred error: ${res.status}`);
-      const data = await res.json(); // expect { text: string }
+      const data = await res.json();
       const text: string = data.text || "…";
       setMessages(prev => [...prev, { role: "assistant", content: text }]);
     } catch (e: any) {
@@ -151,14 +161,13 @@ export default function AlfredScreen() {
     }
   }
 
-  // Very simple bullet extraction for "Quick add to Today"
+  // Quick add bullets
   const quickAdds = useMemo(() => {
     const last = [...messages].reverse().find(m => m.role === "assistant");
     if (!last) return [];
     const lines = last.content.split(/\r?\n/).map(l => l.trim());
-    const bullets = lines.filter(l =>
-      /^[-*•]\s+/.test(l) || /^\d+\.\s+/.test(l)
-    ).map(l => l.replace(/^([-*•]\s+|\d+\.\s+)/, "").trim());
+    const bullets = lines.filter(l => /^[-*•]\s+/.test(l) || /^\d+\.\s+/.test(l))
+      .map(l => l.replace(/^([-*•]\s+|\d+\.\s+)/, "").trim());
     return bullets.slice(0, 6);
   }, [messages]);
 
@@ -182,59 +191,69 @@ export default function AlfredScreen() {
     }
   }
 
+  // a11y: open on Enter/Space for the custom button
+  function onHelpKey(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setShowHelp(true);
+    }
+  }
+
   return (
     <div className="two-col" style={{ alignItems: "start" }}>
-      {/* Sidebar (stacks on mobile) — help button pinned in this header card */}
-      <aside
-        className="card sidebar-sticky"
-        style={{ position: "relative", display: "grid", gap: 8, paddingRight: 64 }}
-      >
-        <button
-          type="button"
-          onClick={() => setShowHelp(true)}
+      {/* Sidebar (stacks on mobile) — help control pinned */}
+      <aside className="card sidebar-sticky" style={{ position: "relative", display: "grid", gap: 8, paddingRight: 64 }}>
+        <div
+          role="button"
+          tabIndex={0}
           aria-label="Open Alfred help"
           title="Need a hand? Ask Alfred"
-          // kill global button chrome (border, bg, focus ring, iOS tap highlight)
+          onClick={() => setShowHelp(true)}
+          onKeyDown={onHelpKey}
           style={{
             position: "absolute",
             top: 8,
             right: 8,
-            appearance: "none",
-            WebkitAppearance: "none",
-            background: "transparent",
-            border: "none",
-            padding: 0,
-            outline: "none",
-            boxShadow: "none",
-            lineHeight: 0,
             cursor: "pointer",
+            // absolutely no background/borders
+            background: "transparent",
+            outline: "none",
+            border: "none",
+            lineHeight: 0,
             WebkitTapHighlightColor: "transparent",
           }}
         >
-          {imgOk ? (
+          {imgOk && src ? (
             <img
-              src={TODAY_ALFRED_SRC}
+              src={src}
               alt="Alfred — open help"
-              // show PNG as-is (no circle, no bg)
+              draggable={false}
               style={{
                 display: "block",
                 width: 44,
                 height: 44,
+                // ensure no accidental styling
+                background: "transparent",
+                border: "none",
               }}
-              onError={() => setImgOk(false)}
+              onError={() => {
+                // try next candidate; if none left, show fallback
+                if (imgIdx < ALFRED_CANDIDATES.length - 1) setImgIdx(i => i + 1);
+                else setImgOk(false);
+              }}
             />
           ) : (
             <span
               style={{
                 display: "inline-flex", alignItems: "center", justifyContent: "center",
-                width: 32, height: 32, borderRadius: 999,
+                width: 32, height: 32, borderRadius: 8,
                 border: "1px solid #d1d5db", background: "#f9fafb", fontWeight: 700,
               }}
             >
               ?
             </span>
           )}
-        </button>
+        </div>
 
         <h2 style={{ margin: 0 }}>Alfred</h2>
         <div className="muted" style={{ fontSize: 12 }}>Choose a persona</div>
@@ -253,15 +272,13 @@ export default function AlfredScreen() {
         </div>
       </aside>
 
-      {/* Chat pane (no help button here) */}
+      {/* Chat pane */}
       <main className="card" style={{ display: "grid", gridTemplateRows: "auto 1fr auto", gap: 10, minHeight: 360 }}>
-        {/* Header */}
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
           <h3 style={{ margin: 0 }}>{MODES.find(m => m.key === mode)?.label}</h3>
           <span className="muted">/ chat</span>
         </div>
 
-        {/* Messages */}
         <div ref={scrollRef} style={{ overflowY: "auto", maxHeight: "50vh", paddingRight: 4 }}>
           {messages.length === 0 && (
             <div className="muted">
@@ -285,7 +302,6 @@ export default function AlfredScreen() {
           </div>
         </div>
 
-        {/* Quick add actions parsed from the last reply */}
         {quickAdds.length > 0 && (
           <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
             <div className="section-title" style={{ marginBottom: 6 }}>Quick add to Today</div>
@@ -300,7 +316,6 @@ export default function AlfredScreen() {
           </div>
         )}
 
-        {/* Composer */}
         <div style={{ display: "grid", gap: 6 }}>
           {err && <div style={{ color: "red" }}>{err}</div>}
           <textarea
@@ -319,10 +334,20 @@ export default function AlfredScreen() {
         </div>
       </main>
 
-      {/* Help modal */}
       <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Alfred — Help">
         <div style={{ display: "flex", gap: 16 }}>
-          {imgOk && <img src={TODAY_ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
+          {src && (
+            <img
+              src={src}
+              alt=""
+              aria-hidden="true"
+              style={{ width: 72, height: 72, flex: "0 0 auto" }}
+              onError={() => {
+                if (imgIdx < ALFRED_CANDIDATES.length - 1) setImgIdx(i => i + 1);
+                else setImgOk(false);
+              }}
+            />
+          )}
           <div style={{ flex: 1 }}>
             <AlfredHelpContent />
           </div>
