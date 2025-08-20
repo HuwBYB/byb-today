@@ -215,13 +215,11 @@ export default function AlfredScreen() {
             <img
               src={TODAY_ALFRED_SRC}
               alt="Alfred — open help"
-              // make the image itself ‘chromeless’ and circular
+              // show PNG as-is (no circle, no bg)
               style={{
                 display: "block",
                 width: 44,
                 height: 44,
-                borderRadius: 999,
-                background: "transparent",
               }}
               onError={() => setImgOk(false)}
             />
