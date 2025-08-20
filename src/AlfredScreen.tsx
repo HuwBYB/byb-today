@@ -215,7 +215,6 @@ export default function AlfredScreen() {
             top: 8,
             right: 8,
             cursor: "pointer",
-            // absolutely no background/borders
             background: "transparent",
             outline: "none",
             border: "none",
@@ -230,14 +229,15 @@ export default function AlfredScreen() {
               draggable={false}
               style={{
                 display: "block",
-                width: 44,
-                height: 44,
-                // ensure no accidental styling
+                width: "auto",
+                height: "auto",
+                maxWidth: 44,
+                maxHeight: 44,
+                objectFit: "contain",
                 background: "transparent",
                 border: "none",
               }}
               onError={() => {
-                // try next candidate; if none left, show fallback
                 if (imgIdx < ALFRED_CANDIDATES.length - 1) setImgIdx(i => i + 1);
                 else setImgOk(false);
               }}
@@ -341,7 +341,15 @@ export default function AlfredScreen() {
               src={src}
               alt=""
               aria-hidden="true"
-              style={{ width: 72, height: 72, flex: "0 0 auto" }}
+              style={{
+                display: "block",
+                width: "auto",
+                height: "auto",
+                maxWidth: 72,
+                maxHeight: 72,
+                objectFit: "contain",
+                flex: "0 0 auto",
+              }}
               onError={() => {
                 if (imgIdx < ALFRED_CANDIDATES.length - 1) setImgIdx(i => i + 1);
                 else setImgOk(false);
