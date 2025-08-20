@@ -97,7 +97,7 @@ function Modal({
   );
 }
 
-/* ---------- Inlined help content (edited) ---------- */
+/* ---------- Inlined help content ---------- */
 function ExerciseHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
@@ -163,12 +163,9 @@ export default function ExerciseDiaryScreen() {
   const [loadingPrevFor, setLoadingPrevFor] = useState<Record<number, boolean>>({});
   const [prevByItem, setPrevByItem] = useState<Record<number, PrevEntry[]>>({});
 
-  // modal
-  const [modalOpen, setModalOpen] = useState(false);
-  const [modalTitle, setModalTitle] = useState("");
-  const [modalForItemId, setModalForItemId] = useState<number | null>(null);
-  const [modalEntries, setModalEntries] = useState<PrevEntry[]>([]);
-  const [modalLoading, setModalLoading] = useState(false);
+  // help modal
+  const [showHelp, setShowHelp] = useState(false);
+  const [imgOk, setImgOk] = useState(true);
 
   // collapsed
   const [finished, setFinished] = useState(false);
@@ -179,10 +176,6 @@ export default function ExerciseDiaryScreen() {
 
   // sticky quick-add (weights)
   const [stickyTitle, setStickyTitle] = useState("");
-
-  // Alfred modal
-  const [showHelp, setShowHelp] = useState(false);
-  const [imgOk, setImgOk] = useState(true);
 
   /* === Debounced saver for workout_sets (makes inputs snappy) === */
   const DEBOUNCE_MS = 300;
@@ -211,8 +204,35 @@ export default function ExerciseDiaryScreen() {
     }
   }, [commitSetPatch]);
 
+  /* === Debounced rename for item titles (fixes typing lag) === */
+  const TITLE_DEBOUNCE_MS = 450;
+  const titleTimers = useRef<Record<number, number>>({});
+  const pendingTitles = useRef<Record<number, string>>({});
+
+  const commitTitle = useCallback(async (id: number) => {
+    const title = pendingTitles.current[id];
+    delete pendingTitles.current[id];
+    if (title == null) return;
+    const { error } = await supabase.from("workout_items").update({ title }).eq("id", id);
+    if (error) setErr(error.message);
+  }, []);
+
+  const queueTitleSave = useCallback((id: number, title: string) => {
+    pendingTitles.current[id] = title;
+    if (titleTimers.current[id]) window.clearTimeout(titleTimers.current[id]);
+    titleTimers.current[id] = window.setTimeout(() => { commitTitle(id); }, TITLE_DEBOUNCE_MS) as unknown as number;
+  }, [commitTitle]);
+
+  const flushTitleSaves = useCallback(async (id?: number) => {
+    const ids = id == null ? Object.keys(pendingTitles.current).map(Number) : [id];
+    for (const k of ids) {
+      if (titleTimers.current[k]) window.clearTimeout(titleTimers.current[k]);
+      await commitTitle(k);
+    }
+  }, [commitTitle]);
+
   // flush pending saves on unmount/nav
-  useEffect(() => () => { flushSetSaves().catch(() => {}); }, [flushSetSaves]);
+  useEffect(() => () => { flushSetSaves().catch(() => {}); flushTitleSaves().catch(() => {}); }, [flushSetSaves, flushTitleSaves]);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
@@ -382,10 +402,10 @@ export default function ExerciseDiaryScreen() {
     await loadItems(session.id);
   }
 
-  async function renameItem(item: Item, newTitle: string) {
-    const { error } = await supabase.from("workout_items").update({ title: newTitle }).eq("id", item.id);
-    if (error) setErr(error.message);
-    else setItems(items.map(i => i.id === item.id ? { ...i, title: newTitle } : i));
+  // Debounced local rename (no network on each keystroke)
+  function renameItemLocal(item: Item, newTitle: string) {
+    setItems(prev => prev.map(i => i.id === item.id ? { ...i, title: newTitle } : i));
+    queueTitleSave(item.id, newTitle);
   }
 
   async function deleteItem(itemId: number) {
@@ -421,12 +441,10 @@ export default function ExerciseDiaryScreen() {
 
   // OPTIMISTIC + DEBOUNCED
   function updateSet(set: WSet, patch: Partial<WSet>) {
-    // local instant update
     setSetsByItem(prev => {
       const list = (prev[set.item_id] || []).map(s => s.id === set.id ? ({ ...s, ...patch }) as WSet : s);
       return { ...prev, [set.item_id]: list };
     });
-    // queue remote save
     queueSetSave(set.id, patch);
   }
 
@@ -505,7 +523,67 @@ export default function ExerciseDiaryScreen() {
     await addSetsBulk(it.id, hist[0].sets);
   }
 
+  /* ----- Template save (name + include weights/reps separately) ----- */
+  const [tplOpen, setTplOpen] = useState(false);
+  const [tplName, setTplName] = useState("");
+  const [tplIncludeWeights, setTplIncludeWeights] = useState(false);
+  const [tplIncludeReps, setTplIncludeReps] = useState(false);
+  const [tplSaving, setTplSaving] = useState(false);
+
+  function openTemplateModal() {
+    setTplOpen(true);
+    setTplName("");
+    setTplIncludeWeights(false);
+    setTplIncludeReps(false);
+  }
+
+  async function saveTemplate() {
+    if (!userId) return;
+    const cleanName = tplName.trim();
+    if (!cleanName || cleanName.toLowerCase() === "insert template name") return;
+
+    const weightsItems = items.filter(i => i.kind === "weights");
+    const payload = {
+      items: weightsItems.map(it => {
+        const sets = (setsByItem[it.id] || []);
+        return {
+          title: it.title,
+          sets: sets.length,
+          ...(tplIncludeWeights ? { weights: sets.map(s => s.weight_kg) } : {}),
+          ...(tplIncludeReps ? { reps: sets.map(s => s.reps) } : {}),
+        };
+      }),
+    };
+
+    setTplSaving(true);
+    try {
+      const { error } = await supabase.from("workout_templates").insert({
+        user_id: userId,
+        name: cleanName,
+        data: payload,
+      } as any);
+      if (error) {
+        // fallback: localStorage (if table doesn't exist)
+        const key = `byb:workout_templates:${userId}`;
+        const prev = JSON.parse(localStorage.getItem(key) || "[]");
+        prev.push({ id: Date.now(), name: cleanName, data: payload });
+        localStorage.setItem(key, JSON.stringify(prev));
+      }
+      setTplOpen(false);
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setTplSaving(false);
+    }
+  }
+
   /* ----- Modal (full history) ----- */
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalTitle, setModalTitle] = useState("");
+  const [modalForItemId, setModalForItemId] = useState<number | null>(null);
+  const [modalEntries, setModalEntries] = useState<PrevEntry[]>([]);
+  const [modalLoading, setModalLoading] = useState(false);
+
   async function openHistoryModal(it: Item, limit = 10) {
     if (!userId) return;
     setModalOpen(true); setModalTitle(it.title); setModalForItemId(it.id); setModalLoading(true);
@@ -552,44 +630,6 @@ export default function ExerciseDiaryScreen() {
   }
   function closeModal() { setModalOpen(false); setModalTitle(""); setModalEntries([]); setModalForItemId(null); }
   async function copySetsFromModal(entry: PrevEntry) { if (modalForItemId) await addSetsBulk(modalForItemId, entry.sets); }
-
-  /* ----- Backup/export ----- */
-  async function downloadBackup() {
-    if (!userId) return;
-    setBackingUp(true);
-    try {
-      const { data: sessions, error: se } = await supabase
-        .from("workout_sessions").select("*").eq("user_id", userId)
-        .order("session_date", { ascending: true });
-      if (se) throw se;
-
-      const sessionIds = (sessions as Session[]).map(s => s.id);
-      const { data: itemsRows, error: ie } = await supabase
-        .from("workout_items").select("*").in("session_id", sessionIds);
-      if (ie) throw ie;
-
-      const itemIds = (itemsRows as Item[]).map(i => i.id);
-      const { data: setsRows, error: te } = await supabase
-        .from("workout_sets").select("*").in("item_id", itemIds);
-      if (te) throw te;
-
-      const payload = {
-        exported_at: new Date().toISOString(),
-        user_id: userId,
-        sessions,
-        items: itemsRows,
-        sets: setsRows,
-      };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `workout_backup_${toISO(new Date()).replace(/-/g, "")}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e: any) { setErr(e.message || String(e)); }
-    finally { setBackingUp(false); }
-  }
 
   /* ----- UI helpers ----- */
   function gotoToday() { setDateISO(toISO(new Date())); }
@@ -694,7 +734,7 @@ export default function ExerciseDiaryScreen() {
                   onAddCardio={(kind, title, km, mmss) => addCardio(kind, title, km, mmss)}
                 />
 
-                {/* Sticky weights bar (appears as you scroll) */}
+                {/* Sticky weights bar */}
                 <div
                   style={{
                     position: "sticky", top: 0, zIndex: 5,
@@ -715,6 +755,10 @@ export default function ExerciseDiaryScreen() {
                   >
                     Add exercise
                   </button>
+
+                  {/* Save template option BEFORE "Complete session" */}
+                  <button className="btn-soft" onClick={openTemplateModal}>Save as template</button>
+
                   <button className="btn-primary" onClick={completeSession} style={{ marginLeft: "auto", borderRadius: 8 }}>
                     Complete session
                   </button>
@@ -730,7 +774,8 @@ export default function ExerciseDiaryScreen() {
                         <input
                           placeholder={it.kind === "weights" ? "Enter exercise name here" : "Title"}
                           value={it.title}
-                          onChange={e => renameItem(it, e.target.value)}
+                          onChange={e => renameItemLocal(it, e.target.value)}
+                          onBlur={() => flushTitleSaves(it.id)}
                           style={{ flex: 1, minWidth: 0 }}
                         />
                         <div style={{ display: "flex", gap: 6 }}>
@@ -871,6 +916,42 @@ export default function ExerciseDiaryScreen() {
           </div>
         </div>
       )}
+
+      {/* Save Template Modal */}
+      <Modal open={tplOpen} onClose={() => setTplOpen(false)} title="Save as template">
+        <div style={{ display: "grid", gap: 10 }}>
+          <div className="muted">Save today’s <b>weights</b> exercises as a reusable template.</div>
+          <label style={{ display: "grid", gap: 6 }}>
+            <span>Template name</span>
+            <input
+              value={tplName}
+              onChange={e => setTplName(e.target.value)}
+              placeholder="insert template name"
+            />
+          </label>
+          <div style={{ display: "grid", gap: 6 }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="checkbox" checked={tplIncludeWeights} onChange={e => setTplIncludeWeights(e.target.checked)} />
+              <span>Also save <b>weights</b></span>
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="checkbox" checked={tplIncludeReps} onChange={e => setTplIncludeReps(e.target.checked)} />
+              <span>Also save <b>reps</b></span>
+            </label>
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={() => setTplOpen(false)}>Cancel</button>
+            <button
+              className="btn-primary"
+              onClick={saveTemplate}
+              disabled={tplSaving || !tplName.trim() || tplName.trim().toLowerCase() === "insert template name"}
+              style={{ borderRadius: 8 }}
+            >
+              {tplSaving ? "Saving…" : "Save template"}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
