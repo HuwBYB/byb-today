@@ -246,6 +246,12 @@ export default function CalendarScreen({
     d.setMonth(d.getMonth() + 1);
     setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
   }
+  function prevYear() {
+    setCursor(new Date(cursor.getFullYear() - 1, cursor.getMonth(), 1));
+  }
+  function nextYear() {
+    setCursor(new Date(cursor.getFullYear() + 1, cursor.getMonth(), 1));
+  }
   function goToday() {
     const d = new Date();
     const iso = toISO(d);
@@ -335,7 +341,7 @@ export default function CalendarScreen({
   return (
     <div style={{ display: "grid", gap: 12 }}>
       {/* Title card with Alfred */}
-      <div className="card" style={{ position: "relative", display: "grid", gap: 6, paddingRight: 64 }}>
+      <div className="card" style={{ position: "relative", display: "grid", gap: 8, paddingRight: 64 }}>
         {/* Alfred — top-right */}
         <button
           onClick={() => setShowHelp(true)}
@@ -346,8 +352,8 @@ export default function CalendarScreen({
             border: "none", background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10,
           }}
         >
-          {ALFRED_SRC ? (
-            <img src={ALFRED_SRC} alt="Calendar Alfred — open help" style={{ width: 48, height: 48 }} onError={() => setImgIdx(i => i + 1)} />
+          {CAL_ALFRED_CANDIDATES[imgIdx] ? (
+            <img src={CAL_ALFRED_CANDIDATES[imgIdx]} alt="Calendar Alfred — open help" style={{ width: 48, height: 48 }} onError={() => setImgIdx(i => i + 1)} />
           ) : (
             <span style={{
               display: "inline-flex", alignItems: "center", justifyContent: "center",
@@ -358,10 +364,9 @@ export default function CalendarScreen({
 
         <h1 style={{ margin: 0 }}>Calendar</h1>
 
-        {/* Month controls row */}
+        {/* Row 1: today pill + month/year dropdowns + big month label */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-          {/* Left cluster: tiny today pill + prev/next + month/year selects + label (no wrapping) */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap", flexWrap: "wrap" }}>
             {/* Tiny day pill for Today */}
             <button
               onClick={goToday}
@@ -371,8 +376,6 @@ export default function CalendarScreen({
             >
               {today.getDate()}
             </button>
-
-            <button onClick={prevMonth} aria-label="Previous month">←</button>
 
             {/* Month + Year dropdowns */}
             <select
@@ -390,9 +393,7 @@ export default function CalendarScreen({
               {years.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
 
-            <button onClick={nextMonth} aria-label="Next month">→</button>
-
-            {/* Nice label (stays readable, but not relied upon for layout) */}
+            {/* Month label */}
             <strong style={{ marginLeft: 6 }}>{monthLabel}</strong>
           </div>
 
@@ -404,6 +405,20 @@ export default function CalendarScreen({
               {Object.values(tasksByDay).reduce((a, b) => a + b.length, 0)} tasks this month
             </div>
           )}
+        </div>
+
+        {/* Row 2: clearly labelled arrow controls for Month & Year */}
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span className="muted" style={{ minWidth: 50 }}>Month</span>
+            <button onClick={prevMonth} aria-label="Previous month">←</button>
+            <button onClick={nextMonth} aria-label="Next month">→</button>
+          </div>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span className="muted" style={{ minWidth: 50 }}>Year</span>
+            <button onClick={prevYear} aria-label="Previous year">←</button>
+            <button onClick={nextYear} aria-label="Next year">→</button>
+          </div>
         </div>
       </div>
 
@@ -473,10 +488,10 @@ export default function CalendarScreen({
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
             <h2 style={{ margin: 0 }}>{selectedISO}</h2>
-            <span className="muted">{dayTasks.length} task{dayTasks.length === 1 ? "" : "s"}</span>
+            <span className="muted">{(tasksByDay[selectedISO] || []).length} task{(tasksByDay[selectedISO] || []).length === 1 ? "" : "s"}</span>
           </div>
 
-          {/* Add task */}
+        {/* Add task */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <input
               value={newTitle}
@@ -511,9 +526,9 @@ export default function CalendarScreen({
           </div>
         </div>
 
-        {dayTasks.length === 0 && <div className="muted">Nothing scheduled.</div>}
+        {(tasksByDay[selectedISO] || []).length === 0 && <div className="muted">Nothing scheduled.</div>}
         <ul className="list">
-          {dayTasks.map((t) => (
+          {(tasksByDay[selectedISO] || []).map((t) => (
             <li key={t.id} className="item">
               <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
                 {/* perfectly round dot that never stretches */}
@@ -524,7 +539,7 @@ export default function CalendarScreen({
                     flex: "0 0 auto",
                     width: 10,
                     height: 10,
-                    marginTop: 6,             // keeps it visually centered on first line
+                    marginTop: 6,
                     borderRadius: 999,
                     background: t.category_color || "#e5e7eb",
                     border: "1px solid #d1d5db",
@@ -543,9 +558,9 @@ export default function CalendarScreen({
       {/* Help modal */}
       <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Calendar — Help">
         <div style={{ display: "flex", gap: 16 }}>
-          {ALFRED_SRC && (
+          {CAL_ALFRED_CANDIDATES[imgIdx] && (
             <img
-              src={ALFRED_SRC}
+              src={CAL_ALFRED_CANDIDATES[imgIdx]}
               alt=""
               aria-hidden="true"
               style={{ width: 72, height: 72, flex: "0 0 auto" }}
