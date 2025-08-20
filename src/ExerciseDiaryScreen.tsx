@@ -150,7 +150,10 @@ export default function ExerciseDiaryScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [dateISO, setDateISO] = useState(() => toISO(new Date()));
 
+  // NEW: keep all sessions for the selected day + the active one
+  const [sessionsToday, setSessionsToday] = useState<Session[]>([]);
   const [session, setSession] = useState<Session | null>(null);
+
   const [items, setItems] = useState<Item[]>([]);
   const [setsByItem, setSetsByItem] = useState<Record<number, WSet[]>>({});
   const [err, setErr] = useState<string | null>(null);
@@ -177,7 +180,7 @@ export default function ExerciseDiaryScreen() {
   // sticky quick-add (weights)
   const [stickyTitle, setStickyTitle] = useState("");
 
-  /* === Debounced saver for workout_sets (makes inputs snappy) === */
+  /* === Debounced saver for workout_sets === */
   const DEBOUNCE_MS = 300;
   const setTimers = useRef<Record<number, number>>({});
   const pendingSetPatches = useRef<Record<number, Partial<WSet>>>({});
@@ -241,7 +244,7 @@ export default function ExerciseDiaryScreen() {
     });
   }, []);
 
-  useEffect(() => { if (userId) { loadSessionForDay(dateISO); loadRecent(); checkOfferBackup(); } }, [userId, dateISO]);
+  useEffect(() => { if (userId) { loadSessionsForDay(dateISO); loadRecent(); checkOfferBackup(); } }, [userId, dateISO]);
 
   useEffect(() => {
     if (session) {
@@ -253,17 +256,26 @@ export default function ExerciseDiaryScreen() {
   }, [session?.id, dateISO]);
 
   /* ----- Loaders ----- */
-  async function loadSessionForDay(iso: string) {
+  async function loadSessionsForDay(iso: string) {
     if (!userId) return;
     setErr(null);
     const { data, error } = await supabase
       .from("workout_sessions").select("*")
       .eq("user_id", userId).eq("session_date", iso)
-      .order("created_at", { ascending: true }).limit(1);
-    if (error) { setErr(error.message); setSession(null); setItems([]); setSetsByItem({}); return; }
-    const s = (data as Session[])[0] || null;
-    setSession(s || null);
-    if (s) await loadItems(s.id); else { setItems([]); setSetsByItem({}); }
+      .order("id", { ascending: true });
+    if (error) {
+      setErr(error.message);
+      setSessionsToday([]);
+      setSession(null);
+      setItems([]);
+      setSetsByItem({});
+      return;
+    }
+    const list = (data as Session[]) || [];
+    setSessionsToday(list);
+    const active = list.length ? list[list.length - 1] : null; // pick the newest (highest id)
+    setSession(active);
+    if (active) await loadItems(active.id); else { setItems([]); setSetsByItem({}); }
   }
 
   async function loadItems(sessionId: number) {
@@ -318,9 +330,12 @@ export default function ExerciseDiaryScreen() {
         .from("workout_sessions").insert({ user_id: userId, session_date: dateISO })
         .select().single();
       if (error) throw error;
-      setSession(data as Session);
-      localStorage.setItem(FIN_KEY((data as Session).id, dateISO), "0");
-      await loadItems((data as Session).id);
+      const newS = data as Session;
+      // add to today's list and make active
+      setSessionsToday(prev => [...prev, newS]);
+      setSession(newS);
+      localStorage.setItem(FIN_KEY(newS.id, dateISO), "0");
+      await loadItems(newS.id);
       await loadRecent();
     } catch (e: any) { setErr(e.message || String(e)); }
     finally { setBusy(false); }
@@ -335,6 +350,14 @@ export default function ExerciseDiaryScreen() {
     if (!session) return;
     localStorage.setItem(FIN_KEY(session.id, dateISO), "0");
     setFinished(false);
+  }
+
+  function switchSessionById(id: number) {
+    const s = sessionsToday.find(x => x.id === id) || null;
+    setSession(s);
+    setItems([]);
+    setSetsByItem({});
+    if (s) loadItems(s.id);
   }
 
   // Ensure exactly ONE "success" per weights session (logs to tasks)
@@ -533,7 +556,7 @@ export default function ExerciseDiaryScreen() {
   function openTemplateModal() {
     setTplOpen(true);
     setTplName("");
-       setTplIncludeWeights(false);
+    setTplIncludeWeights(false);
     setTplIncludeReps(false);
   }
 
@@ -743,13 +766,35 @@ export default function ExerciseDiaryScreen() {
               <button onClick={prevDay}>←</button>
               <input type="date" value={dateISO} onChange={e => setDateISO(e.target.value)} style={{ flex: "1 1 180px", minWidth: 0 }} />
               <button onClick={nextDay}>→</button>
-              <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-                {session ? <span className="muted">Session #{session.id}</span> : (
+
+              <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                {/* Show selector if multiple sessions; otherwise just the label */}
+                {session ? (
+                  <>
+                    {sessionsToday.length > 1 ? (
+                      <select
+                        value={session.id}
+                        onChange={e => switchSessionById(Number(e.target.value))}
+                        title="Switch session"
+                      >
+                        {sessionsToday.map(s => (
+                          <option key={s.id} value={s.id}>Session #{s.id}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="muted">Session #{session.id}</span>
+                    )}
+                    {finished && <button onClick={reopenSession}>Reopen</button>}
+                    {/* Always offer a brand new session */}
+                    <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius: 8 }}>
+                      {busy ? "Starting…" : "New session"}
+                    </button>
+                  </>
+                ) : (
                   <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius: 8 }}>
                     {busy ? "Starting…" : "Start session"}
                   </button>
                 )}
-                {session && finished && <button onClick={reopenSession}>Reopen</button>}
               </div>
             </div>
 
@@ -765,6 +810,9 @@ export default function ExerciseDiaryScreen() {
                 {summary.cardioCount > 0 && <div className="muted">Cardio: {summary.cardioLabels.join(" · ")}</div>}
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                   <button onClick={reopenSession}>Reopen session</button>
+                  <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius: 8 }}>
+                    {busy ? "Starting…" : "New session"}
+                  </button>
                 </div>
               </div>
             ) : (
