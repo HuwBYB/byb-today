@@ -369,17 +369,28 @@ export default function CalendarScreen({
 
         <h1 style={{ margin: 0 }}>Calendar</h1>
 
-        {/* Row 1: today pill + month/year dropdowns + big month label */}
+        {/* Row 1: Today box + month/year dropdowns + big month label */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap", flexWrap: "wrap" }}>
-            {/* Tiny day pill for Today */}
+            {/* Centered "Today" box */}
             <button
               onClick={goToday}
               title="Go to today"
               aria-label="Go to today"
-              style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid var(--border)", background: "#fff", fontWeight: 700 }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minWidth: 64,
+                height: 32,
+                padding: "0 12px",
+                borderRadius: 8,
+                border: "1px solid var(--border)",
+                background: "#fff",
+                fontWeight: 700,
+              }}
             >
-              {today.getDate()}
+              Today
             </button>
 
             {/* Month + Year dropdowns */}
@@ -583,7 +594,7 @@ export default function CalendarScreen({
 
 /* ===== date utils ===== */
 function toISO(d: Date) {
-  const y = d.getFullYear(), m = String(d.getMonth() + 1,).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
 function fromISO(s: string) {
