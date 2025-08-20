@@ -190,25 +190,39 @@ export default function AlfredScreen() {
         style={{ position: "relative", display: "grid", gap: 8, paddingRight: 64 }}
       >
         <button
+          type="button"
           onClick={() => setShowHelp(true)}
           aria-label="Open Alfred help"
           title="Need a hand? Ask Alfred"
+          // kill global button chrome (border, bg, focus ring, iOS tap highlight)
           style={{
             position: "absolute",
             top: 8,
             right: 8,
-            border: "none",
+            appearance: "none",
+            WebkitAppearance: "none",
             background: "transparent",
+            border: "none",
             padding: 0,
-            cursor: "pointer",
+            outline: "none",
+            boxShadow: "none",
             lineHeight: 0,
+            cursor: "pointer",
+            WebkitTapHighlightColor: "transparent",
           }}
         >
           {imgOk ? (
             <img
               src={TODAY_ALFRED_SRC}
               alt="Alfred — open help"
-              style={{ width: 44, height: 44 }}
+              // make the image itself ‘chromeless’ and circular
+              style={{
+                display: "block",
+                width: 44,
+                height: 44,
+                borderRadius: 999,
+                background: "transparent",
+              }}
               onError={() => setImgOk(false)}
             />
           ) : (
@@ -241,7 +255,7 @@ export default function AlfredScreen() {
         </div>
       </aside>
 
-      {/* Chat pane (no help button here anymore) */}
+      {/* Chat pane (no help button here) */}
       <main className="card" style={{ display: "grid", gridTemplateRows: "auto 1fr auto", gap: 10, minHeight: 360 }}>
         {/* Header */}
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
