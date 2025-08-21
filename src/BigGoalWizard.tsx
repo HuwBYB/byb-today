@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type React from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* ---------- Categories (match DB) ---------- */
@@ -87,11 +88,11 @@ function Modal({
 }
 
 /* =========================================================================
-   Big Goal Wizard (implementation name) + alias to keep <BigGoalWizard/> working
+   Big Goal Wizard (implementation)
    ========================================================================= */
 type WizardProps = { onClose?: () => void; onCreated?: () => void };
 
-const GoalWizardView: React.FC<WizardProps> = ({ onClose, onCreated }) => {
+function GoalWizardView({ onClose, onCreated }: WizardProps) {
   const todayISO = useMemo(() => toISO(new Date()), []);
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState<AllowedCategory>("other");
@@ -305,10 +306,10 @@ const GoalWizardView: React.FC<WizardProps> = ({ onClose, onCreated }) => {
       </div>
     </div>
   );
-};
+}
 
-// 🔗 Alias keeps external usage <BigGoalWizard .../> working as a *value*
-const BigGoalWizard = GoalWizardView;
+/* 🔗 Explicitly typed wrapper so <BigGoalWizard …/> props are recognized */
+const BigGoalWizard: React.FC<WizardProps> = (props) => <GoalWizardView {...props} />;
 
 /* =========================================================================
    Goals Screen
@@ -534,7 +535,7 @@ export default function GoalsScreen() {
 
       {/* Wizard modal */}
       <Modal open={showWizard} onClose={() => setShowWizard(false)} title="New Big Goal">
-        {/* The alias means you can keep using <BigGoalWizard …/> */}
+        {/* Keep using the same JSX tag name */}
         <BigGoalWizard
           onClose={() => setShowWizard(false)}
           onCreated={() => { setShowWizard(false); loadAll(); }}
