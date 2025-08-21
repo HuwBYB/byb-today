@@ -208,6 +208,167 @@ function inPeriodISO(dateISO: string, period: PeriodKey) {
 }
 
 /* ======================================================================= */
+/* ------------------------ Scoring & Streaks ----------------------------- */
+const SCORE_WEIGHTS = {
+  general: 1,
+  big: 2,
+  exercise: 2,
+  gratitude: 0.5,
+} as const;
+
+const DAILY_TARGET_DEFAULT = 5; // tweakable per-user later
+
+type DailyBucketCounts = {
+  dateISO: string;
+  general: number;
+  big: number;
+  exercise: number;
+  gratitude: number;
+};
+
+function aggregateDailyCounts(
+  tasks: TaskRow[],
+  sessions: WorkoutSession[],
+  grats: GratRow[]
+): Record<string, DailyBucketCounts> {
+  const map: Record<string, DailyBucketCounts> = {};
+  const add = (d: string, key: keyof DailyBucketCounts) => {
+    const row = (map[d] ||= { dateISO: d, general: 0, big: 0, exercise: 0, gratitude: 0 });
+    // @ts-ignore
+    row[key] += 1;
+  };
+
+  tasks.forEach(t => {
+    const d = dateOnlyLocal(t.completed_at);
+    if (!d) return;
+    add(d, isBigGoal(t) ? "big" : "general");
+  });
+
+  sessions.forEach(s => add(s.session_date, "exercise"));
+  grats.forEach(g => add(g.entry_date, "gratitude"));
+
+  return map;
+}
+
+function scoreForDay(row: DailyBucketCounts) {
+  return (
+    row.general * SCORE_WEIGHTS.general +
+    row.big * SCORE_WEIGHTS.big +
+    row.exercise * SCORE_WEIGHTS.exercise +
+    row.gratitude * SCORE_WEIGHTS.gratitude
+  );
+}
+
+function buildCalendarWindow(days = 28) {
+  const today = new Date();
+  return Array.from({ length: days }).map((_, i) => {
+    const d = new Date(today);
+    d.setDate(today.getDate() - (days - 1 - i));
+    return toISO(d);
+  });
+}
+
+function calcStreak(dailyScores: Record<string, number>, target: number) {
+  // current streak (count back from today)
+  const days = buildCalendarWindow(180).reverse(); // check last 6 months
+  let current = 0;
+  for (const iso of days) {
+    const met = (dailyScores[iso] || 0) >= target;
+    if (iso === toISO(new Date()) && met) current++;
+    else if (iso < toISO(new Date())) {
+      if (met) current++;
+      else break;
+    }
+  }
+  // best streak within window
+  let best = 0, run = 0;
+  for (const iso of days) {
+    const met = (dailyScores[iso] || 0) >= target;
+    run = met ? run + 1 : 0;
+    if (run > best) best = run;
+  }
+  return { current, best };
+}
+
+/* ---------- UI: Progress Ring + Streak Chip + Heatmap + Confetti ---------- */
+function ProgressRing({ value, target }: { value: number; target: number }) {
+  const pct = Math.max(0, Math.min(1, value / Math.max(1, target)));
+  const size = 120, stroke = 10;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const dash = c * pct;
+
+  return (
+    <div aria-label={`Daily progress ${Math.round(pct * 100)}%`} role="img"
+         style={{ width: size, height: size, position: "relative" }}>
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={size/2} cy={size/2} r={r} stroke="var(--muted)" strokeWidth={stroke} fill="none" opacity={0.25}/>
+        <circle cx={size/2} cy={size/2} r={r} stroke="currentColor" strokeWidth={stroke} fill="none"
+                strokeDasharray={`${dash} ${c - dash}`} strokeLinecap="round"/>
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", textAlign: "center" }}>
+        <div style={{ fontSize: 22, fontWeight: 800 }}>{value}</div>
+        <div className="muted" style={{ fontSize: 12 }}>/ {target}</div>
+      </div>
+    </div>
+  );
+}
+
+function StreakChip({ current, best }:{ current:number; best:number }) {
+  return (
+    <div aria-label={`Current streak ${current} days, best ${best} days`}
+      style={{
+        display:"inline-flex", alignItems:"center", gap:8,
+        padding:"8px 12px", borderRadius:999, border:"1px solid var(--border)",
+        background:"var(--card)", fontWeight:700
+      }}>
+      🔥 {current} <span className="muted" style={{ fontWeight:500 }}>(best {best})</span>
+    </div>
+  );
+}
+
+function Heatmap28({ dailyScores, target }:{ dailyScores:Record<string,number>; target:number }) {
+  const days = buildCalendarWindow(28);
+  return (
+    <div style={{ display:"grid", gridTemplateColumns:"repeat(7, 12px)", gap:4 }}>
+      {days.map(d => {
+        const met = (dailyScores[d] || 0) >= target;
+        return (
+          <div key={d} title={`${d}: ${Math.round(dailyScores[d] || 0)} / ${target}`}
+               style={{
+                 width:12, height:12, borderRadius:2,
+                 background: met ? "hsl(var(--pastel-hsl))" : "var(--muted-bg)",
+                 border: "1px solid var(--border)"
+               }}/>
+        );
+      })}
+    </div>
+  );
+}
+
+function ConfettiBurst({ show }:{ show:boolean }) {
+  if (!show) return null;
+  const pieces = Array.from({ length: 16 });
+  return (
+    <div aria-hidden
+      style={{ position:"fixed", inset:0, pointerEvents:"none", overflow:"hidden", zIndex:3000 }}>
+      {pieces.map((_, i) => (
+        <span key={i}
+          style={{
+            position:"absolute",
+            left: `${(i / pieces.length) * 100}%`,
+            top: -10,
+            width:6, height:10, borderRadius:1,
+            background:"hsl(var(--pastel-hsl))",
+            animation: `fall ${600 + i*20}ms ease-out forwards`,
+          }}/>
+      ))}
+      <style>{`@keyframes fall{ to { transform: translateY(100vh) rotate(260deg); opacity:.2; } }`}</style>
+    </div>
+  );
+}
+
+/* ======================================================================= */
 
 export default function WinsScreen() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -375,7 +536,7 @@ export default function WinsScreen() {
     const items = sessionItems[session.id] || [];
     const weights = items.filter(i => i.kind === "weights").length;
     const cardioLabels = items.filter(i => i.kind !== "weights").map(i => labelWorkoutItem(i));
-    const parts = [];
+    const parts: string[] = [];
     if (weights) parts.push(`Weights: ${weights}`);
     if (cardioLabels.length) parts.push(`Cardio: ${cardioLabels.join(" · ")}`);
     return parts.join(" · ") || "Session";
@@ -432,11 +593,30 @@ export default function WinsScreen() {
     [active, filtered, generalTasks, bigGoalTasks, sessionItems]
   );
 
+  /* -------------------- Score & Streak derived -------------------- */
+  const dailyAgg = useMemo(() => aggregateDailyCounts(doneTasks, sessions, grats), [doneTasks, sessions, grats]);
+  const dailyScores = useMemo(() => {
+    const m: Record<string, number> = {};
+    Object.values(dailyAgg).forEach(row => { m[row.dateISO] = scoreForDay(row); });
+    return m;
+  }, [dailyAgg]);
+  const todayScore = dailyScores[toISO(new Date())] || 0;
+  const DAILY_TARGET = DAILY_TARGET_DEFAULT; // later per-user
+  const streak = useMemo(() => calcStreak(dailyScores, DAILY_TARGET), [dailyScores]);
+
+  /* Celebration + optional haptic */
+  const [celebrate, setCelebrate] = useState(false);
+  useEffect(() => {
+    const crossed = todayScore >= DAILY_TARGET;
+    setCelebrate(crossed);
+    if (crossed && (navigator as any).vibrate) (navigator as any).vibrate(10);
+  }, [todayScore, DAILY_TARGET]);
+
   /* Render */
   return (
     <div className="page-wins" style={{ maxWidth: "100%", overflowX: "hidden" }}>
       <div className="container" style={{ display: "grid", gap: 12 }}>
-        {/* Header with Alfred (and removed explanatory text) */}
+        {/* Header with Alfred */}
         <div className="card" style={{ position: "relative", paddingRight: 64 }}>
           <button
             onClick={() => setShowHelp(true)}
@@ -478,6 +658,17 @@ export default function WinsScreen() {
             )}
           </button>
           <h1 style={{ margin: 0 }}>Your Wins</h1>
+        </div>
+
+        {/* Hero: Daily Score + Streak + Heatmap */}
+        <div className="card" style={{ display:"grid", gridTemplateColumns:"auto 1fr", gap:12, alignItems:"center" }}>
+          <ProgressRing value={Math.round(todayScore)} target={DAILY_TARGET} />
+          <div style={{ display:"grid", gap:8 }}>
+            <div className="section-title">Today’s Score</div>
+            <StreakChip current={streak.current} best={streak.best} />
+            <Heatmap28 dailyScores={dailyScores} target={DAILY_TARGET} />
+            <div className="muted" style={{ fontSize:12 }}>Hit {DAILY_TARGET} points to keep your streak alive.</div>
+          </div>
         </div>
 
         {/* At a glance (TOP) */}
@@ -572,6 +763,8 @@ export default function WinsScreen() {
           </div>
         </div>
       </Modal>
+
+      <ConfettiBurst show={celebrate} />
     </div>
   );
 }
