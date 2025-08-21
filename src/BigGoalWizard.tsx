@@ -41,7 +41,7 @@ function addDays(d: Date, n: number) {
   return x;
 }
 
-/* ======================= BIG GOAL WIZARD (placed first) ======================= */
+/* ======================= BIG GOAL WIZARD (kept in-file, defined FIRST) ======================= */
 type WizardProps = { onClose?: () => void; onCreated?: () => void };
 
 function BigGoalWizard({ onClose, onCreated }: WizardProps) {
@@ -283,7 +283,6 @@ type Goal = {
   halfway_note: string | null;
   status: string | null;
 };
-
 type TaskLite = {
   id: number;
   goal_id: number | null;
