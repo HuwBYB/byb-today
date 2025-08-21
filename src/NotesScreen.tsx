@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
+/* ---------- Types ---------- */
 type Note = {
   id: number;
   user_id: string;
   title: string;
   content: string;
   folder: string | null;
-  tags: string[];          // stored as text[] in DB
+  tags: string[];          // text[] in DB
   pinned: boolean;
   archived: boolean;
   created_at: string;      // ISO
   updated_at: string;      // ISO
 };
 
+/* ---------- Utilities ---------- */
 function formatDate(iso?: string) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -27,12 +29,29 @@ function tagsToString(tags: string[]) { return (tags || []).join(", "); }
 function stringToTags(s: string) {
   return (s || "")
     .split(",")
-    .map(x => x.trim())
+    .map(x => x.trim().replace(/^#/, "")) // allow "#tag" or "tag"
     .filter(Boolean)
     .slice(0, 20);
 }
+function escapeHtml(s: string) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c] as string));
+}
+function highlight(text: string, terms: string[]) {
+  if (!terms.length) return escapeHtml(text);
+  let html = escapeHtml(text);
+  // simple multi-term highlighter (case-insensitive)
+  terms.forEach(t => {
+    if (!t) return;
+    const re = new RegExp(`(${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "ig");
+    html = html.replace(re, "<mark>$1</mark>");
+  });
+  return html;
+}
+function normalizeTitle(s: string) {
+  return (s || "").trim().toLowerCase();
+}
 
-/** Public path helper (works with Vite/CRA/Vercel/GH Pages) */
+/** Public path helper (Vite/CRA/Vercel/GH Pages) */
 function publicPath(p: string) {
   // @ts-ignore
   const base =
@@ -44,7 +63,7 @@ function publicPath(p: string) {
 }
 const NOTES_ALFRED_SRC = publicPath("/alfred/Notes_Alfred.png");
 
-/* ---------- Lightweight modal ---------- */
+/* ---------- Modal ---------- */
 function Modal({
   open, onClose, title, children,
 }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
@@ -73,39 +92,34 @@ function Modal({
   );
 }
 
-/* ---------- Inlined help content ---------- */
+/* ---------- Help content ---------- */
 function NotesHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
-      <p><em>Notes keeps everything in one place — ideas, meeting minutes, brain dumps, and plans — so you can find and act on them later.</em></p>
+      <p><em>Notes keeps ideas, meetings, drafts, and plans in one place — with fast search so you can act on them.</em></p>
 
-      <h4 style={{ margin: 0 }}>Quick start</h4>
-      <ol style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Click <b>New</b> to create a note.</li>
-        <li>Add a <b>Title</b> (or leave it blank — we’ll use the first line).</li>
-        <li>Write in the editor. Changes are <b>auto-saved</b> within a second.</li>
-        <li>Optional: set a <b>Folder</b> (e.g., Work, Personal) and add <b>Tags</b> like <code>meeting, idea</code>.</li>
-        <li>Use <b>Search</b>, <b>Folder</b>, and <b>Status</b> filters on the left to find notes fast.</li>
-      </ol>
+      <h4 style={{ margin: 0 }}>Quick capture</h4>
+      <p>Use the bar at the top to dump thoughts to your Inbox — no friction.</p>
 
-      <h4 style={{ margin: 0 }}>Folders vs Tags</h4>
+      <h4 style={{ margin: 0 }}>Search like a pro</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li><b>Folder</b> = one home (good for simple grouping like Work/Personal).</li>
-        <li><b>Tags</b> = many labels (great for themes: <i>meeting, client-x, follow-up</i>).</li>
+        <li>Type to search title & content instantly.</li>
+        <li>Filters: <code>#tag</code>, <code>folder:Work</code>, <code>is:pinned</code>.</li>
       </ul>
 
-      <h4 style={{ margin: 0 }}>Pin, Archive, Delete</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li><b>Pin</b> bubbles important notes to the top.</li>
-        <li><b>Archive</b> moves a note to the <b>Archived</b> view (Status filter).</li>
-        <li><b>Delete</b> removes it permanently.</li>
-      </ul>
+      <h4 style={{ margin: 0 }}>Backlinks & tags</h4>
+      <p>Link notes with <code>[[Wiki Links]]</code>. Inline <code>#tags</code> are picked up automatically.</p>
 
-      <p><strong>Pro tip:</strong> Use <b>Save & Close</b> to finish a note and return to your list quickly.</p>
+      <h4 style={{ margin: 0 }}>Shortcuts</h4>
+      <ul style={{ paddingLeft: 18, margin: 0 }}>
+        <li><b>/</b> focus search, <b>n</b> new note</li>
+        <li><b>Ctrl/Cmd + Enter</b> save & close</li>
+      </ul>
     </div>
   );
 }
 
+/* ---------- Main ---------- */
 export default function NotesScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -113,7 +127,12 @@ export default function NotesScreen() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // local draft for the active note
+  // quick capture
+  const [qcText, setQcText] = useState("");
+  const [qcPinned, setQcPinned] = useState(false);
+  const [qcFolder, setQcFolder] = useState<string>("Inbox");
+
+  // active note draft
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [folder, setFolder] = useState<string>("");
@@ -121,18 +140,21 @@ export default function NotesScreen() {
   const [pinned, setPinned] = useState(false);
   const [archived, setArchived] = useState(false);
 
-  // filters
+  // filters / search
   const [q, setQ] = useState("");
   const [folderFilter, setFolderFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<"active" | "archived">("active");
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
 
   // Alfred
   const [showHelp, setShowHelp] = useState(false);
   const [imgOk, setImgOk] = useState(true);
 
+  const searchRef = useRef<HTMLInputElement>(null);
   const saveTimer = useRef<number | null>(null);
   const activeNote = useMemo(() => notes.find(n => n.id === activeId) || null, [notes, activeId]);
 
+  /* ----- auth ----- */
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -140,6 +162,7 @@ export default function NotesScreen() {
     });
   }, []);
 
+  /* ----- load notes ----- */
   useEffect(() => { if (userId) loadNotes(); }, [userId, statusFilter]);
 
   async function loadNotes() {
@@ -153,12 +176,14 @@ export default function NotesScreen() {
         .eq("archived", statusFilter === "archived")
         .order("pinned", { ascending: false })
         .order("updated_at", { ascending: false })
-        .limit(500);
+        .limit(1000);
       if (error) throw error;
       setNotes((data as Note[]) || []);
-      // keep current selection if it still exists
-      const stillThere = (data as Note[] || []).some(n => n.id === activeId);
-      if (!stillThere) setActiveId((data as Note[] || [])[0]?.id ?? null);
+      // keep selection if still present, else first
+      const nextId = (data as Note[] || []).some(n => n.id === activeId)
+        ? activeId
+        : (data as Note[] || [])[0]?.id ?? null;
+      setActiveId(nextId);
     } catch (e: any) {
       setErr(e.message || String(e));
       setNotes([]); setActiveId(null);
@@ -167,7 +192,7 @@ export default function NotesScreen() {
     }
   }
 
-  // when selection changes, sync drafts
+  /* ----- when selection changes, sync drafts ----- */
   useEffect(() => {
     if (!activeNote) return;
     setTitle(activeNote.title || "");
@@ -179,22 +204,30 @@ export default function NotesScreen() {
   }, [activeNote?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function buildPatch() {
+    // merge inline hashtags found in content/title with explicit tags input
+    const inlineTags = Array.from(new Set([
+      ...extractHashtags(title),
+      ...extractHashtags(content),
+    ]));
+    const explicit = stringToTags(tagsInput);
+    const merged = Array.from(new Set([...explicit, ...inlineTags])).slice(0, 30);
+
     return {
       title: title ?? "",
       content: content ?? "",
       folder: folder || null,
-      tags: stringToTags(tagsInput),
+      tags: merged,
       pinned,
       archived
     };
   }
 
-  // debounced auto-save on any draft changes
+  // debounced auto-save
   useEffect(() => {
     if (!activeNote) return;
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
-      if (!userId) return;
+      if (!userId || !activeNote) return;
       const patch = buildPatch();
       supabase.from("notes").update(patch).eq("id", activeNote.id).then(({ error }) => {
         if (error) { setErr(error.message); return; }
@@ -215,20 +248,28 @@ export default function NotesScreen() {
     setNotes(prev => prev.map(n => n.id === activeNote.id ? { ...n, ...patch, updated_at: new Date().toISOString() } : n));
     return true;
   }
-
   async function saveAndClose() {
     const ok = await saveNow();
     if (ok) setActiveId(null);
   }
 
-  async function createNote() {
+  async function createNote(initial?: Partial<Pick<Note, "title" | "content" | "folder" | "pinned" | "tags">>) {
     if (!userId) return;
-    const base = { user_id: userId, title: "", content: "", folder: null, tags: [], pinned: false, archived: false };
+    const base = {
+      user_id: userId,
+      title: initial?.title ?? "",
+      content: initial?.content ?? "",
+      folder: initial?.folder ?? null,
+      tags: initial?.tags ?? [],
+      pinned: initial?.pinned ?? false,
+      archived: false
+    };
     const { data, error } = await supabase.from("notes").insert(base).select().single();
     if (error) { setErr(error.message); return; }
     const n = data as Note;
     setNotes(prev => [n, ...prev]);
     setActiveId(n.id);
+    return n.id;
   }
 
   async function togglePin(n: Note) {
@@ -236,22 +277,18 @@ export default function NotesScreen() {
     if (error) { setErr(error.message); return; }
     setNotes(prev => prev.map(x => x.id === n.id ? { ...x, pinned: !x.pinned } : x));
   }
-
   async function archiveNote(n: Note) {
     const { error } = await supabase.from("notes").update({ archived: true }).eq("id", n.id);
     if (error) { setErr(error.message); return; }
-    // remove from current list (we're filtering by status)
     setNotes(prev => prev.filter(x => x.id !== n.id));
     if (activeId === n.id) setActiveId(null);
   }
-
   async function unarchiveNote(n: Note) {
     const { error } = await supabase.from("notes").update({ archived: false }).eq("id", n.id);
     if (error) { setErr(error.message); return; }
     setNotes(prev => prev.filter(x => x.id !== n.id));
     if (activeId === n.id) setActiveId(null);
   }
-
   async function deleteNote(n: Note) {
     if (!confirm("Delete this note permanently?")) return;
     const { error } = await supabase.from("notes").delete().eq("id", n.id);
@@ -260,22 +297,156 @@ export default function NotesScreen() {
     if (activeId === n.id) setActiveId(null);
   }
 
-  // derived lists
+  /* ---------- Keyboard shortcuts ---------- */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const meta = e.ctrlKey || e.metaKey;
+      if (e.key === "/" && !meta) {
+        e.preventDefault();
+        searchRef.current?.focus();
+      } else if (e.key === "n" && !meta && (document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "TEXTAREA")) {
+        e.preventDefault();
+        createNote();
+      } else if ((e.key === "Enter" && meta) || (e.key === "Enter" && e.ctrlKey)) {
+        if (activeNote) { e.preventDefault(); saveAndClose(); }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeNote]);
+
+  /* ---------- Derived: folders, tag cloud ---------- */
   const folders = useMemo(() => {
     const set = new Set<string>();
     notes.forEach(n => { if (n.folder) set.add(n.folder); });
     return Array.from(set).sort();
   }, [notes]);
 
-  const filtered = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    return notes.filter(n => {
-      if (folderFilter && (n.folder || "") !== folderFilter) return false;
-      if (!term) return true;
-      return (n.title.toLowerCase().includes(term) || (n.content || "").toLowerCase().includes(term));
+  const tagCloud = useMemo(() => {
+    const map = new Map<string, number>();
+    notes.forEach(n => {
+      const allTags = new Set<string>([
+        ...(n.tags || []),
+        ...extractHashtags(n.title || ""),
+        ...extractHashtags(n.content || "")
+      ]);
+      allTags.forEach(t => map.set(t, (map.get(t) || 0) + 1));
     });
-  }, [notes, q, folderFilter]);
+    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 30);
+  }, [notes]);
 
+  /* ---------- Backlinks ---------- */
+  const titleIndex = useMemo(() => {
+    const m = new Map<string, Note>();
+    notes.forEach(n => {
+      const key = normalizeTitle(n.title || firstLine(n.content));
+      if (key) m.set(key, n);
+    });
+    return m;
+  }, [notes]);
+
+  const backlinks = useMemo(() => {
+    if (!activeNote) return [] as { from: Note; snippet: string }[];
+    const myTitle = activeNote.title || firstLine(activeNote.content);
+    const myKey = normalizeTitle(myTitle);
+    if (!myKey) return [];
+    const re = /\[\[([^\]]+)\]\]/g;
+    const result: { from: Note; snippet: string }[] = [];
+    notes.forEach(n => {
+      if (n.id === activeNote.id) return;
+      const matches = [...(n.content || "").matchAll(re)];
+      for (const m of matches) {
+        const ref = normalizeTitle(m[1] || "");
+        if (ref === myKey) {
+          result.push({ from: n, snippet: makeSnippet(n.content || "", m.index ?? 0, m[0].length) });
+          break;
+        }
+      }
+    });
+    return result;
+  }, [notes, activeNote]);
+
+  function makeSnippet(text: string, start: number, len: number) {
+    const S = Math.max(0, start - 40);
+    const E = Math.min(text.length, start + len + 40);
+    return (text.slice(S, E).replace(/\s+/g, " ")).trim();
+  }
+
+  /* ---------- Search (fast client-side) ---------- */
+  function parseQuery(raw: string) {
+    const term = raw.trim();
+    const parts = term.split(/\s+/);
+    const tags: string[] = [];
+    let folder: string | null = null;
+    let isPinned: boolean | null = null;
+    const words: string[] = [];
+    parts.forEach(p => {
+      if (p.startsWith("#")) tags.push(p.slice(1).toLowerCase());
+      else if (p.startsWith("folder:")) folder = p.slice(7);
+      else if (p === "is:pinned") isPinned = true;
+      else words.push(p);
+    });
+    return { words, tags, folder, isPinned };
+  }
+
+  const { listFiltered, matchTerms } = useMemo(() => {
+    const parsed = parseQuery(q);
+    const wordsLC = parsed.words.map(w => w.toLowerCase());
+    const selectedTagsArray = Array.from(selectedTags.values()).map(t => t.toLowerCase());
+
+    const arr = notes.filter(n => {
+      if (folderFilter && (n.folder || "") !== folderFilter) return false;
+      if (parsed.folder && (n.folder || "") !== parsed.folder) return false;
+      if (parsed.isPinned === true && !n.pinned) return false;
+      // tags filter: must include all selected & typed tags (AND)
+      const noteTags = new Set(
+        [
+          ...(n.tags || []),
+          ...extractHashtags(n.title || ""),
+          ...extractHashtags(n.content || ""),
+        ].map(t => t.toLowerCase())
+      );
+      for (const t of [...selectedTagsArray, ...parsed.tags]) {
+        if (!noteTags.has(t)) return false;
+      }
+      if (!q.trim()) return true;
+      // word match
+      const hayTitle = (n.title || "").toLowerCase();
+      const hayContent = (n.content || "").toLowerCase();
+      return wordsLC.every(w => hayTitle.includes(w) || hayContent.includes(w));
+    });
+    const termsForHighlight = [...parsed.words, ...parsed.tags.map(t => `#${t}`)];
+    return { listFiltered: arr, matchTerms: termsForHighlight };
+  }, [notes, q, folderFilter, selectedTags]);
+
+  /* ---------- Quick capture ---------- */
+  async function quickCapture() {
+    const text = qcText.trim();
+    if (!text) return;
+    const first = firstLine(text);
+    const hashtags = extractHashtags(text);
+    const id = await createNote({
+      title: first === text ? "" : first,
+      content: text,
+      folder: qcFolder || null,
+      pinned: qcPinned,
+      tags: hashtags
+    });
+    if (id) {
+      setQcText("");
+      setQcPinned(false);
+      setQcFolder("Inbox");
+    }
+  }
+
+  /* ---------- Hashtag extraction ---------- */
+  function extractHashtags(s: string): string[] {
+    const tags = new Set<string>();
+    (s || "").replace(/(^|\s)#([a-zA-Z0-9_\-./]+)/g, (_m, _pre, tag) => { if (tag) tags.add(tag); return ""; });
+    return Array.from(tags);
+  }
+
+  /* ---------- UI ---------- */
   return (
     <div className="page-notes" style={{ display: "grid", gap: 12 }}>
       {/* Title + Alfred */}
@@ -285,15 +456,8 @@ export default function NotesScreen() {
           aria-label="Open Notes help"
           title="Need a hand? Ask Alfred"
           style={{
-            position: "absolute",
-            top: 8,
-            right: 8,
-            border: "none",
-            background: "transparent",
-            padding: 0,
-            cursor: "pointer",
-            lineHeight: 0,
-            zIndex: 10,
+            position: "absolute", top: 8, right: 8, border: "none",
+            background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10,
           }}
         >
           {imgOk ? (
@@ -306,75 +470,135 @@ export default function NotesScreen() {
           ) : (
             <span
               style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 36, height: 36, borderRadius: 999,
-                border: "1px solid #d1d5db",
-                background: "#f9fafb",
-                fontWeight: 700,
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db",
+                background: "#f9fafb", fontWeight: 700,
               }}
-            >
-              ?
-            </span>
+            >?</span>
           )}
         </button>
         <h1 style={{ margin: 0 }}>Notes</h1>
       </div>
 
       <div className="container">
-        <div className="notes-layout">
+        <div className="notes-layout" style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 12 }}>
           {/* Sidebar */}
           <aside className="card" style={{ display:"grid", gridTemplateRows:"auto auto auto auto 1fr auto", gap:10, minWidth:0 }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
-              <h2 style={{ margin:0 }}>{statusFilter === "archived" ? "Archived notes" : "All notes"}</h2>
-              <button className="btn-primary" onClick={createNote} style={{ borderRadius:8 }}>New</button>
+            {/* Quick capture */}
+            <div style={{ display:"grid", gap:6 }}>
+              <div className="section-title">Quick capture</div>
+              <textarea
+                rows={3}
+                placeholder="Jot it down… (hashtags like #idea work too)"
+                value={qcText}
+                onChange={(e)=>setQcText(e.target.value)}
+              />
+              <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap" }}>
+                <label style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
+                  <input type="checkbox" checked={qcPinned} onChange={e=>setQcPinned(e.target.checked)} />
+                  Pin
+                </label>
+                <label style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
+                  Folder
+                  <input value={qcFolder} onChange={e=>setQcFolder(e.target.value)} style={{ width:140 }} placeholder="Inbox" />
+                </label>
+                <button className="btn-primary" onClick={quickCapture} style={{ borderRadius:8 }}>Add</button>
+              </div>
             </div>
 
-            <input
-              type="text"
-              placeholder="Search notes…"
-              value={q}
-              onChange={e=>setQ(e.target.value)}
-            />
-
-            <div style={{ display:"flex", gap:8 }}>
-              <select value={folderFilter} onChange={e=>setFolderFilter(e.target.value)} style={{ flex:1 }}>
-                <option value="">All folders</option>
-                {folders.map(f => <option key={f} value={f}>{f}</option>)}
-              </select>
-              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as "active" | "archived")}>
-                <option value="active">Active</option>
-                <option value="archived">Archived</option>
-              </select>
-              <button onClick={loadNotes} disabled={loading}>{loading?"…": "↻"}</button>
+            {/* Search + filters */}
+            <div style={{ display:"grid", gap:8 }}>
+              <input
+                ref={searchRef}
+                type="text"
+                placeholder="Search…  (#tag, folder:Work, is:pinned)"
+                value={q}
+                onChange={e=>setQ(e.target.value)}
+              />
+              <div style={{ display:"flex", gap:8 }}>
+                <select value={folderFilter} onChange={e=>setFolderFilter(e.target.value)} style={{ flex:1 }}>
+                  <option value="">All folders</option>
+                  {folders.map(f => <option key={f} value={f}>{f}</option>)}
+                </select>
+                <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as "active" | "archived")}>
+                  <option value="active">Active</option>
+                  <option value="archived">Archived</option>
+                </select>
+                <button onClick={loadNotes} disabled={loading}>{loading?"…": "↻"}</button>
+              </div>
             </div>
 
-            <ul className="list" style={{ overflow:"auto", maxHeight:"60vh" }}>
-              {filtered.length === 0 && <li className="muted">No notes yet.</li>}
-              {filtered.map(n => (
-                <li key={n.id} className="item" style={{ alignItems:"center", gap:8 }}>
-                  <button
-                    onClick={()=>setActiveId(n.id)}
-                    style={{
-                      textAlign:"left", width:"100%",
-                      background: activeId===n.id ? "hsl(var(--pastel-hsl)/.35)" : "#fff",
-                      border:"none", padding:0
-                    }}
-                  >
-                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                      {n.pinned && <span className="badge">Pinned</span>}
-                      {n.archived && <span className="badge">Archived</span>}
-                      <div style={{ fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                        {n.title || firstLine(n.content)}
+            {/* Tag cloud filter */}
+            <div style={{ display:"grid", gap:6 }}>
+              <div className="section-title">Tags</div>
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                {tagCloud.length === 0 && <span className="muted">No tags yet.</span>}
+                {tagCloud.map(([t, c]) => {
+                  const on = selectedTags.has(t);
+                  return (
+                    <button
+                      key={t}
+                      className="btn-soft"
+                      onClick={() => {
+                        setSelectedTags(prev => {
+                          const nxt = new Set(prev);
+                          on ? nxt.delete(t) : nxt.add(t);
+                          return nxt;
+                        });
+                      }}
+                      title={`${c} note(s)`}
+                      style={{
+                        borderRadius: 999,
+                        background: on ? "#eef2ff" : "#fff",
+                        borderColor: on ? "#c7d2fe" : "var(--border)"
+                      }}
+                    >
+                      #{t} <span className="muted">({c})</span>
+                    </button>
+                  );
+                })}
+                {selectedTags.size > 0 && (
+                  <button className="btn-soft" onClick={() => setSelectedTags(new Set())}>Clear</button>
+                )}
+              </div>
+            </div>
+
+            {/* List */}
+            <ul className="list" style={{ overflow:"auto", maxHeight:"55vh" }}>
+              {listFiltered.length === 0 && <li className="muted">No notes match.</li>}
+              {listFiltered.map(n => {
+                const titleShow = n.title || firstLine(n.content);
+                const preview = (n.content || "").split(/\r?\n/).slice(1).join(" ").slice(0, 140);
+                return (
+                  <li key={n.id} className="item" style={{ alignItems:"center", gap:8 }}>
+                    <button
+                      onClick={()=>setActiveId(n.id)}
+                      style={{
+                        textAlign:"left", width:"100%", padding:0, border:"none",
+                        background: activeId===n.id ? "#f0f4ff" : "#fff"
+                      }}
+                      title={titleShow}
+                    >
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        {n.pinned && <span className="badge">Pinned</span>}
+                        {n.archived && <span className="badge">Archived</span>}
+                        <div
+                          style={{ fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}
+                          dangerouslySetInnerHTML={{ __html: highlight(titleShow, matchTerms) }}
+                        />
                       </div>
-                    </div>
-                    <div className="muted" style={{ marginTop:4, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                      {formatDate(n.updated_at)} · {(n.folder||"").toString()}
-                    </div>
-                  </button>
-                </li>
-              ))}
+                      <div
+                        className="muted"
+                        style={{ marginTop:4, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}
+                        dangerouslySetInnerHTML={{ __html: highlight(preview, matchTerms) }}
+                      />
+                      <div className="muted" style={{ fontSize:12, marginTop:4 }}>
+                        {formatDate(n.updated_at)} · {(n.folder||"").toString()}
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
 
             {err && <div style={{ color:"red" }}>{err}</div>}
@@ -404,23 +628,54 @@ export default function NotesScreen() {
                 </div>
 
                 <textarea
-                  rows={14}
-                  placeholder="Write your note…"
+                  rows={16}
+                  placeholder="Write your note… Use [[Wiki Links]] to connect notes. Inline #tags are automatically collected."
                   value={content}
                   onChange={e=>setContent(e.target.value)}
-                  style={{ width:"100%", minHeight:240 }}
+                  style={{ width:"100%", minHeight:260 }}
                 />
 
+                {/* Tag chips editor */}
                 <div style={{ display:"grid", gap:6 }}>
-                  <div className="section-title">Tags (comma separated)</div>
+                  <div className="section-title">Tags</div>
                   <input
                     type="text"
                     placeholder="meeting, idea, phone, follow-up"
                     value={tagsInput}
                     onChange={e=>setTagsInput(e.target.value)}
                   />
+                  <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                    {Array.from(new Set([
+                      ...stringToTags(tagsInput),
+                      ...extractHashtags(title),
+                      ...extractHashtags(content)
+                    ])).map(t => (
+                      <span key={t} className="badge">#{t}</span>
+                    ))}
+                    {(!tagsInput && extractHashtags(title+content).length===0) && <span className="muted">No tags yet.</span>}
+                  </div>
                 </div>
 
+                {/* Backlinks */}
+                <div style={{ borderTop:"1px solid var(--border)", paddingTop:10 }}>
+                  <div className="section-title">Backlinks</div>
+                  {backlinks.length === 0 ? (
+                    <div className="muted">No notes link here yet. Use [[{title || firstLine(content)}]] in another note.</div>
+                  ) : (
+                    <ul className="list">
+                      {backlinks.map(({ from, snippet }) => (
+                        <li key={from.id} className="item" style={{ alignItems:"center" }}>
+                          <button onClick={()=>setActiveId(from.id)} style={{ textAlign:"left", width:"100%", border:"none", padding:0, background:"#fff" }}>
+                            <div style={{ fontWeight:600 }}>{from.title || firstLine(from.content)}</div>
+                            <div className="muted" style={{ fontSize:12, marginTop:2 }}>{snippet}</div>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {/* Actions */}
                 <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
                   <button onClick={()=>togglePin(activeNote)} className="btn-soft">{pinned ? "Unpin" : "Pin"}</button>
 
