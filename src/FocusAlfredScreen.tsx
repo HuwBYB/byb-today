@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, useMemo } from "react";
+import { supabase } from "./lib/supabaseClient";
 
 /* ---------- Public path helper ---------- */
 function publicPath(p: string) {
@@ -14,9 +15,22 @@ const FOCUS_ALFRED_SRC = publicPath("/alfred/imer_Alfred.png");
 
 /* ---------- Tiny helpers ---------- */
 function mmss(sec: number) {
-  const m = Math.floor(sec / 60);
-  const s = Math.max(0, sec % 60);
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  const s = Math.max(0, sec);
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+}
+function todayStartISO() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+function startOfWeekMondayISO() {
+  const d = new Date();
+  const day = (d.getDay() + 6) % 7; // Monday=0
+  d.setDate(d.getDate() - day);
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
 }
 
 /* ---------- Presets ---------- */
@@ -35,10 +49,7 @@ const PRESETS: Preset[] = [
   { key: "swift",    label: "20 / 5 (x4 → 15)", focusMin: 20, shortMin: 5, longMin: 15, cyclesBeforeLong: 4 },
   { key: "deep",     label: "50 / 10 (x2 → 20)", focusMin: 50, shortMin: 10, longMin: 20, cyclesBeforeLong: 2 },
 ];
-
-function presetByKey(k: PresetKey): Preset {
-  return PRESETS.find(p => p.key === k)!;
-}
+function presetByKey(k: PresetKey): Preset { return PRESETS.find(p => p.key === k)!; }
 
 /* ---------- Modal ---------- */
 function Modal({
@@ -71,25 +82,17 @@ function FocusHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
       <p><em>Short, focused bursts with deliberate breaks — perfect for deep work and avoiding burnout.</em></p>
-
       <h4 style={{ margin: 0 }}>How this timer works</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
         <li><b>Focus</b> for the set minutes (don’t switch tasks).</li>
         <li>Take a <b>Short break</b> after each focus cycle.</li>
         <li>After several cycles, enjoy a <b>Long break</b>.</li>
-        <li>Use presets: <b>25/5</b> classic Pomodoro, <b>20/5</b> swift bursts, or <b>50/10</b> deep focus.</li>
+        <li>Use presets: <b>25/5</b> classic Pomodoro, <b>20/5</b> swift, or <b>50/10</b> deep focus.</li>
       </ul>
-
-      <h4 style={{ margin: 0 }}>Suggested uses</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Admin bursts, writing sprints, code spikes, study blocks.</li>
-        <li>Pair with your <b>Today</b> page: pick 1–3 tasks, then start.</li>
-      </ul>
-
       <h4 style={{ margin: 0 }}>Tips</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>When distracted, jot the thought on a scratch note — get back to the task.</li>
-        <li>Breaks are for moving, water, or a quick reset — not for doomscrolling.</li>
+        <li>Type a task to anchor your session, then Start.</li>
+        <li>Breaks are for movement/water — not doomscrolling.</li>
       </ul>
     </div>
   );
@@ -98,15 +101,17 @@ function FocusHelpContent() {
 /* ---------- Persisted state ---------- */
 type Phase = "focus" | "short" | "long";
 type SavedState = {
-  v: 1;
+  v: 2;
   presetKey: PresetKey;
   phase: Phase;
   running: boolean;
   cycle: number;
   targetAt: number | null; // epoch ms when current phase ends (if running)
   remaining: number;        // seconds remaining when last saved (used if paused)
+  autoStartNext: boolean;
+  taskTitle: string;
 };
-const LS_KEY = "byb:focus_timer_state:v1";
+const LS_KEY = "byb:focus_timer_state:v2";
 
 /* ---- utils: sound + notifications ---- */
 function playBeep(times = 2) {
@@ -140,80 +145,141 @@ function sendNotification(title: string, body: string) {
   if (!("Notification" in window)) return;
   if (Notification.permission !== "granted") return;
   try {
-    new Notification(title, {
-      body,
-      icon: FOCUS_ALFRED_SRC,
-      badge: FOCUS_ALFRED_SRC,
-    });
+    new Notification(title, { body, icon: FOCUS_ALFRED_SRC, badge: FOCUS_ALFRED_SRC });
   } catch {}
 }
 
+/* ---------- Confetti (light) ---------- */
+function ConfettiBurst({ show }:{ show:boolean }) {
+  if (!show) return null;
+  const pieces = Array.from({ length: 16 });
+  return (
+    <div aria-hidden
+      style={{ position:"fixed", inset:0, pointerEvents:"none", overflow:"hidden", zIndex:3000 }}>
+      {pieces.map((_, i) => (
+        <span key={i}
+          style={{
+            position:"absolute",
+            left: `${(i / pieces.length) * 100}%`,
+            top: -10,
+            width:6, height:10, borderRadius:1,
+            background:"hsl(var(--pastel-hsl))",
+            animation: `fall ${600 + i*20}ms ease-out forwards`,
+          }}/>
+      ))}
+      <style>{`@keyframes fall{ to { transform: translateY(100vh) rotate(260deg); opacity:.2; } }`}</style>
+    </div>
+  );
+}
+
+/* ---------- Summary component ---------- */
+function FocusSummary({ userId }:{ userId: string | null }) {
+  const [todayMin, setTodayMin] = useState(0);
+  const [weekMin, setWeekMin] = useState(0);
+
+  useEffect(() => {
+    if (!userId) return;
+    const load = async () => {
+      const sinceWeek = startOfWeekMondayISO();
+      const { data, error } = await supabase
+        .from("focus_sessions")
+        .select("minutes, started_at")
+        .eq("user_id", userId)
+        .gte("started_at", sinceWeek)
+        .order("started_at", { ascending: false });
+      if (error || !data) { setTodayMin(0); setWeekMin(0); return; }
+      const week = data.reduce((a, x) => a + (x.minutes || 0), 0);
+      const today = data.filter(x => new Date(x.started_at) >= new Date(todayStartISO()))
+                        .reduce((a, x) => a + (x.minutes || 0), 0);
+      setWeekMin(week); setTodayMin(today);
+    };
+    load();
+  }, [userId]);
+
+  return (
+    <div className="card" style={{ display:"flex", gap:16, alignItems:"center", flexWrap:"wrap" }}>
+      <div><strong>Today</strong>: {todayMin} min</div>
+      <div><strong>This week</strong>: {weekMin} min</div>
+    </div>
+  );
+}
+
 /* ---------- Page ---------- */
-export default function FocusAlfredScreen() {
+export default function FocusScreen() {
   const [presetKey, setPresetKey] = useState<PresetKey>("pomodoro");
   const [phase, setPhase] = useState<Phase>("focus");
   const [remaining, setRemaining] = useState(() => presetByKey("pomodoro").focusMin * 60);
   const [running, setRunning] = useState(false);
   const [cycle, setCycle] = useState(0); // completed focus blocks in the current set
+  const [autoStartNext, setAutoStartNext] = useState(true);
+  const [currentTaskTitle, setCurrentTaskTitle] = useState("");
 
   // deadline for current phase (epoch ms). Used to keep time while backgrounded.
   const [targetAt, setTargetAt] = useState<number | null>(null);
 
-  // Help button
+  // Help & image
   const [showHelp, setShowHelp] = useState(false);
   const [imgOk, setImgOk] = useState(true);
 
-  const currentPreset = presetByKey(presetKey);
+  const currentPreset = useMemo(() => presetByKey(presetKey), [presetKey]);
 
   // timers/handles
   const tickRef = useRef<number | null>(null);
   const notifTimeoutRef = useRef<number | null>(null);
 
+  // wake lock & interruptions
+  const wakeRef = useRef<any>(null);
+  const interruptionsRef = useRef(0);
+
+  // auth (for logging sessions)
+  const [userId, setUserId] = useState<string | null>(null);
+  useEffect(() => { supabase.auth.getUser().then(({data}) => setUserId(data.user?.id ?? null)); }, []);
+
   /* ====== persistence ====== */
   function saveState(toSave?: Partial<SavedState>) {
     const snapshot: SavedState = {
-      v: 1,
+      v: 2,
       presetKey,
       phase,
       running,
       cycle,
       targetAt,
       remaining,
+      autoStartNext,
+      taskTitle: currentTaskTitle,
       ...toSave,
     } as SavedState;
-    localStorage.setItem(LS_KEY, JSON.stringify(snapshot));
+    try { localStorage.setItem(LS_KEY, JSON.stringify(snapshot)); } catch {}
   }
-
   function durationFor(ph: Phase, p: Preset) {
     return (ph === "focus" ? p.focusMin : ph === "short" ? p.shortMin : p.longMin) * 60;
   }
 
-  // On mount: restore state if any, and catch up if we passed deadlines
+  // Restore on mount and catch up across missed boundaries
   useEffect(() => {
     try {
       const raw = localStorage.getItem(LS_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw) as SavedState;
-      if (!parsed || parsed.v !== 1) return;
+      if (!parsed || parsed.v !== 2) return;
 
       setPresetKey(parsed.presetKey);
       setPhase(parsed.phase);
       setCycle(parsed.cycle);
       setRunning(parsed.running);
+      setAutoStartNext(parsed.autoStartNext ?? true);
+      setCurrentTaskTitle(parsed.taskTitle || "");
 
       const now = Date.now();
       if (parsed.running && parsed.targetAt) {
-        // Catch up across missed boundaries
         let ph = parsed.phase;
         let cyc = parsed.cycle;
         let tgt = parsed.targetAt;
 
-        // Safety guard: don't loop forever
         let guard = 0;
         while (tgt <= now && guard < 20) {
-          // the phase ended in the past — advance
-          ({ nextPhase: ph, nextCycle: cyc, nextTargetAt: tgt } = computeNextPhase(ph, cyc, presetByKey(parsed.presetKey), tgt));
-          guard++;
+          const next = computeNextPhase(ph, cyc, presetByKey(parsed.presetKey), tgt);
+          ph = next.nextPhase; cyc = next.nextCycle; tgt = next.nextTargetAt; guard++;
         }
 
         setPhase(ph);
@@ -221,10 +287,9 @@ export default function FocusAlfredScreen() {
         setTargetAt(tgt);
         const rem = Math.max(0, Math.ceil((tgt - now) / 1000));
         setRemaining(rem);
-        // schedule notification for upcoming boundary
         scheduleBoundaryNotification(tgt, ph);
+        setRunning(true);
       } else {
-        // paused state
         setTargetAt(null);
         setRemaining(Math.max(0, parsed.remaining || durationFor(parsed.phase, presetByKey(parsed.presetKey))));
       }
@@ -232,10 +297,34 @@ export default function FocusAlfredScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Persist on key changes
-  useEffect(() => { saveState(); }, [presetKey, phase, running, cycle, targetAt, remaining]);
+  // Persist on changes
+  useEffect(() => { saveState(); }, [presetKey, phase, running, cycle, targetAt, remaining, autoStartNext, currentTaskTitle]);
 
-  /* ====== main tick (deadline-based) ====== */
+  /* ====== wake lock ====== */
+  async function requestWakeLock() {
+    try {
+      // @ts-ignore
+      if ('wakeLock' in navigator && (navigator as any).wakeLock?.request) {
+        // @ts-ignore
+        wakeRef.current = await (navigator as any).wakeLock.request('screen');
+      }
+    } catch {}
+  }
+  function releaseWakeLock() { try { wakeRef.current?.release?.(); wakeRef.current = null; } catch {} }
+  useEffect(() => { if (!running) releaseWakeLock(); }, [running]);
+
+  /* ====== visibility interruptions ====== */
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'hidden' && phase === 'focus' && running) {
+        interruptionsRef.current += 1;
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [phase, running]);
+
+  /* ====== main tick ====== */
   useEffect(() => {
     if (!running || !targetAt) {
       if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
@@ -245,23 +334,20 @@ export default function FocusAlfredScreen() {
       const now = Date.now();
       const rem = Math.max(0, Math.ceil((targetAt - now) / 1000));
       setRemaining(rem);
-      if (rem <= 0) {
-        onPhaseEnd(); // handles advancing + new target
-      }
+      if (rem <= 0) onPhaseEnd();
     }, 1000) as unknown as number;
     return () => { if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; } };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running, targetAt]);
 
-  // Update document title while running
+  // Update title while running
   useEffect(() => {
     const label = phase === "focus" ? "Focus" : phase === "short" ? "Short break" : "Long break";
     document.title = running ? `${mmss(remaining)} • ${label}` : "Focus Timer";
   }, [running, remaining, phase]);
 
-  // When preset changes, reset cleanly (but keep persistence)
+  // Reset when preset changes
   useEffect(() => {
-    // Reset to start of a focus block
     setRunning(false);
     setPhase("focus");
     setCycle(0);
@@ -270,19 +356,15 @@ export default function FocusAlfredScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetKey]);
 
-  /* ====== notifications scheduling ====== */
+  /* ====== boundary notifications ====== */
   function clearBoundaryNotification() {
-    if (notifTimeoutRef.current) {
-      clearTimeout(notifTimeoutRef.current);
-      notifTimeoutRef.current = null;
-    }
+    if (notifTimeoutRef.current) { clearTimeout(notifTimeoutRef.current); notifTimeoutRef.current = null; }
   }
-  function scheduleBoundaryNotification(tgt: number, nextPhaseBaseOn?: Phase) {
+  function scheduleBoundaryNotification(tgt: number, phaseForLabel?: Phase) {
     clearBoundaryNotification();
     const ms = Math.max(0, tgt - Date.now());
     notifTimeoutRef.current = window.setTimeout(() => {
-      // if in background or not focused, also notify
-      const label = nextPhaseBaseOn || phase;
+      const label = phaseForLabel || phase;
       const next = label === "focus" ? "Break time!" : "Back to focus!";
       sendNotification(next, label === "focus" ? "Focus block complete" : "Break finished");
       playBeep(2);
@@ -299,45 +381,72 @@ export default function FocusAlfredScreen() {
       const nextTargetAt = endedAtMs + dur * 1000;
       return { nextPhase, nextCycle: useLong ? 0 : nextCycle, nextTargetAt };
     }
-    // from short/long -> focus
     const nextPhase: Phase = "focus";
     const dur = p.focusMin * 60;
     const nextTargetAt = endedAtMs + dur * 1000;
     return { nextPhase, nextCycle: cyc, nextTargetAt };
   }
 
-  function onPhaseEnd() {
-    // Alarm for the phase that just ended
+  const [celebrate, setCelebrate] = useState(false);
+
+  async function onPhaseEnd() {
     const justEnded = phase;
+
+    // Notify if not on page
     if (document.visibilityState !== "visible") {
-      // try to notify if user granted permission
       sendNotification(justEnded === "focus" ? "Break time!" : "Back to focus!", justEnded === "focus" ? "Focus block complete" : "Break finished");
     }
     playBeep(2);
+
+    // Log focus session
+    if (justEnded === "focus" && userId) {
+      try {
+        await supabase.from("focus_sessions").insert({
+          user_id: userId,
+          started_at: new Date(Date.now() - currentPreset.focusMin * 60 * 1000).toISOString(),
+          ended_at: new Date().toISOString(),
+          phase: "focus",
+          preset: presetKey,
+          minutes: currentPreset.focusMin,
+          interruptions: interruptionsRef.current,
+          task_title: currentTaskTitle || null,
+        });
+      } catch {}
+      interruptionsRef.current = 0;
+      setCelebrate(true);
+      if ((navigator as any).vibrate) (navigator as any).vibrate(8);
+      setTimeout(() => setCelebrate(false), 900);
+    }
 
     const now = Date.now();
     const { nextPhase, nextCycle, nextTargetAt } = computeNextPhase(justEnded, cycle, currentPreset, now);
 
     setPhase(nextPhase);
     setCycle(nextCycle);
-    setTargetAt(nextTargetAt);
-    setRunning(true);
-    setRemaining(Math.max(0, Math.ceil((nextTargetAt - now) / 1000)));
-    scheduleBoundaryNotification(nextTargetAt, nextPhase);
+
+    if (autoStartNext) {
+      setTargetAt(nextTargetAt);
+      setRunning(true);
+      setRemaining(Math.max(0, Math.ceil((nextTargetAt - now) / 1000)));
+      scheduleBoundaryNotification(nextTargetAt, nextPhase);
+    } else {
+      setTargetAt(null);
+      setRunning(false);
+      setRemaining(durationFor(nextPhase, currentPreset));
+      clearBoundaryNotification();
+    }
   }
 
   /* ====== controls ====== */
   async function start() {
-    if (!(await ensureNotifPermission())) {
-      // non-blocking: user can still run without notifications
-    }
+    await ensureNotifPermission().catch(()=>{});
+    await requestWakeLock();
     const base = remaining > 0 ? remaining : durationFor(phase, currentPreset);
     const tgt = Date.now() + base * 1000;
     setTargetAt(tgt);
     setRunning(true);
     scheduleBoundaryNotification(tgt, phase);
   }
-
   function pause() {
     if (running && targetAt) {
       const rem = Math.max(0, Math.ceil((targetAt - Date.now()) / 1000));
@@ -346,8 +455,8 @@ export default function FocusAlfredScreen() {
     setRunning(false);
     setTargetAt(null);
     clearBoundaryNotification();
+    releaseWakeLock();
   }
-
   function resetAll() {
     setRunning(false);
     setPhase("focus");
@@ -355,8 +464,8 @@ export default function FocusAlfredScreen() {
     setTargetAt(null);
     setRemaining(currentPreset.focusMin * 60);
     clearBoundaryNotification();
+    releaseWakeLock();
   }
-
   function progressPct(ph: Phase, rem: number, p: Preset) {
     const total = (ph === "focus" ? p.focusMin : ph === "short" ? p.shortMin : p.longMin) * 60;
     if (total <= 0) return 0;
@@ -364,8 +473,34 @@ export default function FocusAlfredScreen() {
     return Math.round(done * 100);
   }
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e as any).isComposing) return;
+      if (e.key === ' ') { e.preventDefault(); running ? pause() : start(); }
+      if (e.key.toLowerCase() === 'r') { e.preventDefault(); resetAll(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [running, phase, remaining, targetAt]);
+
+  // Optional mini PiP
+  async function openMiniTimer() {
+    // @ts-ignore
+    const dip = (window as any).documentPictureInPicture;
+    if (!dip?.requestWindow) return;
+    const pip = await dip.requestWindow({ width: 220, height: 120 });
+    const el = pip.document.createElement('div');
+    el.style.cssText = 'font: 700 28px system-ui; display:grid; place-items:center; height:100%;';
+    pip.document.body.style.margin = "0";
+    pip.document.body.appendChild(el);
+    const i = setInterval(() => { el.textContent = mmss(remaining); }, 250);
+    pip.addEventListener('pagehide', () => clearInterval(i));
+  }
+
   return (
-    <div className="page-focus-alfred">
+    <div className="page-focus">
       <div className="container" style={{ display: "grid", gap: 12 }}>
         {/* Title + Alfred button */}
         <div className="card" style={{ position: "relative" }}>
@@ -373,10 +508,7 @@ export default function FocusAlfredScreen() {
             onClick={() => setShowHelp(true)}
             aria-label="Open Focus help"
             title="Need a hand? Ask Alfred"
-            style={{
-              position: "absolute", top: 8, right: 8,
-              border: "none", background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10,
-            }}
+            style={{ position: "absolute", top: 8, right: 8, border: "none", background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10 }}
           >
             {imgOk ? (
               <img
@@ -389,8 +521,7 @@ export default function FocusAlfredScreen() {
               <span
                 style={{
                   display: "inline-flex", alignItems: "center", justifyContent: "center",
-                  width: 36, height: 36, borderRadius: 999,
-                  border: "1px solid #d1d5db", background: "#f9fafb", fontWeight: 700,
+                  width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db", background: "#f9fafb", fontWeight: 700,
                 }}
               >?</span>
             )}
@@ -400,7 +531,7 @@ export default function FocusAlfredScreen() {
           <div className="muted">Deep work intervals with smart breaks.</div>
         </div>
 
-        {/* Controls row (separate box under title) */}
+        {/* Controls row */}
         <div className="card" style={{ display: "grid", gap: 10 }}>
           {/* Preset & status */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -410,12 +541,28 @@ export default function FocusAlfredScreen() {
                 {PRESETS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
               </select>
             </label>
-            <span className="badge" title="Completed focus cycles in this set">
-              Cycles: {cycle}/{currentPreset.cyclesBeforeLong}
-            </span>
+
+            <label style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
+              <input type="checkbox" checked={autoStartNext} onChange={e => setAutoStartNext(e.target.checked)} />
+              Auto-start next phase
+            </label>
+
+            <span className="badge" title="Completed focus cycles in this set">Cycles: {cycle}/{currentPreset.cyclesBeforeLong}</span>
             <span className="badge" style={{ background: "#eef2ff", border: "1px solid var(--border)" }}>
               {phase === "focus" ? "Focus" : phase === "short" ? "Short break" : "Long break"}
             </span>
+
+            <div style={{ flex: 1 }} />
+
+            <label style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <span className="muted">Task</span>
+              <input
+                value={currentTaskTitle}
+                onChange={e=>setCurrentTaskTitle(e.target.value)}
+                placeholder="Optional: what are you focusing on?"
+                style={{ minWidth: 220 }}
+              />
+            </label>
           </div>
 
           {/* Timer + actions */}
@@ -430,6 +577,13 @@ export default function FocusAlfredScreen() {
                 <button onClick={pause}>Pause</button>
               )}
               <button onClick={resetAll}>Reset</button>
+              {phase !== "focus" && <button onClick={() => onPhaseEnd()}>Skip break</button>}
+              <button onClick={() => {
+                const extra = 5 * 60;
+                if (running && targetAt) setTargetAt(targetAt + extra * 1000);
+                setRemaining(r => r + extra);
+              }}>+5 min</button>
+              <button onClick={openMiniTimer} title="Floating mini-timer (Chrome)">Mini</button>
             </div>
             <div style={{ flex: 1, minWidth: 180 }}>
               <div style={{ height: 10, borderRadius: 999, border: "1px solid var(--border)", background: "#f8fafc", overflow: "hidden" }}>
@@ -446,13 +600,16 @@ export default function FocusAlfredScreen() {
           </div>
         </div>
 
-        {/* Simple guidance card */}
+        {/* Summary */}
+        <FocusSummary userId={userId} />
+
+        {/* Guidance */}
         <div className="card" style={{ display: "grid", gap: 8 }}>
           <div className="section-title">How to use</div>
           <ul className="list" style={{ margin: 0 }}>
             <li>Pick a preset that matches your energy.</li>
             <li>Choose one task — close other tabs — hit Start.</li>
-            <li>Breaks are for movement or water. After a few cycles, take the longer break.</li>
+            <li>Breaks are for movement or water. After a few cycles, enjoy the longer break.</li>
           </ul>
         </div>
 
@@ -466,6 +623,8 @@ export default function FocusAlfredScreen() {
           </div>
         </Modal>
       </div>
+
+      <ConfettiBurst show={celebrate} />
     </div>
   );
 }
