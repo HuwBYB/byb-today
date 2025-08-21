@@ -230,7 +230,7 @@ export default function AlfredScreen() {
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
-      setBusy(false));
+      setBusy(false);
     }
   }
 
