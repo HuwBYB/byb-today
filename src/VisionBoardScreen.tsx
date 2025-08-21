@@ -23,24 +23,25 @@ const VB_ALFRED_CANDIDATES = [
 /** Storage bucket name */
 const VISION_BUCKET = "vision";
 
-/** Local captions fallback */
-function localCapsKey(userId: string) {
-  return `vb_caps_${userId}`;
+/* ---------- Life areas (match Goals) ---------- */
+const AREAS = [
+  { key: "personal",  label: "Personal",  color: "#a855f7" },
+  { key: "health",    label: "Health",    color: "#22c55e" },
+  { key: "career",    label: "Business",  color: "#3b82f6" }, // stored as 'career'
+  { key: "financial", label: "Finance",   color: "#f59e0b" }, // stored as 'financial'
+  { key: "other",     label: "Other",     color: "#6b7280" },
+] as const;
+type AreaKey = typeof AREAS[number]["key"];
+const colorOf = (k: AreaKey) => AREAS.find(a => a.key === k)?.color || "#6b7280";
+
+/** Local captions/area/order fallback */
+function localKey(userId: string) { return `vb_meta_${userId}`; }
+type LocalMeta = Record<string, { caption?: string; area?: AreaKey; order_index?: number }>;
+function readLocal(userId: string): LocalMeta {
+  try { return JSON.parse(localStorage.getItem(localKey(userId)) || "{}"); } catch { return {}; }
 }
-function readLocalCaps(userId: string): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(localCapsKey(userId));
-    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
-  } catch {
-    return {};
-  }
-}
-function writeLocalCaps(userId: string, caps: Record<string, string>) {
-  try {
-    localStorage.setItem(localCapsKey(userId), JSON.stringify(caps));
-  } catch {
-    /* ignore */
-  }
+function writeLocal(userId: string, meta: LocalMeta) {
+  try { localStorage.setItem(localKey(userId), JSON.stringify(meta)); } catch { /* ignore */ }
 }
 
 /** Types */
@@ -48,10 +49,20 @@ type VBImage = {
   path: string;       // storage path
   url: string;        // public URL
   caption: string;    // optional text
+  area: AreaKey;      // life area
+  order_index: number;// persistent order
   created_at?: string;
 };
 
-/* ---------- Modal shell ---------- */
+type SupaMetaRow = {
+  user_id: string;
+  path: string;
+  caption?: string | null;
+  area?: AreaKey | null;
+  order_index?: number | null;
+};
+
+/* ---------- Modal ---------- */
 function Modal({
   open, onClose, title, children,
 }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
@@ -80,37 +91,27 @@ function Modal({
   );
 }
 
-/* ---------- Refreshed, positive help content ---------- */
+/* ---------- Positive help content ---------- */
 function VisionHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.6 }}>
       <h4 style={{ margin: 0 }}>Why a Vision Board?</h4>
-      <p>
-        Pictures make goals feel real. When you see what you want every day and pair it with
-        small, consistent actions, you stay focused and build momentum.
-      </p>
+      <p>Pictures make goals feel real. See them daily, pair with tiny actions, and momentum compounds.</p>
 
       <h4 style={{ margin: 0 }}>How to use it</h4>
       <ol style={{ paddingLeft: 18, margin: 0 }}>
         <li>Upload images that represent what you’re moving toward.</li>
-        <li>Add a short line beneath each image that makes it personal and specific.</li>
-        <li>Use the arrows or <strong>Play 30s</strong> to cycle through your board daily.</li>
-        <li>Take 10–20 seconds per image to imagine the scene as if it’s already part of your life.</li>
-        <li>Ask, “What’s one small step I can take today toward this?” Then do that step.</li>
+        <li>Add a short affirmation under each image.</li>
+        <li>Play your board daily (slideshow).</li>
+        <li>Ask: “What’s one small step toward this today?” Then do it.</li>
       </ol>
 
       <h4 style={{ margin: 0 }}>Alfred’s tips</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Specific beats vague: “Run 5k on Saturdays” beats “Get fitter”.</li>
-        <li>Keep it visible—open the Vision Board when you start your day.</li>
-        <li>Tiny actions compound. Consistency &gt; intensity.</li>
+        <li>Specific beats vague (“Run 5k on Saturdays” &gt; “Get fitter”).</li>
+        <li>Make it visible—open this page when you start your day.</li>
+        <li>Consistency &gt; intensity.</li>
       </ul>
-
-      <h4 style={{ margin: 0 }}>Make it a habit</h4>
-      <p>
-        A few focused minutes each day is enough. Let the images spark motivation—and let your
-        daily actions create results.
-      </p>
     </div>
   );
 }
@@ -127,6 +128,10 @@ export default function VisionBoardScreen() {
   const [images, setImages] = useState<VBImage[]>([]);
   const [selected, setSelected] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState<10000 | 30000 | 60000>(30000);
+  const [shuffle, setShuffle] = useState(false);
+  const [filterArea, setFilterArea] = useState<AreaKey | "all">("all");
+
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -137,9 +142,7 @@ export default function VisionBoardScreen() {
 
   const fileRef = useRef<HTMLInputElement>(null);
   const canAddMore = images.length < 6;
-  const current = images[selected] || null;
 
-  /* ----- local CSS: perfect icon centering + contain viewer ----- */
   const styleTag = (
     <style>{`
       .vb-viewer-img { object-fit: contain !important; }
@@ -153,6 +156,11 @@ export default function VisionBoardScreen() {
       .vb-circle-btn svg { display: block; width: 18px; height: 18px; }
       .vb-circle-btn--sm svg { width: 14px; height: 14px; }
       .vb-circle-btn:hover { background: #f8fafc; }
+      .vb-thumb { transition: transform .08s ease; }
+      .vb-thumb[aria-grabbed="true"] { transform: scale(1.02); box-shadow: 0 6px 16px rgba(0,0,0,.15); }
+      .vb-dropover { outline: 2px dashed #cbd5e1; outline-offset: -2px; }
+      .vb-chip { border:1px solid var(--border); border-radius:999px; padding:2px 10px; background:#fff; cursor:pointer; }
+      .vb-chip--on { background:#111827; color:#fff; border-color:#111827; }
     `}</style>
   );
 
@@ -213,29 +221,38 @@ export default function VisionBoardScreen() {
         if (error) throw error;
 
         const files = (data || []).filter((f: any) => !("id" in f && (f as any).id === null));
-        const rows: VBImage[] = files.map((f: any) => {
-          const path = usePrefix === "user" ? `${uid}/${f.name}` : f.name;
-          const { data: pub } = supabase.storage.from(VISION_BUCKET).getPublicUrl(path);
-          return { path, url: pub.publicUrl, caption: "", created_at: (f as any)?.created_at };
-        });
 
-        // Try to merge captions from DB (if table exists)
+        // Pull metadata if table exists
+        let meta: SupaMetaRow[] = [];
         try {
           const { data: caps, error: capErr } = await supabase
             .from("vision_images")
-            .select("path, caption")
+            .select("path, caption, area, order_index")
             .eq("user_id", uid);
-          if (!capErr && caps && Array.isArray(caps)) {
-            const map = new Map<string, string>(caps.map((c: any) => [c.path, c.caption || ""]));
-            rows.forEach(r => { r.caption = map.get(r.path) || ""; });
-          }
+          if (!capErr && Array.isArray(caps)) meta = caps as SupaMetaRow[];
         } catch { /* table may not exist; ignore */ }
 
-        // Merge localStorage fallback (fills any blanks)
-        const local = readLocalCaps(uid);
-        rows.forEach(r => {
-          if (!r.caption && local[r.path]) r.caption = local[r.path];
+        const metaMap = new Map<string, SupaMetaRow>(meta.map(m => [m.path, m]));
+
+        // Merge local fallback
+        const local = readLocal(uid);
+
+        // Build VBImage rows
+        const rows = files.map((f: any, idx: number) => {
+          const path = usePrefix === "user" ? `${uid}/${f.name}` : f.name;
+          const { data: pub } = supabase.storage.from(VISION_BUCKET).getPublicUrl(path);
+          const m = metaMap.get(path);
+          const l = local[path] || {};
+          const caption = (m?.caption ?? l.caption ?? "") || "";
+          const area = (m?.area ?? l.area ?? "other") as AreaKey;
+          // default order: DB > local > created order
+          const order_index = (typeof m?.order_index === "number" ? m!.order_index! :
+                              typeof l.order_index === "number" ? l.order_index! : idx);
+          return { path, url: pub.publicUrl, caption, area, order_index, created_at: (f as any)?.created_at } as VBImage;
         });
+
+        // sort by order_index
+        rows.sort((a,b) => (a.order_index ?? 0) - (b.order_index ?? 0));
 
         setImages(rows.slice(0, 6));
         setSelected(0);
@@ -250,16 +267,42 @@ export default function VisionBoardScreen() {
     detectAndLoad();
   }, [userId]);
 
-  /* ----- slideshow every 30s ----- */
+  /* ----- slideshow ----- */
   useEffect(() => {
     if (!playing || images.length === 0) return;
-    const id = setInterval(() => setSelected(i => (i + 1) % images.length), 30000);
+    const id = setInterval(() => {
+      setSelected(i => {
+        const next = (i + 1) % images.length;
+        return next;
+      });
+    }, speed);
     return () => clearInterval(id);
-  }, [playing, images.length]);
+  }, [playing, speed, images.length]);
+
+  // keyboard nav
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft") prev();
+      if (e.key === "ArrowRight") next();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   /* ----- actions ----- */
-  function prev() { if (images.length) setSelected(i => (i - 1 + images.length) % images.length); }
-  function next() { if (images.length) setSelected(i => (i + 1) % images.length); }
+  const filtered = useMemo(() => {
+    return filterArea === "all" ? images : images.filter(i => i.area === filterArea);
+  }, [images, filterArea]);
+
+  const current = filtered[selected] || null;
+  const canAdd = images.length < 6;
+
+  function prev() {
+    if (filtered.length) setSelected(i => (i - 1 + filtered.length) % filtered.length);
+  }
+  function next() {
+    if (filtered.length) setSelected(i => (i + 1) % filtered.length);
+  }
 
   async function handleUpload(files: FileList | null) {
     if (!userId || !files || files.length === 0) return;
@@ -270,7 +313,8 @@ export default function VisionBoardScreen() {
       const toUpload = Array.from(files).slice(0, remaining);
       const newOnes: VBImage[] = [];
 
-      for (const file of toUpload) {
+      for (let j = 0; j < toUpload.length; j++) {
+        const file = toUpload[j];
         const safeName = `${Date.now()}-${file.name.replace(/\s+/g, "_")}`;
         const path = (prefix === "user" ? `${uid}/` : "") + safeName;
 
@@ -278,19 +322,24 @@ export default function VisionBoardScreen() {
         if (uerr) throw uerr;
 
         const { data: pub } = supabase.storage.from(VISION_BUCKET).getPublicUrl(path);
-        newOnes.push({ path, url: pub.publicUrl, caption: "" });
+        const order_index = images.length + newOnes.length; // append
 
-        // best-effort: create empty caption row
+        newOnes.push({ path, url: pub.publicUrl, caption: "", area: "other", order_index });
+
+        // best-effort: create empty meta row
         try {
-          await supabase.from("vision_images").insert({ user_id: uid, path, caption: "" });
-        } catch {
-          // table or policy may not exist; ignore (local fallback still works)
-        }
+          await supabase.from("vision_images").upsert(
+            { user_id: uid, path, caption: "", area: "other", order_index } as SupaMetaRow,
+            { onConflict: "user_id,path" } as any
+          );
+        } catch { /* ignore */ }
       }
 
       const updated = [...images, ...newOnes].slice(0, 6);
+      updated.sort((a,b)=>a.order_index-b.order_index);
       setImages(updated);
-      if (images.length === 0 && updated.length > 0) setSelected(0);
+      setFilterArea("all");
+      setSelected(0);
       if (fileRef.current) fileRef.current.value = "";
     } catch (e: any) {
       setErr(e.message || String(e));
@@ -299,56 +348,96 @@ export default function VisionBoardScreen() {
     }
   }
 
-  async function saveCaption(idx: number, caption: string) {
-    const img = images[idx]; if (!img || !userId) return;
+  async function persistMeta(path: string, patch: Partial<VBImage>) {
+    if (!userId) return;
     const uid = userId as string;
-
-    // Update UI immediately
-    setImages(prev => {
-      const next = prev.slice();
-      next[idx] = { ...prev[idx], caption };
-      return next;
-    });
-
-    // Save to local fallback
-    const local = readLocalCaps(uid);
-    local[img.path] = caption;
-    writeLocalCaps(uid, local);
-
-    // Try to upsert to Supabase (cross-device persistence)
+    // local fallback
+    const local = readLocal(uid);
+    const prev = local[path] || {};
+    local[path] = { ...prev };
+    if (patch.caption !== undefined) local[path].caption = patch.caption;
+    if (patch.area !== undefined) local[path].area = patch.area;
+    if (patch.order_index !== undefined) local[path].order_index = patch.order_index;
+    writeLocal(uid, local);
+    // supabase best-effort
     try {
-      const { error } = await supabase
-        .from("vision_images")
-        .upsert(
-          { user_id: uid, path: img.path, caption },
-          { onConflict: "user_id,path" } as any
-        );
-      if (error) throw error;
-    } catch {
-      // ignore — local fallback already saved
-    }
+      const row: SupaMetaRow = {
+        user_id: uid,
+        path,
+        caption: patch.caption ?? prev.caption ?? null,
+        area: (patch.area ?? prev.area ?? "other") as AreaKey,
+        order_index: patch.order_index ?? prev.order_index ?? 0
+      };
+      await supabase.from("vision_images").upsert(row as any, { onConflict: "user_id,path" } as any);
+    } catch { /* ignore */ }
   }
 
-  async function removeAt(idx: number) {
+  async function saveCaption(idxInFiltered: number, caption: string) {
+    const img = filtered[idxInFiltered]; if (!img) return;
+    // update in full list
+    setImages(prev => prev.map(p => p.path === img.path ? { ...p, caption } : p));
+    await persistMeta(img.path, { caption });
+  }
+
+  async function setArea(idxInFiltered: number, area: AreaKey) {
+    const img = filtered[idxInFiltered]; if (!img) return;
+    setImages(prev => prev.map(p => p.path === img.path ? { ...p, area } : p));
+    await persistMeta(img.path, { area });
+  }
+
+  async function removeAt(idxInFiltered: number) {
     if (!userId) return;
-    const img = images[idx]; if (!img) return;
+    const img = filtered[idxInFiltered]; if (!img) return;
     setBusy(true); setErr(null);
     try {
       await supabase.storage.from(VISION_BUCKET).remove([img.path]);
       try { await supabase.from("vision_images").delete().eq("user_id", userId).eq("path", img.path); } catch {}
-      // remove from local fallback too
-      const local = readLocalCaps(userId);
+      // remove local meta
+      const local = readLocal(userId);
       delete local[img.path];
-      writeLocalCaps(userId, local);
+      writeLocal(userId, local);
 
-      const next = images.filter((_, i) => i !== idx);
-      setImages(next);
-      setSelected(Math.max(0, Math.min(selected, next.length - 1)));
+      setImages(prev => prev.filter(p => p.path !== img.path).map((p, i) => ({ ...p, order_index: i })));
+      setSelected(0);
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
       setBusy(false);
     }
+  }
+
+  // drag & drop reorder
+  const dragSrc = useRef<string | null>(null);
+  const [dropOver, setDropOver] = useState<string | null>(null);
+
+  function onDragStart(path: string) {
+    dragSrc.current = path;
+  }
+  function onDragOver(path: string, e: React.DragEvent) {
+    e.preventDefault();
+    setDropOver(path);
+  }
+  async function onDrop(targetPath: string) {
+    const src = dragSrc.current;
+    dragSrc.current = null;
+    setDropOver(null);
+    if (!src || src === targetPath) return;
+
+    setImages(prev => {
+      const arr = prev.slice();
+      const from = arr.findIndex(i => i.path === src);
+      const to = arr.findIndex(i => i.path === targetPath);
+      if (from === -1 || to === -1) return prev;
+      const [moved] = arr.splice(from, 1);
+      arr.splice(to, 0, moved);
+      // reindex
+      arr.forEach((it, i) => it.order_index = i);
+      // persist updated orders (best-effort)
+      (async () => {
+        for (const it of arr) await persistMeta(it.path, { order_index: it.order_index });
+      })();
+      return arr;
+    });
   }
 
   /* ----- layout helpers ----- */
@@ -357,11 +446,96 @@ export default function VisionBoardScreen() {
     return d.toLocaleString(undefined, { month: "long", year: "numeric" });
   }, []);
 
+  // EXPORT COLLAGE (1920x1080)
+  async function exportBoard() {
+    const list = filtered.length ? filtered : images;
+    if (!list.length) return;
+    const W = 1920, H = 1080;
+    const cols = 3, rows = 2; // for up to 6 images
+    const cellW = Math.floor(W / cols), cellH = Math.floor(H / rows);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d")!;
+    // background
+    ctx.fillStyle = "#0f172a"; // dark slate to make colors pop
+    ctx.fillRect(0,0,W,H);
+
+    // draw each image contain-fit + caption
+    for (let idx = 0; idx < Math.min(6, list.length); idx++) {
+      const img = list[idx];
+      const r = Math.floor(idx / cols), c = idx % cols;
+      const x = c * cellW, y = r * cellH;
+
+      try {
+        const tag = await loadImage(img.url);
+        const scale = Math.min(cellW / tag.width, cellH / tag.height);
+        const dw = Math.round(tag.width * scale), dh = Math.round(tag.height * scale);
+        const dx = x + Math.floor((cellW - dw) / 2), dy = y + Math.floor((cellH - dh) / 2);
+        // photo
+        ctx.fillStyle = "#0b1220";
+        roundRect(ctx, x+8, y+8, cellW-16, cellH-16, 16); ctx.fill();
+        ctx.save(); ctx.beginPath(); roundRect(ctx, x+8, y+8, cellW-16, cellH-16, 16); ctx.clip();
+        ctx.drawImage(tag, dx, dy, dw, dh);
+        // overlay caption
+        if (img.caption) {
+          const pad = 14;
+          const barH = 44;
+          ctx.fillStyle = "rgba(0,0,0,0.55)";
+          ctx.fillRect(x+8, y+cellH-8-barH, cellW-16, barH);
+          ctx.font = "bold 18px system-ui, -apple-system, Segoe UI, Roboto";
+          ctx.fillStyle = "#fff";
+          ctx.textBaseline = "middle";
+          ctx.fillText(img.caption, x+8+pad, y+cellH-8-barH/2);
+        }
+        ctx.restore();
+      } catch {
+        // skip image that failed to load
+      }
+    }
+
+    const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, "image/png"));
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+
+    // try native share
+    // @ts-ignore
+    if (navigator.share && (navigator.canShare?.({ files: [] }) || true)) {
+      try {
+        const file = new File([blob], "vision-board.png", { type: "image/png" });
+        // @ts-ignore
+        await navigator.share({ files: [file], title: "My Vision Board" });
+        URL.revokeObjectURL(url);
+        return;
+      } catch { /* fall back to download */ }
+    }
+
+    // download
+    const a = document.createElement("a");
+    a.href = url; a.download = "vision-board.png";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function shuffleNow() {
+    setImages(prev => {
+      const arr = prev.slice();
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      arr.forEach((it, i) => it.order_index = i);
+      (async () => { for (const it of arr) await persistMeta(it.path, { order_index: it.order_index }); })();
+      return arr;
+    });
+    setSelected(0);
+  }
+
   return (
     <div style={{ display: "grid", gap: 12 }}>
       {styleTag}
 
-      {/* Title card ONLY */}
+      {/* Title card */}
       <div className="card" style={{ position: "relative", paddingRight: 64 }}>
         {/* Alfred — top-right */}
         <button
@@ -369,15 +543,8 @@ export default function VisionBoardScreen() {
           aria-label="Open Vision Board help"
           title="Need a hand? Ask Alfred"
           style={{
-            position: "absolute",
-            top: 8,
-            right: 8,
-            border: "none",
-            background: "transparent",
-            padding: 0,
-            cursor: "pointer",
-            lineHeight: 0,
-            zIndex: 10,
+            position: "absolute", top: 8, right: 8,
+            border: "none", background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10,
           }}
         >
           {VB_ALFRED_SRC ? (
@@ -388,19 +555,11 @@ export default function VisionBoardScreen() {
               onError={() => setImgIdx(i => i + 1)}
             />
           ) : (
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 36, height: 36, borderRadius: 999,
-                border: "1px solid #d1d5db",
-                background: "#f9fafb",
-                fontWeight: 700,
-              }}
-            >
-              ?
-            </span>
+            <span style={{
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db",
+              background: "#f9fafb", fontWeight: 700,
+            }}>?</span>
           )}
         </button>
 
@@ -408,11 +567,10 @@ export default function VisionBoardScreen() {
         <div className="muted">{monthLabel}</div>
       </div>
 
-      {/* Info + Upload BELOW the title */}
+      {/* Controls + Upload */}
       <div className="card" style={{ display: "grid", gap: 10 }}>
-        <div className="muted">
-          You can upload up to <strong>6 images</strong> for your vision board.
-        </div>
+        <div className="muted">Upload up to <strong>6 images</strong>. Drag thumbnails to reorder. Tag by life area.</div>
+
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <input
             ref={fileRef}
@@ -421,31 +579,57 @@ export default function VisionBoardScreen() {
             multiple
             onChange={e => handleUpload(e.target.files)}
             style={{ display: "none" }}
-            disabled={!userId || !storageReady || !canAddMore || busy}
+            disabled={!userId || !storageReady || !canAdd || busy}
           />
           <button
             onClick={() => fileRef.current?.click()}
-            disabled={!userId || !storageReady || !canAddMore || busy}
+            disabled={!userId || !storageReady || !canAdd || busy}
             className="btn-primary"
             style={{ borderRadius: 8 }}
           >
             Upload image
           </button>
-          {!canAddMore && <span className="muted">Limit reached.</span>}
-          <button onClick={() => setPlaying(p => !p)} disabled={images.length <= 1} style={{ marginLeft: "auto" }}>
-            {playing ? "Pause" : "Play 30s"}
-          </button>
+          {!canAdd && <span className="muted">Limit reached.</span>}
+
+          {/* Filters */}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginLeft: "auto" }}>
+            <FilterChip label="All" on={filterArea === "all"} onClick={() => { setFilterArea("all"); setSelected(0); }} />
+            {AREAS.map(a => (
+              <FilterChip key={a.key}
+                label={a.label}
+                on={filterArea === a.key}
+                onClick={() => { setFilterArea(a.key); setSelected(0); }} />
+            ))}
+          </div>
         </div>
+
+        {/* Play controls */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <button onClick={() => setPlaying(p => !p)} disabled={filtered.length <= 1}>
+            {playing ? "Pause" : "Play"}
+          </button>
+          <select value={String(speed)} onChange={e => setSpeed(Number(e.target.value) as any)} title="Slide duration">
+            <option value="10000">10s</option>
+            <option value="30000">30s</option>
+            <option value="60000">60s</option>
+          </select>
+          <button onClick={() => { setShuffle(s => !s); if (!playing) setPlaying(true); }} aria-pressed={shuffle}>
+            {shuffle ? "Shuffle On" : "Shuffle Off"}
+          </button>
+          <button onClick={shuffleNow}>Randomize order</button>
+          <button onClick={exportBoard} className="btn-soft">Export PNG</button>
+        </div>
+
         {err && <div style={{ color: "red", marginTop: 6 }}>{err}</div>}
       </div>
 
       {/* Viewer */}
       <div className="card" style={{ display: "grid", gap: 10 }}>
-        {images.length === 0 ? (
+        {filtered.length === 0 ? (
           <div className="muted">No images yet. Use <strong>Upload image</strong> above to add your first one.</div>
         ) : (
           <>
-            {/* Main image with arrows — no cropping, centered */}
+            {/* Main image with arrows + caption overlay */}
             <div
               style={{
                 position: "relative",
@@ -456,7 +640,7 @@ export default function VisionBoardScreen() {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                background: "#f8fafc",
+                background: "#0b1220",
               }}
             >
               <button
@@ -483,67 +667,108 @@ export default function VisionBoardScreen() {
               </button>
 
               {current && (
-                <img
-                  key={current.path}
-                  src={current.url}
-                  alt=""
-                  className="vb-viewer-img"
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    maxWidth: "100%",
-                    maxHeight: "100%",
-                    display: "block",
-                  }}
-                />
+                <>
+                  <img
+                    key={current.path}
+                    src={current.url}
+                    alt=""
+                    className="vb-viewer-img"
+                    style={{ width: "100%", height: "100%", maxWidth: "100%", maxHeight: "100%", display: "block" }}
+                  />
+                  {/* overlay caption */}
+                  {current.caption && (
+                    <div
+                      style={{
+                        position: "absolute", left: 0, right: 0, bottom: 0,
+                        background: "linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.65) 70%)",
+                        color: "#fff", padding: "22px 16px 14px 16px", fontWeight: 700, fontSize: 18,
+                        textShadow: "0 2px 4px rgba(0,0,0,.35)",
+                      }}
+                    >
+                      {current.caption}
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
-            {/* Caption editor for selected — input only */}
+            {/* Caption + area editor */}
             {current && (
-              <div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <input
                   value={current.caption}
                   onChange={e => {
                     const v = e.target.value;
-                    setImages(imgs => {
-                      const copy = imgs.slice();
-                      copy[selected] = { ...copy[selected], caption: v };
-                      return copy;
-                    });
+                    setImages(arr => arr.map(it => it.path === current.path ? { ...it, caption: v } : it));
                   }}
                   onBlur={e => saveCaption(selected, e.target.value)}
-                  placeholder="Add text for this image here"
+                  placeholder="Add an affirmation or caption…"
                   aria-label="Image caption"
+                  style={{ flex: 1, minWidth: 220 }}
                 />
+                <select
+                  value={current.area}
+                  onChange={e => setArea(selected, e.target.value as AreaKey)}
+                  title="Life area"
+                >
+                  {AREAS.map(a => <option key={a.key} value={a.key}>{a.label}</option>)}
+                </select>
+                <span title="Area color" style={{ display:"inline-block", width:18, height:18, borderRadius:999, background:colorOf(current.area), border:"1px solid #ccc" }} />
+                <button onClick={() => removeAt(selected)} className="btn-soft">Remove</button>
               </div>
             )}
 
-            {/* Thumbnails */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 8 }}>
-              {images.map((img, i) => (
-                <div key={img.path} style={{ position: "relative", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
-                  <button
-                    onClick={() => setSelected(i)}
-                    title={img.caption || "Select"}
-                    style={{ padding: 0, border: "none", background: "transparent", width: "100%", lineHeight: 0 }}
+            {/* Thumbnails — drag & drop reorder */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 8 }}>
+              {images.map((img) => {
+                const isSel = current?.path === img.path;
+                const isDropOver = dropOver === img.path;
+                return (
+                  <div
+                    key={img.path}
+                    className={`vb-thumb ${isDropOver ? "vb-dropover" : ""}`}
+                    style={{
+                      position: "relative",
+                      border: "1px solid var(--border)",
+                      borderRadius: 10,
+                      overflow: "hidden",
+                      outlineOffset: -2,
+                    }}
+                    draggable
+                    aria-grabbed={dragSrc.current === img.path}
+                    onDragStart={() => onDragStart(img.path)}
+                    onDragOver={(e) => onDragOver(img.path, e)}
+                    onDrop={() => onDrop(img.path)}
                   >
-                    <img src={img.url} alt="" style={{ width: "100%", height: 80, objectFit: "cover", display: "block", opacity: i === selected ? 1 : 0.9 }} />
-                  </button>
-                  <button
-                    onClick={() => removeAt(i)}
-                    title="Remove"
-                    aria-label="Remove"
-                    className="vb-circle-btn vb-circle-btn--sm"
-                    style={{ position: "absolute", top: 6, right: 6 }}
-                  >
-                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
-                      <path d="M5 5 L15 15" />
-                      <path d="M15 5 L5 15" />
-                    </svg>
-                  </button>
-                </div>
-              ))}
+                    <button
+                      onClick={() => {
+                        const idx = filtered.findIndex(f => f.path === img.path);
+                        setSelected(idx >= 0 ? idx : 0);
+                      }}
+                      title={img.caption || "Select"}
+                      style={{ padding: 0, border: "none", background: "transparent", width: "100%", lineHeight: 0 }}
+                    >
+                      <img
+                        src={img.url}
+                        alt=""
+                        style={{
+                          width: "100%", height: 90, objectFit: "cover", display: "block",
+                          opacity: isSel ? 1 : 0.92, filter: isSel ? "none" : "saturate(0.9)"
+                        }}
+                      />
+                    </button>
+                    <div style={{
+                      position: "absolute", left: 6, top: 6,
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                      background: "rgba(17,24,39,.8)", color:"#fff", borderRadius: 999, padding: "2px 8px",
+                      fontSize: 11, border: "1px solid rgba(255,255,255,.2)"
+                    }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 999, background: colorOf(img.area) }} />
+                      {AREAS.find(a=>a.key===img.area)?.label ?? "Other"}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </>
         )}
@@ -568,4 +793,34 @@ export default function VisionBoardScreen() {
       </Modal>
     </div>
   );
+}
+
+/* ---------- small UI ---------- */
+function FilterChip({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
+  return (
+    <button className={`vb-chip ${on ? "vb-chip--on": ""}`} onClick={onClick} aria-pressed={on}>
+      {label}
+    </button>
+  );
+}
+
+/* ---------- utils ---------- */
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+function roundRect(ctx: CanvasRenderingContext2D, x:number, y:number, w:number, h:number, r:number) {
+  const rr = Math.min(r, w/2, h/2);
+  ctx.beginPath();
+  ctx.moveTo(x+rr, y);
+  ctx.arcTo(x+w, y,   x+w, y+h, rr);
+  ctx.arcTo(x+w, y+h, x,   y+h, rr);
+  ctx.arcTo(x,   y+h, x,   y,   rr);
+  ctx.arcTo(x,   y,   x+w, y,   rr);
+  ctx.closePath();
 }
