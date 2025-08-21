@@ -7,8 +7,8 @@ import { supabase } from "./lib/supabaseClient";
 const CATS = [
   { key: "personal",  label: "Personal",  color: "#a855f7" }, // purple
   { key: "health",    label: "Health",    color: "#22c55e" }, // green
-  { key: "career",    label: "Business",  color: "#3b82f6" }, // blue (stored as 'career')
-  { key: "financial", label: "Finance",   color: "#f59e0b" }, // amber (stored as 'financial')
+  { key: "career",    label: "Business",  color: "#3b82f6" }, // blue
+  { key: "financial", label: "Finance",   color: "#f59e0b" }, // amber
   { key: "other",     label: "Other",     color: "#6b7280" }, // gray
 ] as const;
 type AllowedCategory = typeof CATS[number]["key"];
@@ -41,7 +41,235 @@ function addDays(d: Date, n: number) {
   return x;
 }
 
-/* =========================== TYPES =========================== */
+/* ======================= BIG GOAL WIZARD (placed first) ======================= */
+type WizardProps = { onClose?: () => void; onCreated?: () => void };
+
+function BigGoalWizard({ onClose, onCreated }: WizardProps) {
+  const todayISO = useMemo(() => toISO(new Date()), []);
+  const [title, setTitle] = useState("");
+  const [category, setCategory] = useState<AllowedCategory>("other");
+  const [startDate, setStartDate] = useState(todayISO);
+  const [targetDate, setTargetDate] = useState("");
+  const [halfwayNote, setHalfwayNote] = useState("");
+  const [monthlyCommit, setMonthlyCommit] = useState("");
+  const [weeklyCommit, setWeeklyCommit] = useState("");
+  const [dailyCommit, setDailyCommit] = useState("");
+  const [autoReviews, setAutoReviews] = useState<"" | "weekly" | "monthly">("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const [userId, setUserId] = useState<string | null>(null);
+  useEffect(() => { supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null)); }, []);
+
+  const catColor = colorOf(category);
+
+  const computedHalfDate = useMemo(() => {
+    if (!targetDate) return "";
+    const a = fromISO(startDate), b = fromISO(targetDate);
+    if (b < a) return "";
+    return toISO(new Date((a.getTime() + b.getTime()) / 2));
+  }, [startDate, targetDate]);
+
+  async function create() {
+    setErr(null);
+    if (!title.trim()) { setErr("Please enter a goal title."); return; }
+    if (!targetDate)   { setErr("Please choose a target date."); return; }
+    if (!userId) { setErr("Not signed in."); return; }
+
+    setBusy(true);
+    try {
+      // 1) create goal
+      const { data: goal, error: gerr } = await supabase.from("goals")
+        .insert({
+          user_id: userId,
+          title: title.trim(),
+          goal_type: "big",
+          category,
+          category_color: catColor,
+          start_date: startDate,
+          target_date: targetDate,
+          halfway_note: halfwayNote || null,
+          halfway_date: computedHalfDate || null,
+          status: "active",
+        })
+        .select()
+        .single();
+      if (gerr) throw gerr;
+
+      // 2) seed tasks linked to goal_id
+      const start = fromISO(startDate), end = fromISO(targetDate);
+      if (end < start) throw new Error("Target date is before start date.");
+
+      const tasks: any[] = [];
+      const cat = goal.category as AllowedCategory;
+      const col = goal.category_color;
+
+      // Milestones
+      tasks.push({
+        user_id:userId, title:`BIG GOAL — Target: ${goal.title}`, due_date: targetDate,
+        source:"big_goal_target", status:"pending", priority:2, goal_id: goal.id,
+        category:cat, category_color:col
+      });
+      if (computedHalfDate && halfwayNote.trim()) {
+        tasks.push({
+          user_id:userId, title:`BIG GOAL — Halfway: ${halfwayNote.trim()}`, due_date: computedHalfDate,
+          source:"big_goal_halfway", status:"pending", priority:2, goal_id: goal.id,
+          category:cat, category_color:col
+        });
+      }
+
+      // Monthly commitment
+      if (monthlyCommit.trim()) {
+        let d = addMonthsClamped(start, 1, start.getDate());
+        while (d <= end) {
+          tasks.push({
+            user_id:userId, title:`BIG GOAL — Monthly: ${monthlyCommit.trim()}`, due_date: toISO(d),
+            source:"big_goal_monthly", status:"pending", priority:2, goal_id: goal.id,
+            category:cat, category_color:col
+          });
+          d = addMonthsClamped(d, 1, start.getDate());
+        }
+      }
+
+      // Weekly commitment
+      if (weeklyCommit.trim()) {
+        let d = new Date(start); d.setDate(d.getDate() + 7);
+        while (d <= end) {
+          tasks.push({
+            user_id:userId, title:`BIG GOAL — Weekly: ${weeklyCommit.trim()}`, due_date: toISO(d),
+            source:"big_goal_weekly", status:"pending", priority:2, goal_id: goal.id,
+            category:cat, category_color:col
+          });
+          d.setDate(d.getDate() + 7);
+        }
+      }
+
+      // Daily commitment
+      if (dailyCommit.trim()) {
+        let d = clampDay(new Date(Math.max(Date.now(), start.getTime())));
+        while (d <= end) {
+          tasks.push({
+            user_id:userId, title:`BIG GOAL — Daily: ${dailyCommit.trim()}`, due_date: toISO(d),
+            source:"big_goal_daily", status:"pending", priority:2, goal_id: goal.id,
+            category:cat, category_color:col
+          });
+          d.setDate(d.getDate() + 1);
+        }
+      }
+
+      // Auto-schedule reviews (optional)
+      if (autoReviews) {
+        let d = clampDay(new Date());
+        const count = autoReviews === "weekly" ? 8 : 6;
+        for (let i = 0; i < count; i++) {
+          tasks.push({
+            user_id:userId, title:`Review: ${goal.title}`, due_date: toISO(d),
+            source:`goal_review_${autoReviews}`, status:"pending", priority:2, goal_id: goal.id,
+            category:cat, category_color:col
+          });
+          d = autoReviews === "weekly" ? addDays(d, 7) : addMonthsClamped(d, 1, d.getDate());
+        }
+      }
+
+      // 3) bulk insert
+      for (let i = 0; i < tasks.length; i += 500) {
+        const slice = tasks.slice(i, i + 500);
+        const { error: terr } = await supabase.from("tasks").insert(slice);
+        if (terr) throw terr;
+      }
+
+      onCreated && onCreated();
+      onClose && onClose();
+      alert(`Big goal created! Seeded ${tasks.length} item(s).`);
+    } catch (e:any) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 16, background: "#fff" }}>
+      <h2 style={{ fontSize: 18, marginBottom: 8 }}>Create a Big Goal (guided)</h2>
+
+      <div style={{ display: "grid", gap: 10 }}>
+        {/* title */}
+        <label>
+          <div className="muted">Big goal title</div>
+          <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g., Get 30 new customers" />
+        </label>
+
+        {/* category */}
+        <label>
+          <div className="muted">Category</div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <select value={category} onChange={e=>setCategory(e.target.value as AllowedCategory)}>
+              {CATS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </select>
+            <span title="Category color" style={{ display:"inline-block", width:18, height:18, borderRadius:999, background:colorOf(category), border:"1px solid #ccc" }} />
+          </div>
+        </label>
+
+        {/* dates */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <label style={{ flex: 1, minWidth: 220 }}>
+            <div className="muted">Start date</div>
+            <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} />
+          </label>
+          <label style={{ flex: 1, minWidth: 220 }}>
+            <div className="muted">Target date</div>
+            <input type="date" value={targetDate} onChange={e=>setTargetDate(e.target.value)} />
+          </label>
+        </div>
+
+        {/* halfway note */}
+        <label>
+          <div className="muted">How will you know you’re halfway?</div>
+          <input value={halfwayNote} onChange={e=>setHalfwayNote(e.target.value)} placeholder="e.g., 15 customers or £X MRR" />
+          {computedHalfDate && <div className="muted" style={{ marginTop:6 }}>Halfway milestone: <b>{computedHalfDate}</b></div>}
+        </label>
+
+        {/* commitments — Monthly → Weekly → Daily */}
+        <label>
+          <div className="muted">Monthly commitment (optional)</div>
+          <input value={monthlyCommit} onChange={e=>setMonthlyCommit(e.target.value)} placeholder="e.g., At least 2 new customers" />
+          <div className="muted" style={{ marginTop:6 }}>Starts next month on same day-of-month.</div>
+        </label>
+
+        <label>
+          <div className="muted">Weekly commitment (optional)</div>
+          <input value={weeklyCommit} onChange={e=>setWeeklyCommit(e.target.value)} placeholder="e.g., 5 new prospects" />
+          <div className="muted" style={{ marginTop:6 }}>Starts next week on same weekday.</div>
+        </label>
+
+        <label>
+          <div className="muted">Daily commitment (optional)</div>
+          <input value={dailyCommit} onChange={e=>setDailyCommit(e.target.value)} placeholder="e.g., Call or email 15 people" />
+          <div className="muted" style={{ marginTop:6 }}>Seeds every day from today (or future start) through target date.</div>
+        </label>
+
+        {/* review cadence */}
+        <label>
+          <div className="muted">Auto-schedule reviews (optional)</div>
+          <select value={autoReviews} onChange={e => setAutoReviews(e.target.value as "" | "weekly" | "monthly")}>
+            <option value="">None</option>
+            <option value="weekly">Weekly (next 8)</option>
+            <option value="monthly">Monthly (next 6)</option>
+          </select>
+        </label>
+
+        {err && <div style={{ color: "red" }}>{err}</div>}
+
+        <div style={{ display:"flex", gap:8, marginTop:8, justifyContent:"flex-end" }}>
+          <button onClick={onClose} disabled={busy}>Cancel</button>
+          <button onClick={create} disabled={busy} className="btn-primary" style={{ borderRadius:8 }}>{busy?"Creating…":"Create Big Goal"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ========================= MAIN SCREEN ========================= */
 type Goal = {
   id: number;
   user_id: string;
@@ -53,7 +281,7 @@ type Goal = {
   target_date: string;
   halfway_date: string | null;
   halfway_note: string | null;
-  status: string | null; // 'active' | 'paused' | 'archived' | ...
+  status: string | null;
 };
 
 type TaskLite = {
@@ -63,7 +291,6 @@ type TaskLite = {
   source: string | null;
 };
 
-/* ========================= MAIN SCREEN ========================= */
 export default function GoalsScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -317,268 +544,4 @@ function timeProgressPct(startISO?: string, targetISO?: string) {
   if (total <= 0) return 100;
   const elapsed = Math.min(Math.max(0, now.getTime() - start.getTime()), total);
   return Math.round((elapsed / total) * 100);
-}
-
-/* ======================= BIG GOAL WIZARD ======================= */
-type WizardProps = { onClose?: () => void; onCreated?: () => void };
-
-function BigGoalWizard({ onClose, onCreated }: WizardProps) {
-  const todayISO = useMemo(() => toISO(new Date()), []);
-  const [title, setTitle] = useState("");
-  const [category, setCategory] = useState<AllowedCategory>("other");
-  const [startDate, setStartDate] = useState(todayISO);
-  const [targetDate, setTargetDate] = useState("");
-  const [halfwayNote, setHalfwayNote] = useState("");
-  const [monthlyCommit, setMonthlyCommit] = useState("");
-  const [weeklyCommit, setWeeklyCommit] = useState("");
-  const [dailyCommit, setDailyCommit] = useState("");
-  const [autoReviews, setAutoReviews] = useState<"" | "weekly" | "monthly">("");
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const [userId, setUserId] = useState<string | null>(null);
-  useEffect(() => { supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null)); }, []);
-
-  const catColor = colorOf(category);
-
-  const computedHalfDate = useMemo(() => {
-    if (!targetDate) return "";
-    const a = fromISO(startDate), b = fromISO(targetDate);
-    if (b < a) return "";
-    return toISO(new Date((a.getTime() + b.getTime()) / 2));
-  }, [startDate, targetDate]);
-
-  async function create() {
-    setErr(null);
-    if (!title.trim()) { setErr("Please enter a goal title."); return; }
-    if (!targetDate)   { setErr("Please choose a target date."); return; }
-    if (!userId) { setErr("Not signed in."); return; }
-
-    setBusy(true);
-    try {
-      // 1) create goal
-      const { data: goal, error: gerr } = await supabase.from("goals")
-        .insert({
-          user_id: userId,
-          title: title.trim(),
-          goal_type: "big",
-          category,
-          category_color: catColor,
-          start_date: startDate,
-          target_date: targetDate,
-          halfway_note: halfwayNote || null,
-          halfway_date: computedHalfDate || null,
-          status: "active",
-        })
-        .select()
-        .single();
-      if (gerr) throw gerr;
-
-      // 2) seed tasks (link with goal_id so progress can be tracked)
-      const start = fromISO(startDate), end = fromISO(targetDate);
-      if (end < start) throw new Error("Target date is before start date.");
-
-      const tasks: any[] = [];
-      const cat = goal.category as AllowedCategory;
-      const col = goal.category_color;
-
-      // Milestones
-      tasks.push({
-        user_id:userId,
-        title:`BIG GOAL — Target: ${goal.title}`,
-        due_date: targetDate,
-        source:"big_goal_target",
-        status:"pending",
-        priority:2,
-        goal_id: goal.id,
-        category:cat,
-        category_color:col
-      });
-      if (computedHalfDate && halfwayNote.trim()) {
-        tasks.push({
-          user_id:userId,
-          title:`BIG GOAL — Halfway: ${halfwayNote.trim()}`,
-          due_date: computedHalfDate,
-          source:"big_goal_halfway",
-          status:"pending",
-          priority:2,
-          goal_id: goal.id,
-          category:cat,
-          category_color:col
-        });
-      }
-
-      // Monthly commitment
-      if (monthlyCommit.trim()) {
-        let d = addMonthsClamped(start, 1, start.getDate());
-        while (d <= end) {
-          tasks.push({
-            user_id:userId,
-            title:`BIG GOAL — Monthly: ${monthlyCommit.trim()}`,
-            due_date: toISO(d),
-            source:"big_goal_monthly",
-            status:"pending",
-            priority:2,
-            goal_id: goal.id,
-            category:cat,
-            category_color:col
-          });
-          d = addMonthsClamped(d, 1, start.getDate());
-        }
-      }
-
-      // Weekly commitment
-      if (weeklyCommit.trim()) {
-        let d = new Date(start); d.setDate(d.getDate() + 7);
-        while (d <= end) {
-          tasks.push({
-            user_id:userId,
-            title:`BIG GOAL — Weekly: ${weeklyCommit.trim()}`,
-            due_date: toISO(d),
-            source:"big_goal_weekly",
-            status:"pending",
-            priority:2,
-            goal_id: goal.id,
-            category:cat,
-            category_color:col
-          });
-          d.setDate(d.getDate() + 7);
-        }
-      }
-
-      // Daily commitment
-      if (dailyCommit.trim()) {
-        let d = clampDay(new Date(Math.max(Date.now(), start.getTime())));
-        while (d <= end) {
-          tasks.push({
-            user_id:userId,
-            title:`BIG GOAL — Daily: ${dailyCommit.trim()}`,
-            due_date: toISO(d),
-            source:"big_goal_daily",
-            status:"pending",
-            priority:2,
-            goal_id: goal.id,
-            category:cat,
-            category_color:col
-          });
-          d.setDate(d.getDate() + 1);
-        }
-      }
-
-      // Auto-schedule reviews (optional)
-      if (autoReviews) {
-        let d = clampDay(new Date());
-        const count = autoReviews === "weekly" ? 8 : 6;
-        for (let i = 0; i < count; i++) {
-          tasks.push({
-            user_id:userId,
-            title:`Review: ${goal.title}`,
-            due_date: toISO(d),
-            source:`goal_review_${autoReviews}`,
-            status:"pending",
-            priority:2,
-            goal_id: goal.id,
-            category:cat,
-            category_color:col
-          });
-          d = autoReviews === "weekly" ? addDays(d, 7) : addMonthsClamped(d, 1, d.getDate());
-        }
-      }
-
-      // 3) bulk insert (batched)
-      for (let i = 0; i < tasks.length; i += 500) {
-        const slice = tasks.slice(i, i + 500);
-        const { error: terr } = await supabase.from("tasks").insert(slice);
-        if (terr) throw terr;
-      }
-
-      onCreated && onCreated();
-      onClose && onClose();
-      alert(`Big goal created! Seeded ${tasks.length} item(s).`);
-    } catch (e:any) {
-      setErr(e.message || String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 16, background: "#fff" }}>
-      <h2 style={{ fontSize: 18, marginBottom: 8 }}>Create a Big Goal (guided)</h2>
-
-      <div style={{ display: "grid", gap: 10 }}>
-        {/* title */}
-        <label>
-          <div className="muted">Big goal title</div>
-          <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g., Get 30 new customers" />
-        </label>
-
-        {/* category */}
-        <label>
-          <div className="muted">Category</div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <select value={category} onChange={e=>setCategory(e.target.value as AllowedCategory)}>
-              {CATS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
-            </select>
-            <span title="Category color" style={{ display:"inline-block", width:18, height:18, borderRadius:999, background:colorOf(category), border:"1px solid #ccc" }} />
-          </div>
-        </label>
-
-        {/* dates */}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <label style={{ flex: 1, minWidth: 220 }}>
-            <div className="muted">Start date</div>
-            <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} />
-          </label>
-          <label style={{ flex: 1, minWidth: 220 }}>
-            <div className="muted">Target date</div>
-            <input type="date" value={targetDate} onChange={e=>setTargetDate(e.target.value)} />
-          </label>
-        </div>
-
-        {/* halfway note */}
-        <label>
-          <div className="muted">How will you know you’re halfway?</div>
-          <input value={halfwayNote} onChange={e=>setHalfwayNote(e.target.value)} placeholder="e.g., 15 customers or £X MRR" />
-          {computedHalfDate && <div className="muted" style={{ marginTop:6 }}>Halfway milestone: <b>{computedHalfDate}</b></div>}
-        </label>
-
-        {/* commitments — Monthly → Weekly → Daily */}
-        <label>
-          <div className="muted">Monthly commitment (optional)</div>
-          <input value={monthlyCommit} onChange={e=>setMonthlyCommit(e.target.value)} placeholder="e.g., At least 2 new customers" />
-          <div className="muted" style={{ marginTop:6 }}>Starts next month on same day-of-month.</div>
-        </label>
-
-        <label>
-          <div className="muted">Weekly commitment (optional)</div>
-          <input value={weeklyCommit} onChange={e=>setWeeklyCommit(e.target.value)} placeholder="e.g., 5 new prospects" />
-          <div className="muted" style={{ marginTop:6 }}>Starts next week on same weekday.</div>
-        </label>
-
-        <label>
-          <div className="muted">Daily commitment (optional)</div>
-          <input value={dailyCommit} onChange={e=>setDailyCommit(e.target.value)} placeholder="e.g., Call or email 15 people" />
-          <div className="muted" style={{ marginTop:6 }}>Seeds every day from today (or future start) through target date.</div>
-        </label>
-
-        {/* review cadence */}
-        <label>
-          <div className="muted">Auto-schedule reviews (optional)</div>
-          <select value={autoReviews} onChange={e => setAutoReviews(e.target.value as "" | "weekly" | "monthly")}>
-            <option value="">None</option>
-            <option value="weekly">Weekly (next 8)</option>
-            <option value="monthly">Monthly (next 6)</option>
-          </select>
-        </label>
-
-        {err && <div style={{ color: "red" }}>{err}</div>}
-
-        <div style={{ display:"flex", gap:8, marginTop:8, justifyContent:"flex-end" }}>
-          <button onClick={onClose} disabled={busy}>Cancel</button>
-          <button onClick={create} disabled={busy} className="btn-primary" style={{ borderRadius:8 }}>{busy?"Creating…":"Create Big Goal"}</button>
-        </div>
-      </div>
-    </div>
-  );
 }
