@@ -1,20 +1,6 @@
-import { useEffect, useState, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useState, useRef, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
-import BigGoalWizardModule from "./BigGoalWizard";
-
-/** ── Wizard adapter ─────────────────────────────────────────────
- * Accepts onClose/onCreated (optional) and renders whatever
- * ./BigGoalWizard exports (function component, default object, etc).
- * This removes the TS2322 “IntrinsicAttributes” error regardless of
- * how BigGoalWizard’s props are typed.
- */
-type WizardProps = { onClose?: () => void; onCreated?: () => void };
-function BigGoalWizardAdapter(props: WizardProps) {
-  const Comp: any = (BigGoalWizardModule as any)?.default ?? BigGoalWizardModule;
-  if (typeof Comp === "function") return <Comp {...props} />;
-  if (Comp && typeof Comp === "object") return <Comp.type {...{ ...(Comp.props || {}), ...props }} />;
-  return <div className="muted">Big Goal Wizard unavailable.</div>;
-}
+import BigGoalWizard from "./BigGoalWizard";
 
 /** Public path helper (works with Vite/CRA/Vercel/GH Pages) */
 function publicPath(p: string) {
@@ -152,6 +138,41 @@ function GoalsHelpContent() {
   );
 }
 
+/* ---------- Balance helpers ---------- */
+
+const PROMPTS_BY_CAT: Record<CatKey, string[]> = {
+  personal:  ["Plan a weekend with family", "Start a creative hobby", "Reconnect with a friend weekly"],
+  health:    ["Walk 30 min, 5×/week", "Strength train 2×/week", "Lights out by 10:30pm"],
+  career:    ["Ship a portfolio case study", "Book 5 sales calls/week", "Launch a new offering"],
+  financial: ["Build a 3-month emergency fund", "Automate saving 10%", "Reduce one recurring cost"],
+  other:     ["Learn a new skill", "Volunteer monthly", "Declutter one room"],
+};
+
+type BalanceStats = {
+  total: number;
+  counts: Record<CatKey, number>;
+  percents: Record<CatKey, number>;
+  represented: CatKey[];
+  dominant?: { key: CatKey; share: number } | null;
+};
+
+function computeBalance(goals: Goal[]): BalanceStats {
+  const active = goals.filter(g => (g.status || "active") !== "archived");
+  const total = active.length;
+  const counts: Record<CatKey, number> = { personal:0, health:0, career:0, financial:0, other:0 };
+  for (const g of active) counts[normalizeCat(g.category)]++;
+  const percents = { personal:0, health:0, career:0, financial:0, other:0 } as Record<CatKey, number>;
+  for (const k of Object.keys(counts) as CatKey[]) percents[k] = total ? counts[k] / total : 0;
+  const represented = (Object.keys(counts) as CatKey[]).filter(k => counts[k] > 0);
+  let dominant: BalanceStats["dominant"] = null;
+  if (total > 0) {
+    const entries = (Object.keys(counts) as CatKey[]).map(k => ({ key:k, share: percents[k] }));
+    entries.sort((a,b)=>b.share - a.share);
+    dominant = entries[0];
+  }
+  return { total, counts, percents, represented, dominant };
+}
+
 /* ========================== MAIN SCREEN ========================== */
 
 export default function GoalsScreen() {
@@ -161,9 +182,9 @@ export default function GoalsScreen() {
   const [showWizard, setShowWizard] = useState(false);
 
   // steps state (Monthly → Weekly → Daily)
-  const [daily, setDaily] = useState<string[]>([]);
-  const [weekly, setWeekly] = useState<string[]>([]);
-  const [monthly, setMonthly] = useState<string[]>([]);
+  const [daily, setDaily] = useState<string[]>([""]);
+  const [weekly, setWeekly] = useState<string[]>([""]);
+  const [monthly, setMonthly] = useState<string[]>([""]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -180,6 +201,7 @@ export default function GoalsScreen() {
   const [showHelp, setShowHelp] = useState(false);
   const [imgIdx, setImgIdx] = useState(0); // which candidate we’re trying
 
+  /* ----- auth ----- */
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -210,11 +232,14 @@ export default function GoalsScreen() {
       .eq("goal_id", g.id)
       .eq("active", true)
       .order("id", { ascending: true });
-    if (error) { setErr(error.message); setDaily([]); setWeekly([]); setMonthly([]); return; }
+    if (error) { setErr(error.message); setDaily([""]); setWeekly([""]); setMonthly([""]); return; }
     const rows = (data as Step[]) || [];
-    setMonthly(rows.filter(r => r.cadence === "monthly").map(r => r.description));
-    setWeekly(rows.filter(r => r.cadence === "weekly").map(r => r.description));
-    setDaily(rows.filter(r => r.cadence === "daily").map(r => r.description));
+    const m = rows.filter(r => r.cadence === "monthly").map(r => r.description);
+    const w = rows.filter(r => r.cadence === "weekly").map(r => r.description);
+    const d = rows.filter(r => r.cadence === "daily").map(r => r.description);
+    setMonthly(m.length ? m : [""]);
+    setWeekly(w.length ? w : [""]);
+    setDaily(d.length ? d : [""]);
     setEditCat(normalizeCat(g.category));
   }
 
@@ -230,7 +255,7 @@ export default function GoalsScreen() {
     if (ge) throw ge;
     const goal = g as Goal;
 
-    const startISO = goal.start_date || toISO(new Date());
+    const startISO = goal.start_date || toISO(new Date()));
     const endISO   = goal.target_date || startISO;
     const start = fromISO(startISO);
     const end   = fromISO(endISO);
@@ -405,6 +430,9 @@ export default function GoalsScreen() {
 
   const currentAlfredSrc = ALFRED_CANDIDATES[Math.min(imgIdx, ALFRED_CANDIDATES.length - 1)];
 
+  /* ----- balance (computed) ----- */
+  const balance = useMemo(() => computeBalance(goals), [goals]);
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 12 }}>
       {/* Left: list + creators */}
@@ -431,12 +459,7 @@ export default function GoalsScreen() {
             alt="Alfred — open help"
             style={{ width: 56, height: 56, display: "block" }}
             onError={() => {
-              if (imgIdx < ALFRED_CANDIDATES.length - 1) {
-                setImgIdx(imgIdx + 1);
-              } else {
-                (document.activeElement as HTMLElement | null)?.blur?.();
-              }
-              console.warn("Alfred image not found at:", currentAlfredSrc);
+              if (imgIdx < ALFRED_CANDIDATES.length - 1) setImgIdx(imgIdx + 1);
             }}
           />
         </button>
@@ -502,7 +525,7 @@ export default function GoalsScreen() {
 
         {showWizard && (
           <div style={{ marginTop: 8 }}>
-            <BigGoalWizardAdapter
+            <BigGoalWizard
               onClose={() => setShowWizard(false)}
               onCreated={() => { setShowWizard(false); loadGoals(); }}
             />
@@ -510,8 +533,48 @@ export default function GoalsScreen() {
         )}
       </div>
 
-      {/* Right: details + steps */}
-      <div className="card">
+      {/* Right: Balance + details/steps */}
+      <div className="card" style={{ display: "grid", gap: 12 }}>
+        {/* ---- Balance panel ---- */}
+        <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 10 }}>
+          <div className="section-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <span>Goal balance</span>
+            <span className="muted">{balance.total} goal{balance.total === 1 ? "" : "s"}</span>
+          </div>
+
+          {/* Stacked distribution bar */}
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 999, overflow: "hidden", height: 12, display: "flex", marginTop: 6 }}>
+            {(CATS as any as {key:CatKey; color:string}[]).map(c => {
+              const pct = (balance.percents[c.key] || 0) * 100;
+              if (pct <= 0) return null;
+              return (
+                <div key={c.key} style={{ width: `${pct}%`, background: c.color, height: "100%" }} title={`${c.key}: ${Math.round(pct)}%`} />
+              );
+            })}
+          </div>
+
+          {/* Legend */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, marginTop: 10 }}>
+            {CATS.map(c => {
+              const count = balance.counts[c.key] || 0;
+              const pct = Math.round((balance.percents[c.key] || 0) * 100);
+              return (
+                <div key={c.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ width: 10, height: 10, borderRadius: 999, background: c.color, border: "1px solid #d1d5db", flex: "0 0 auto" }} />
+                  <div style={{ fontSize: 13 }}>
+                    <div style={{ fontWeight: 600 }}>{c.label}</div>
+                    <div className="muted">{count} • {pct}%</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Insight / prompt */}
+          <BalanceInsight balance={balance} />
+        </div>
+
+        {/* ---- Goal details + steps ---- */}
         {!selected ? (
           <div className="muted">Select a goal to view or edit details and steps.</div>
         ) : (
@@ -531,7 +594,7 @@ export default function GoalsScreen() {
             {/* Category editor */}
             <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 10 }}>
               <div className="section-title">Edit details</div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
                 <label>
                   <div className="muted">Category</div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -605,12 +668,52 @@ export default function GoalsScreen() {
             style={{ width: 72, height: 72, flex: "0 0 auto" }}
             onError={() => {
               if (imgIdx < ALFRED_CANDIDATES.length - 1) setImgIdx(imgIdx + 1);
-              console.warn("Alfred image not found at:", currentAlfredSrc);
             }}
           />
           <GoalsHelpContent />
         </div>
       </Modal>
+    </div>
+  );
+}
+
+/* ---------- Balance insight component ---------- */
+function BalanceInsight({ balance }: { balance: BalanceStats }) {
+  if (balance.total === 0) {
+    return <div className="muted" style={{ marginTop: 8 }}>No goals yet. Add a couple to see balance.</div>;
+  }
+
+  const represented = balance.represented.length;
+  const dom = balance.dominant;
+  const missing = (CATS.map(c=>c.key) as CatKey[]).filter(k => balance.counts[k] === 0);
+
+  let message = "";
+  if (represented >= 4 && (!dom || dom.share <= 0.5)) {
+    message = "Nice variety — your goals look well balanced.";
+  } else if (represented <= 2) {
+    message = "Heavy focus detected. Consider adding a couple of goals in other areas for balance.";
+  } else if (dom && dom.share >= 0.6) {
+    const label = CATS.find(c=>c.key===dom.key)?.label || dom.key;
+    message = `Most goals are ${label}. Is that intentional? A small goal in another area can help balance.`;
+  } else {
+    message = "Decent spread. If this matches your season of life, you’re good!";
+  }
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div className="muted">{message}</div>
+      {missing.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div className="muted" style={{ marginBottom: 6 }}>Ideas to round things out:</div>
+          <ul className="list">
+            {missing.slice(0, 2).map(k => {
+              const label = CATS.find(c=>c.key===k)?.label || k;
+              const prompt = PROMPTS_BY_CAT[k][0];
+              return <li key={k} className="item"><span style={{ fontWeight: 600 }}>{label}:</span> {prompt}</li>;
+            })}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
