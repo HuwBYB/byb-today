@@ -20,12 +20,12 @@ const VB_ALFRED_CANDIDATES = [
   "/alfred/Vision_Alfred.webp",
 ].map(publicPath);
 
-/* ---------- Sections (life areas) ---------- */
+/* ---------- Life areas (sections) ---------- */
 const SECTIONS = [
   { key: "personal",  label: "Personal",  color: "#a855f7" },
   { key: "health",    label: "Health",    color: "#22c55e" },
-  { key: "career",    label: "Business",  color: "#3b82f6" },   // stored as 'career'
-  { key: "financial", label: "Finance",   color: "#f59e0b" },   // stored as 'financial'
+  { key: "career",    label: "Business",  color: "#3b82f6" }, // stored as 'career'
+  { key: "financial", label: "Finance",   color: "#f59e0b" }, // stored as 'financial'
   { key: "other",     label: "Other",     color: "#6b7280" },
 ] as const;
 type SectionKey = typeof SECTIONS[number]["key"];
@@ -34,7 +34,7 @@ const colorOf = (k: SectionKey) => SECTIONS.find(s => s.key === k)?.color || "#6
 /* ---------- Storage ---------- */
 const VISION_BUCKET = "vision";
 
-/* ---------- Local fallbacks (caption/order) ---------- */
+/* ---------- Local caption/order fallbacks ---------- */
 const capsKey = (uid: string) => `vb_caps_${uid}`;
 const orderKey = (uid: string) => `vb_order_${uid}`;
 function readLocalCaps(uid: string): Record<string, string> {
@@ -50,7 +50,7 @@ function writeLocalOrder(uid: string, map: Record<string, number>) {
   try { localStorage.setItem(orderKey(uid), JSON.stringify(map)); } catch {}
 }
 
-/* ---------- Modal ---------- */
+/* ---------- Modal shell ---------- */
 function Modal({ open, onClose, title, children }: {
   open: boolean; onClose: () => void; title: string; children: ReactNode;
 }) {
@@ -79,16 +79,17 @@ function Modal({ open, onClose, title, children }: {
   );
 }
 
-/* ---------- Help ---------- */
+/* ---------- Help content ---------- */
 function VisionHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.6 }}>
       <h4 style={{ margin: 0 }}>Make it vivid, make it daily</h4>
       <ol style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Create sections and drop images into each.</li>
+        <li>Create sections (life areas) and drop images into each.</li>
         <li>Add a short, specific affirmation under each image.</li>
-        <li>Reorder with drag &amp; drop until it feels right.</li>
+        <li>Reorder with drag &amp; drop until it “feels right”.</li>
         <li>Use <b>Play</b> for a 30s slideshow or export a wallpaper collage.</li>
+        <li>Ask yourself: “What’s one tiny step I can do <i>today</i> toward this?”</li>
       </ol>
     </div>
   );
@@ -96,11 +97,11 @@ function VisionHelpContent() {
 
 /* ---------- Types ---------- */
 type VBImage = {
-  path: string;
-  url: string;
-  caption: string;
-  section: SectionKey;
-  order_index: number;
+  path: string;        // storage path
+  url: string;         // public URL
+  caption: string;     // affirmation
+  section: SectionKey; // life area
+  order_index: number; // for sorting
   created_at?: string;
 };
 
@@ -123,57 +124,46 @@ export default function VisionBoardScreen() {
 
   const fileRef = useRef<HTMLInputElement>(null);
   const dragFrom = useRef<number | null>(null);
-  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   const MAX_IMAGES = 6;
 
-  /* ---------- Mobile-first CSS + big viewer + arrows ---------- */
+  /* ----- inline CSS (mobile-first) ----- */
   const styleTag = (
     <style>{`
-      * { box-sizing: border-box }
-      .vb-wrap { display:grid; gap:12px }
-
-      .vb-title { position:relative; padding-right:56px }
-
-      .vb-toolbar { display:grid; gap:12px }
-      .vb-field { display:grid; gap:6px }
-      .vb-inline { display:flex; align-items:center; gap:8px }
-      .vb-actions { display:grid; gap:8px; grid-template-columns:1fr }
-      .vb-actions > button { width:100% }
-      .vb-select, .vb-input { width:100% }
-
-      /* Large viewer */
-      .vb-viewer { position:relative; border:1px solid var(--border); border-radius:12px; overflow:hidden; background:#0b1220 }
-      .vb-viewer-inner { width:100%; height:280px; display:flex; align-items:center; justify-content:center }
-      .vb-viewer-img { width:100%; height:100%; object-fit:contain; display:block }
+      .vb-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap }
+      .vb-dot { width:10px; height:10px; border-radius:999px; border:1px solid #d1d5db; flex:0 0 auto }
+      .vb-circle-btn {
+        display:inline-flex; align-items:center; justify-content:center;
+        width:36px; height:36px; border-radius:999px; border:1px solid #d1d5db;
+        background:#fff; padding:0; line-height:1; cursor:pointer
+      }
+      /* MAIN VIEWER */
+      .vb-viewer {
+        position:relative;
+        width:100%;
+        height: min(70vw, 520px);  /* tall on phones, capped on large screens */
+        min-height: 280px;
+        border:1px solid var(--border);
+        border-radius:12px;
+        overflow:hidden;
+        background:#0b1220;
+        display:flex; align-items:center; justify-content:center;
+      }
+      .vb-viewer img { width:100%; height:100%; object-fit:contain; display:block }
       .vb-arrow {
         position:absolute; top:50%; transform:translateY(-50%);
-        width:40px; height:40px; border-radius:999px; border:1px solid #d1d5db;
-        background:#fff; display:inline-flex; align-items:center; justify-content:center;
-        cursor:pointer; padding:0; line-height:1;
+        background:#fff; border:1px solid #d1d5db; border-radius:999px; width:40px; height:40px;
+        display:inline-flex; align-items:center; justify-content:center;
       }
-      .vb-arrow-left { left:8px }
-      .vb-arrow-right { right:8px }
-
-      /* Taller viewer on wider screens */
-      @media (min-width: 480px) { .vb-viewer-inner { height:340px } }
-      @media (min-width: 768px) { .vb-viewer-inner { height:420px } }
-
-      /* Editor */
-      .vb-editor { display:grid; gap:10px }
-      @media (min-width: 520px) {
-        .vb-editor { grid-template-columns: 120px 1fr; align-items:start }
-      }
-
-      /* Grid — 2 cols on phones, 3 on small tablets */
-      .vb-grid { display:grid; gap:10px; grid-template-columns:repeat(2, 1fr) }
-      @media (min-width: 600px) { .vb-grid { grid-template-columns:repeat(3, 1fr) } }
-
-      .vb-card { border:1px solid var(--border); border-radius:12px; overflow:hidden; background:#fff }
-      .vb-thumb { width:100%; height:120px; object-fit:cover; display:block }
-      .vb-dot { width:12px; height:12px; border-radius:999px; border:1px solid #d1d5db; display:inline-block }
-      .vb-soft { background:#f8fafc; border:1px solid var(--border); border-radius:8px; padding:8px }
-      .vb-drag { outline:2px dashed #93c5fd; outline-offset:2px }
+      .vb-arrow--left { left:8px }
+      .vb-arrow--right { right:8px }
+      /* THUMBS GRID */
+      .vb-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px }
+      @media (min-width: 520px) { .vb-grid { grid-template-columns:repeat(4, 1fr) } }
+      .vb-card { border:1px solid var(--border); border-radius:10px; overflow:hidden; background:#fff }
+      .vb-thumb { width:100%; height:100px; object-fit:cover; display:block }
+      .vb-caption { font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+      .vb-active { outline:2px solid #6366f1; outline-offset:2px }
     `}</style>
   );
 
@@ -191,9 +181,11 @@ export default function VisionBoardScreen() {
     (async () => {
       setErr(null);
       try {
+        // sanity check bucket exists
         const ping = await supabase.storage.from(VISION_BUCKET).list(undefined, { limit: 1 });
         if (ping.error) throw ping.error;
 
+        // choose folder: prefer userId/ if exists else root
         let underUser = true;
         const testUser = await supabase.storage.from(VISION_BUCKET).list(userId, { limit: 1 });
         if (testUser.error || (testUser.data || []).length === 0) {
@@ -214,6 +206,7 @@ export default function VisionBoardScreen() {
           return { path, url: pub.publicUrl, caption: "", section: "other", order_index: i, created_at: (f as any)?.created_at };
         });
 
+        // Merge DB captions/section/order if table exists
         try {
           const { data: rows, error } = await supabase
             .from("vision_images")
@@ -232,8 +225,9 @@ export default function VisionBoardScreen() {
               }
             });
           }
-        } catch {}
+        } catch { /* table may not exist; ignore */ }
 
+        // Merge local fallbacks
         const lc = readLocalCaps(userId);
         const lo = readLocalOrder(userId);
         baseRows.forEach(r => {
@@ -258,14 +252,14 @@ export default function VisionBoardScreen() {
     return () => clearInterval(id);
   }, [playing, images.length]);
 
-  const canAdd = images.length < MAX_IMAGES;
+  const canAdd = useMemo(() => images.length < MAX_IMAGES, [images.length]);
   const monthLabel = useMemo(() => new Date().toLocaleString(undefined, { month: "long", year: "numeric" }), []);
   const filtered = useMemo(
     () => activeSection === "all" ? images : images.filter(i => i.section === activeSection),
     [images, activeSection]
   );
 
-  /* ---------- meta upserts ---------- */
+  /* ---------- DB helpers ---------- */
   async function upsertMetaMany(rows: Array<Pick<VBImage, "path" | "caption" | "section" | "order_index">>) {
     if (!userId) return;
     try {
@@ -273,6 +267,7 @@ export default function VisionBoardScreen() {
       const { error } = await supabase.from("vision_images").upsert(payload, { onConflict: "user_id,path" } as any);
       if (error) throw error;
     } catch {
+      // fallback: local-only
       const c = readLocalCaps(userId);
       const o = readLocalOrder(userId);
       rows.forEach(r => { c[r.path] = r.caption; o[r.path] = r.order_index; });
@@ -280,18 +275,28 @@ export default function VisionBoardScreen() {
       writeLocalOrder(userId, o);
     }
   }
+
   async function saveCaption(idxInAll: number, caption: string) {
-    setImages(prev => { const n = prev.slice(); n[idxInAll] = { ...n[idxInAll], caption }; return n; });
+    setImages(prev => {
+      const next = prev.slice();
+      next[idxInAll] = { ...next[idxInAll], caption };
+      return next;
+    });
     const row = images[idxInAll];
     if (row) await upsertMetaMany([{ path: row.path, caption, section: row.section, order_index: row.order_index }]);
   }
+
   async function changeSection(idxInAll: number, section: SectionKey) {
-    setImages(prev => { const n = prev.slice(); n[idxInAll] = { ...n[idxInAll], section }; return n; });
+    setImages(prev => {
+      const next = prev.slice();
+      next[idxInAll] = { ...next[idxInAll], section };
+      return next;
+    });
     const row = images[idxInAll];
     if (row) await upsertMetaMany([{ path: row.path, caption: row.caption, section, order_index: row.order_index }]);
   }
 
-  /* ---------- upload ---------- */
+  /* ---------- Upload ---------- */
   async function handleUpload(files: FileList | null) {
     if (!userId || !files || files.length === 0) return;
     setBusy(true); setErr(null);
@@ -302,17 +307,20 @@ export default function VisionBoardScreen() {
 
       for (const file of toUpload) {
         const safeName = `${Date.now()}-${file.name.replace(/\s+/g, "_")}`;
-        const path = `${userId}/${safeName}`;
+        const path = `${userId}/${safeName}`; // always under user/
         const up = await supabase.storage.from(VISION_BUCKET).upload(path, file, { upsert: false });
         if (up.error) throw up.error;
 
         const { data: pub } = supabase.storage.from(VISION_BUCKET).getPublicUrl(path);
-        const order_index = images.length + added.length;
-        added.push({ path, url: pub.publicUrl, caption: "", section: defaultSection, order_index });
+        const order_index = images.length + added.length; // append
+        const row: VBImage = { path, url: pub.publicUrl, caption: "", section: defaultSection, order_index };
+        added.push(row);
       }
 
       const next = [...images, ...added].slice(0, MAX_IMAGES);
       setImages(next);
+
+      // persist metadata for new rows
       await upsertMetaMany(added.map(r => ({ path: r.path, caption: "", section: r.section, order_index: r.order_index })));
 
       if (fileRef.current) fileRef.current.value = "";
@@ -323,7 +331,7 @@ export default function VisionBoardScreen() {
     }
   }
 
-  /* ---------- delete ---------- */
+  /* ---------- Delete ---------- */
   async function removeAt(idxInAll: number) {
     if (!userId) return;
     const img = images[idxInAll]; if (!img) return;
@@ -332,7 +340,9 @@ export default function VisionBoardScreen() {
       await supabase.storage.from(VISION_BUCKET).remove([img.path]);
       try { await supabase.from("vision_images").delete().eq("user_id", userId).eq("path", img.path); } catch {}
 
-      const reindexed = images.filter((_, i) => i !== idxInAll).map((r, i) => ({ ...r, order_index: i }));
+      const next = images.filter((_, i) => i !== idxInAll);
+      // reindex order
+      const reindexed = next.map((r, i) => ({ ...r, order_index: i }));
       setImages(reindexed);
       if (selectedIdx >= reindexed.length) setSelectedIdx(Math.max(0, reindexed.length - 1));
 
@@ -344,19 +354,17 @@ export default function VisionBoardScreen() {
     }
   }
 
-  /* ---------- drag & drop reorder ---------- */
+  /* ---------- Drag & Drop (reorder) ---------- */
   function onDragStart(e: React.DragEvent, filteredIndex: number) {
     dragFrom.current = filteredIndex;
     e.dataTransfer.effectAllowed = "move";
   }
-  function onDragOver(e: React.DragEvent, idx: number) {
+  function onDragOver(e: React.DragEvent) {
     e.preventDefault();
-    setDragOverIdx(idx);
     e.dataTransfer.dropEffect = "move";
   }
   async function onDrop(e: React.DragEvent, filteredIndex: number) {
     e.preventDefault();
-    setDragOverIdx(null);
     const fromFiltered = dragFrom.current;
     dragFrom.current = null;
     if (fromFiltered == null) return;
@@ -373,12 +381,13 @@ export default function VisionBoardScreen() {
     const next = images.slice();
     const [moved] = next.splice(fromIdxAll, 1);
     next.splice(toIdxAll, 0, moved);
+
     const reindexed = next.map((r, i) => ({ ...r, order_index: i }));
     setImages(reindexed);
     await upsertMetaMany(reindexed.map(r => ({ path: r.path, caption: r.caption, section: r.section, order_index: r.order_index })));
   }
 
-  /* ---------- export collage (1080x1920) ---------- */
+  /* ---------- Export (collage wallpaper 1080x1920) ---------- */
   async function exportCollage() {
     const src = images;
     if (src.length === 0) return;
@@ -387,17 +396,26 @@ export default function VisionBoardScreen() {
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext("2d"); if (!ctx) return;
 
-    ctx.fillStyle = "#0f172a"; ctx.fillRect(0, 0, W, H);
+    // background
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(0, 0, W, H);
+
+    // title
     ctx.fillStyle = "#ffffff";
     ctx.font = "bold 40px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial";
     ctx.fillText("My Vision", P, 72);
 
+    // grid: up to 6 images (2 cols x 3 rows)
     const cols = 2, rows = 3;
     const cellW = Math.floor((W - P * 3) / cols);
-    const cellH = Math.floor((H - 200 - P * 4) / rows);
+    const cellH = Math.floor((H - 200 - P * 4) / rows); // leave top area for title
 
+    // load
     const imgs = await Promise.all(src.map((it) => new Promise<HTMLImageElement>((resolve) => {
-      const im = new Image(); im.crossOrigin = "anonymous"; im.onload = () => resolve(im); im.src = it.url;
+      const im = new Image();
+      im.crossOrigin = "anonymous";
+      im.onload = () => resolve(im);
+      im.src = it.url;
     })));
 
     imgs.slice(0, cols * rows).forEach((im, idx) => {
@@ -405,16 +423,21 @@ export default function VisionBoardScreen() {
       const x = P + c * (cellW + P);
       const y = 110 + r * (cellH + P);
 
+      // draw image (contain)
       const ratio = Math.min(cellW / im.width, cellH / im.height);
       const w = Math.floor(im.width * ratio);
       const h = Math.floor(im.height * ratio);
       const ix = x + Math.floor((cellW - w) / 2);
       const iy = y + Math.floor((cellH - h) / 2);
 
+      // card bg
       ctx.fillStyle = "#0b1220";
-      roundRect(ctx, x - 2, y - 2, cellW + 4, cellH + 4, 16); ctx.fill();
+      roundRect(ctx, x - 2, y - 2, cellW + 4, cellH + 4, 16);
+      ctx.fill();
+
       ctx.drawImage(im, ix, iy, w, h);
 
+      // caption
       const cap = (src[idx].caption || "").trim();
       if (cap) {
         ctx.fillStyle = "#e5e7eb";
@@ -431,7 +454,8 @@ export default function VisionBoardScreen() {
         try { await navAny.share({ files: [file], title: "Vision board" }); return; } catch {}
       }
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = "vision_wallpaper.png"; a.click();
+      const a = document.createElement("a");
+      a.href = url; a.download = "vision_wallpaper.png"; a.click();
       URL.revokeObjectURL(url);
     }, "image/png");
   }
@@ -461,66 +485,176 @@ export default function VisionBoardScreen() {
     if (line) ctx.fillText(line.trim(), x, y);
   }
 
-  /* ---------- helpers ---------- */
-  function nextIdx() { return images.length ? (selectedIdx + 1) % images.length : 0; }
-  function prevIdx() { return images.length ? (selectedIdx - 1 + images.length) % images.length : 0; }
-
   /* ---------- UI ---------- */
   const current = images[selectedIdx] || null;
+  const monthStr = monthLabel;
+
+  function prev() { if (images.length) setSelectedIdx(i => (i - 1 + images.length) % images.length); }
+  function next() { if (images.length) setSelectedIdx(i => (i + 1) % images.length); }
 
   return (
-    <div className="vb-wrap">
+    <div style={{ display: "grid", gap: 12 }}>
       {styleTag}
 
       {/* Title + Help */}
-      <div className="card vb-title">
+      <div className="card" style={{ position: "relative", paddingRight: 64 }}>
         <button
           onClick={() => setShowHelp(true)}
           aria-label="Open Vision Board help"
           title="Need a hand? Ask Alfred"
-          style={{ position: "absolute", top: 8, right: 8, border: "none", background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0 }}
+          style={{ position: "absolute", top: 8, right: 8, border: "none", background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10 }}
         >
           {VB_ALFRED_SRC ? (
-            <img src={VB_ALFRED_SRC} alt="Vision Board Alfred — open help" style={{ width: 44, height: 44 }} onError={() => setImgIdx(i => i + 1)} />
+            <img src={VB_ALFRED_SRC} alt="Vision Board Alfred — open help" style={{ width: 48, height: 48 }} onError={() => setImgIdx(i => i + 1)} />
           ) : (
             <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db", background: "#f9fafb", fontWeight: 700 }}>?</span>
           )}
         </button>
         <h1 style={{ margin: 0 }}>Vision Board</h1>
-        <div className="muted">{monthLabel}</div>
+        <div className="muted">{monthStr}</div>
       </div>
 
-      {/* Large viewer with arrows (only when we have images) */}
-      {current && (
-        <div className="vb-viewer card">
-          <div className="vb-viewer-inner">
-            <img src={current.url} alt="" className="vb-viewer-img" />
-          </div>
-          <button className="vb-arrow vb-arrow-left" onClick={() => setSelectedIdx(prevIdx())} aria-label="Previous">
-            <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 4 L7 10 L12 16" />
-            </svg>
-          </button>
-          <button className="vb-arrow vb-arrow-right" onClick={() => setSelectedIdx(nextIdx())} aria-label="Next">
-            <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M8 4 L13 10 L8 16" />
-            </svg>
-          </button>
-        </div>
-      )}
-
       {/* Toolbar */}
-      <div className="card vb-toolbar">
-        <div className="vb-field">
-          <span className="muted">View</span>
-          <select className="vb-select" value={activeSection} onChange={e => setActiveSection(e.target.value as any)}>
-            <option value="all">All sections</option>
-            {SECTIONS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
-          </select>
+      <div className="card" style={{ display: "grid", gap: 10 }}>
+        <div className="vb-actions">
+          <div style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+            <span className="muted">View</span>
+            <select value={activeSection} onChange={e => setActiveSection(e.target.value as any)}>
+              <option value="all">All sections</option>
+              {SECTIONS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+            </select>
+          </div>
+
+          <div style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+            <span className="muted">New uploads →</span>
+            <select value={defaultSection} onChange={e => setDefaultSection(e.target.value as SectionKey)}>
+              {SECTIONS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+            </select>
+            <span className="vb-dot" title="Color" style={{ background: colorOf(defaultSection) }} />
+          </div>
+
+          <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: "none" }}
+                 onChange={e => handleUpload(e.target.files)} />
+          <button onClick={() => fileRef.current?.click()} disabled={!userId || !canAdd || busy}
+                  className="btn-primary" style={{ borderRadius: 8 }}>
+            {busy ? "Uploading…" : `Upload image${canAdd ? "" : " (full)"}`}
+          </button>
+
+          <button onClick={() => setPlaying(p => !p)} disabled={images.length <= 1}>
+            {playing ? "Pause" : "Play 30s"}
+          </button>
+          <button onClick={exportCollage} disabled={images.length === 0} className="btn-soft">
+            Export collage
+          </button>
         </div>
 
-        <div className="vb-field">
-          <span className="muted">New uploads go to</span>
-          <div className="vb-inline">
-            <select className="vb-select" value={defaultSection} onChange={e => setDefaultSection(e.target.value as SectionKey)}>
-              {SECTIONS.map(s => <option key={s.key} value={s.key}>{s.label}</option
+        {err && <div style={{ color: "red" }}>{err}</div>}
+      </div>
+
+      {/* Big viewer (manual arrows + slideshow) */}
+      <div className="card" style={{ padding: 8 }}>
+        {current ? (
+          <div className="vb-viewer" aria-label="Vision image viewer">
+            <button className="vb-arrow vb-arrow--left" aria-label="Previous" onClick={prev}>
+              <svg viewBox="0 0 20 20" width="18" height="18" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 4 L7 10 L12 16" />
+              </svg>
+            </button>
+
+            <img key={current.path} src={current.url} alt="" />
+
+            <button className="vb-arrow vb-arrow--right" aria-label="Next" onClick={next}>
+              <svg viewBox="0 0 20 20" width="18" height="18" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 4 L13 10 L8 16" />
+              </svg>
+            </button>
+          </div>
+        ) : (
+          <div className="muted">No images yet. Upload your first one above.</div>
+        )}
+
+        {/* Inline editor under the viewer */}
+        {current && (
+          <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+            <label style={{ display: "grid", gap: 6 }}>
+              <span className="muted">Affirmation / caption</span>
+              <input
+                value={current.caption}
+                onChange={e => setImages(prev => { const n = prev.slice(); n[selectedIdx] = { ...n[selectedIdx], caption: e.target.value }; return n; })}
+                onBlur={e => saveCaption(selectedIdx, e.target.value)}
+                placeholder="e.g., I run a healthy 5k every Saturday"
+              />
+            </label>
+
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                <span className="muted">Section</span>
+                <select
+                  value={current.section}
+                  onChange={e => changeSection(selectedIdx, e.target.value as SectionKey)}
+                >
+                  {SECTIONS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                </select>
+              </label>
+              <button onClick={() => removeAt(selectedIdx)} className="btn-soft" style={{ marginLeft: "auto" }}>
+                Delete
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Thumbnails (filtered), drag + drop reorder */}
+      <div className="card">
+        {filtered.length === 0 ? (
+          <div className="muted">No images{activeSection !== "all" ? ` in ${SECTIONS.find(s=>s.key===activeSection)?.label}` : ""} yet.</div>
+        ) : (
+          <div className="vb-grid">
+            {filtered.map((img, i) => {
+              const idxAll = images.findIndex(x => x.path === img.path);
+              const isActive = idxAll === selectedIdx;
+              return (
+                <div
+                  key={img.path}
+                  className={`vb-card${isActive ? " vb-active" : ""}`}
+                  draggable
+                  onDragStart={(e) => onDragStart(e, i)}
+                  onDragOver={onDragOver}
+                  onDrop={(e) => onDrop(e, i)}
+                  onClick={() => setSelectedIdx(idxAll)}
+                  title={img.caption || "Open"}
+                >
+                  <img src={img.url} alt="" className="vb-thumb" />
+                  <div style={{ padding: 8, display: "grid", gap: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span className="vb-dot" style={{ background: colorOf(img.section) }} />
+                      <div className="vb-caption">{img.caption || "—"}</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Help modal */}
+      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Vision Board — Help">
+        <div style={{ display: "flex", gap: 16 }}>
+          {VB_ALFRED_SRC && (
+            <img
+              src={VB_ALFRED_SRC}
+              alt=""
+              aria-hidden="true"
+              style={{ width: 72, height: 72, flex: "0 0 auto" }}
+              onError={() => setImgIdx(i => i + 1)}
+            />
+          )}
+          <div style={{ flex: 1 }}>
+            <VisionHelpContent />
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
