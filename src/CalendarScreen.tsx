@@ -284,7 +284,6 @@ export default function CalendarScreen({
     const newSel = toISO(addDays(fromISO(selectedISO), -7));
     setSelectedISO(newSel);
     if (navigateOnSelect && onSelectDate) onSelectDate(newSel);
-    // if moved to different month, keep cursor aligned
     const d = fromISO(newSel);
     setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
   }
@@ -736,7 +735,9 @@ export default function CalendarScreen({
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
             <h2 style={{ margin: 0 }}>{selectedISO}</h2>
-            <span className="muted">{dayTasks.length} task{dayTasks.length === 1 ? "" : "s"}</span>
+            <span className="muted">
+              {loading ? "Loading…" : `${dayTasks.length} task${dayTasks.length === 1 ? "" : "s"}`}
+            </span>
           </div>
 
           {/* Natural-language quick add */}
@@ -785,7 +786,7 @@ export default function CalendarScreen({
           </button>
         </div>
 
-        {dayTasks.length === 0 && <div className="muted">Nothing scheduled.</div>}
+        {dayTasks.length === 0 && !loading && <div className="muted">Nothing scheduled.</div>}
         <ul className="list">
           {dayTasks.map((t) => (
             <li key={t.id} className="item">
@@ -1144,9 +1145,8 @@ function parseCSV(text: string): Array<{ title: string; due_date: string; catego
   const lines = text.replace(/\r\n/g, "\n").split("\n").filter(Boolean);
   if (!lines.length) return out;
   let startIdx = 0;
-  let hasHeader = false;
   const first = lines[0].toLowerCase();
-  if (first.includes("date") && first.includes("title")) { hasHeader = true; startIdx = 1; }
+  if (first.includes("date") && first.includes("title")) { startIdx = 1; }
   for (let i = startIdx; i < lines.length; i++) {
     const cols = splitCsvLine(lines[i]);
     if (!cols.length) continue;
