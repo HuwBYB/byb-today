@@ -21,14 +21,10 @@ function fromISO(s: string) {
   const [y, m, d] = s.split("-").map(Number);
   return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
-function addDaysISO(iso: string, days: number) {
+function isoAddDays(iso: string, delta: number) {
   const d = fromISO(iso);
-  d.setDate(d.getDate() + days);
+  d.setDate(d.getDate() + delta);
   return toISO(d);
-}
-function diffDays(aISO: string, bISO: string) {
-  const a = fromISO(aISO), b = fromISO(bISO);
-  return Math.round((+b - +a) / 86400000);
 }
 
 /* ---------- Public path helper ---------- */
@@ -81,18 +77,18 @@ function GratitudeHelpContent() {
 
       <h4 style={{ margin: 0 }}>How to use</h4>
       <ol style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Tap <b>Today</b> (or pick a date).</li>
-        <li>Use a prompt or write your own — short is perfect.</li>
-        <li>Keep your streak alive 🔥</li>
+        <li>Tap <b>Today</b>, then use the arrows or date to navigate.</li>
+        <li>Fill any of the 1–8 lines with short, specific entries.</li>
+        <li>Use prompts to spark ideas; your streak grows automatically.</li>
       </ol>
 
       <h4 style={{ margin: 0 }}>Alfred’s tip</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Add one thing you’re grateful to <b>yourself</b> for — it builds self-respect.</li>
+        <li>Include one thing you’re grateful to <b>yourself</b> for — it builds self-respect.</li>
       </ul>
 
       <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-        Entries save on blur. If you go offline, they’re stored locally and retried.
+        Entries save when a field loses focus. If you go offline, we keep your text locally and retry later.
       </p>
     </div>
   );
@@ -103,31 +99,31 @@ type Idx = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 const INDEXES: Idx[] = [1,2,3,4,5,6,7,8];
 const SIMPLE_PLACEHOLDER = "Today I’m grateful for…";
 
-/* Daily prompt bank */
-const PROMPTS = [
+/* Prompts */
+const PROMPT_CATALOGUE = [
   "A person who helped me recently",
-  "Something in nature I noticed today",
-  "A tiny win from the last 24h",
-  "A comfort at home I love",
-  "A lesson a mistake taught me",
-  "A part of my body that’s working hard",
-  "Someone I can always text/call",
-  "A skill I’ve improved",
-  "A memory that still makes me smile",
-  "A freedom I often forget I have",
-  "A tool or app that saves me time",
-  "Something about my work I appreciate",
-  "Food or drink that lifted my mood",
-  "A song/podcast/book I enjoyed",
-  "An act of kindness I witnessed",
-  "Something I’m excited to learn",
-  "A place that makes me feel calm",
-  "A problem that didn’t happen",
-  "A challenge I handled better than before",
-  "A habit I’m proud I kept today",
+  "Something about my health/body",
+  "A small win from today",
+  "A lesson I learned",
+  "Something in my environment",
+  "A freedom/privilege I enjoy",
+  "Progress I made on a goal",
+  "Someone I appreciate from the past",
+  "An ability/skill I used",
+  "A piece of good news",
+  "A kindness I received/gave",
+  "Something I’m looking forward to",
 ];
+function pickN<T>(arr: T[], n: number) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a.slice(0, n);
+}
 
-/* ---------- Local unsynced cache helpers ---------- */
+/* ---------- Local unsynced cache ---------- */
 function lsKey(userId: string, dateISO: string) { return `byb:gratitude:unsynced:${userId}:${dateISO}`; }
 type UnsyncedMap = Record<number, string>;
 
@@ -142,7 +138,14 @@ export default function GratitudeScreen() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // history for streaks & resurfacing (last 120 days)
   const [history, setHistory] = useState<Record<string, EntryRow[]>>({});
+
+  // prompts
+  const [promptSet, setPromptSet] = useState<string[]>(() => pickN(PROMPT_CATALOGUE, 6));
+
+  // resurfacing
+  const [surfaced, setSurfaced] = useState<{ date: string; content: string } | null>(null);
 
   // Alfred modal
   const [showHelp, setShowHelp] = useState(false);
@@ -151,16 +154,8 @@ export default function GratitudeScreen() {
   // per-field local unsynced state
   const [unsynced, setUnsynced] = useState<UnsyncedMap>({});
 
-  // Streaks
-  const [streak, setStreak] = useState(0);
-  const [bestStreak, setBestStreak] = useState(0);
-
-  // Daily prompts
-  const [promptSet, setPromptSet] = useState<string[]>([]);
-
-  // “From the vault”
-  const [vaultPool, setVaultPool] = useState<Array<{ entry_date: string; content: string }>>([]);
-  const [vaultItem, setVaultItem] = useState<{ entry_date: string; content: string } | null>(null);
+  // inputs refs (optional focus after using a prompt)
+  const inputRefs = useRef<Array<HTMLInputElement | null>>([]);
 
   // mounted guard
   const alive = useRef(true);
@@ -178,36 +173,11 @@ export default function GratitudeScreen() {
   useEffect(() => {
     if (userId) {
       loadDay(dateISO);
-      loadHistoryAndStats();
+      loadHistory();
       loadUnsynced(userId, dateISO);
-      seedPromptsFor(dateISO);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, dateISO]);
-
-  function seedPromptsFor(iso: string) {
-    // Deterministic 3 prompts per day (but allow shuffle)
-    const dayNumber = Math.abs(Math.floor(fromISO(iso).getTime() / 86400000));
-    const a = PROMPTS[dayNumber % PROMPTS.length];
-    const b = PROMPTS[(dayNumber + 5) % PROMPTS.length];
-    const c = PROMPTS[(dayNumber + 11) % PROMPTS.length];
-    setPromptSet([a, b, c]);
-  }
-  function shufflePrompts() {
-    const arr = [...PROMPTS];
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    setPromptSet(arr.slice(0, 3));
-  }
-  function usePrompt(p: string) {
-    // put into next empty slot, then save
-    const empty = INDEXES.find(i => (draft[i] ?? "").trim() === "");
-    const idx = empty ?? 8;
-    setDraft(d => ({ ...d, [idx]: p }));
-    // save after state settles
-    setTimeout(() => saveIdx(idx), 0);
-  }
 
   function initMaps(withRows: EntryRow[]) {
     const rb: Record<number, EntryRow | null> = {};
@@ -232,61 +202,23 @@ export default function GratitudeScreen() {
     initMaps((data as EntryRow[]) || []);
   }
 
-  async function loadHistoryAndStats() {
+  async function loadHistory() {
     if (!userId) return;
-    const today = toISO(new Date());
-    const since = addDaysISO(today, -365);
+    const since = new Date(); since.setDate(since.getDate() - 120);
     const { data, error } = await supabase
       .from("gratitude_entries")
-      .select("entry_date,item_index,content")
+      .select("id,user_id,entry_date,item_index,content")
       .eq("user_id", userId)
-      .gte("entry_date", since)
-      .lte("entry_date", today)
-      .order("entry_date", { ascending: true })
-      .limit(2000); // generous cap
+      .gte("entry_date", toISO(since))
+      .order("entry_date", { ascending: false })
+      .order("item_index", { ascending: true });
     if (error) { setErr(error.message); safeSet(setHistory, {}); return; }
-
-    const rows = (data as EntryRow[]) || [];
     const grouped: Record<string, EntryRow[]> = {};
-    rows.forEach(r => { (grouped[r.entry_date] ||= []).push(r); });
+    (data as EntryRow[]).forEach(r => { (grouped[r.entry_date] ||= []).push(r); });
     safeSet(setHistory, grouped);
 
-    // streaks (unique days with >=1 entry)
-    const dates = Object.keys(grouped).filter(d => grouped[d].some(r => (r.content || "").trim().length > 0));
-    const set = new Set(dates);
-
-    // current streak: count back from today
-    let cur = 0;
-    let cursor = today;
-    while (set.has(cursor)) {
-      cur += 1;
-      cursor = addDaysISO(cursor, -1);
-    }
-    setStreak(cur);
-
-    // best streak: scan the year
-    let best = 0, run = 0, prev: string | null = null;
-    dates.sort(); // ascending
-    for (const d of dates) {
-      if (prev && diffDays(prev, d) === 1) run += 1;
-      else run = 1;
-      best = Math.max(best, run);
-      prev = d;
-    }
-    setBestStreak(best);
-
-    // “From the vault”
-    const pool = rows
-      .filter(r => (r.content || "").trim().length > 0 && r.entry_date < today)
-      .map(r => ({ entry_date: r.entry_date, content: r.content }));
-    setVaultPool(pool);
-    pickVault(pool);
-  }
-
-  function pickVault(pool = vaultPool) {
-    if (!pool || pool.length === 0) { setVaultItem(null); return; }
-    const i = Math.floor(Math.random() * pool.length);
-    setVaultItem(pool[i]);
+    // seed resurfacing
+    surfaceRandom(grouped);
   }
 
   /* ---------- Local unsynced persistence ---------- */
@@ -317,7 +249,7 @@ export default function GratitudeScreen() {
     });
   }
 
-  /* ---------- Save one line ---------- */
+  /* ---------- Save one line (insert OR update) ---------- */
   async function saveIdx(idx: Idx) {
     if (!userId) return;
     const content = (draft[idx] || "").trim();
@@ -327,6 +259,7 @@ export default function GratitudeScreen() {
 
     try {
       if (!content) {
+        // delete if existed
         if (existing) {
           const { error } = await supabase.from("gratitude_entries").delete().eq("id", existing.id);
           if (error) throw error;
@@ -334,6 +267,7 @@ export default function GratitudeScreen() {
         setRowsByIdx(prev => ({ ...prev, [idx]: null }));
         clearUnsynced(idx);
       } else if (existing) {
+        // UPDATE
         const { error } = await supabase
           .from("gratitude_entries")
           .update({ content })
@@ -342,6 +276,7 @@ export default function GratitudeScreen() {
         setRowsByIdx(prev => ({ ...prev, [idx]: { ...(prev[idx] as EntryRow), content } }));
         clearUnsynced(idx);
       } else {
+        // INSERT
         const { data, error } = await supabase
           .from("gratitude_entries")
           .insert({ user_id: userId, entry_date: dateISO, item_index: idx, content })
@@ -352,8 +287,8 @@ export default function GratitudeScreen() {
         clearUnsynced(idx);
       }
 
-      // refresh stats quickly (don’t block UI)
-      loadHistoryAndStats();
+      // refresh history (streaks) quietly
+      loadHistory();
     } catch (e: any) {
       const msg = (e?.message || String(e)) as string;
       if (msg.includes('no field "updated_at"')) {
@@ -378,14 +313,72 @@ export default function GratitudeScreen() {
 
   /* ---------- UI helpers ---------- */
   function gotoToday() { setDateISO(toISO(new Date())); }
-  function gotoPrev()  { const d = fromISO(dateISO); d.setDate(d.getDate() - 1); setDateISO(toISO(d)); }
-  function gotoNext()  { const d = fromISO(dateISO); d.setDate(d.getDate() + 1); setDateISO(toISO(d)); }
+  function gotoPrev()  { setDateISO(isoAddDays(dateISO, -1)); }
+  function gotoNext()  { setDateISO(isoAddDays(dateISO, +1)); }
 
   const countToday = useMemo(
     () => INDEXES.reduce((n, i) => n + (rowsByIdx[i] ? 1 : 0), 0),
     [rowsByIdx]
   );
 
+  /* ---------- Streaks ---------- */
+  const { currentStreak, bestStreak } = useMemo(() => {
+    // Build a set of days with >=1 entries (include current day state)
+    const set = new Set<string>(Object.keys(history).filter(d => (history[d] || []).length > 0));
+    if (countToday > 0) set.add(dateISO);
+
+    // current streak: go backwards from today
+    let cur = 0;
+    let probe = dateISO;
+    while (set.has(probe)) {
+      cur += 1;
+      probe = isoAddDays(probe, -1);
+    }
+
+    // best streak: scan last 120 days
+    let best = 0;
+    let running = 0;
+    const start = isoAddDays(toISO(new Date()), -120);
+    let day = start;
+    const today = toISO(new Date());
+    while (day <= today) {
+      if (set.has(day)) {
+        running += 1;
+        if (running > best) best = running;
+      } else {
+        running = 0;
+      }
+      day = isoAddDays(day, +1);
+    }
+
+    return { currentStreak: cur, bestStreak: best };
+  }, [history, dateISO, countToday]);
+
+  /* ---------- Prompts ---------- */
+  function shufflePrompts() {
+    setPromptSet(pickN(PROMPT_CATALOGUE, 6));
+  }
+  function usePrompt(text: string) {
+    // Fill the next empty line
+    const nextEmpty = INDEXES.find(i => !draft[i]?.trim());
+    if (!nextEmpty) return;
+    setDraft(d => ({ ...d, [nextEmpty]: text }));
+    // focus that input
+    const ref = inputRefs.current[nextEmpty - 1];
+    if (ref) ref.focus();
+  }
+
+  /* ---------- Resurfacing ---------- */
+  function surfaceRandom(grouped: Record<string, EntryRow[]>) {
+    const dates = Object.keys(grouped).filter(d => d !== dateISO && (grouped[d] || []).length > 0);
+    if (dates.length === 0) { setSurfaced(null); return; }
+    const pickDate = dates[Math.floor(Math.random() * dates.length)];
+    const items = grouped[pickDate] || [];
+    const item = items[Math.floor(Math.random() * items.length)];
+    setSurfaced({ date: pickDate, content: item?.content || "" });
+  }
+
+  /* ---------- Export ---------- */
   async function exportCSV() {
     if (!userId) return;
     const { data, error } = await supabase
@@ -395,168 +388,4 @@ export default function GratitudeScreen() {
       .order("entry_date", { ascending: true })
       .order("item_index", { ascending: true });
     if (error) { setErr(error.message); return; }
-    const rows = [["date", "item_index", "content"]];
-    (data as any[]).forEach(r => rows.push([r.entry_date, String(r.item_index), String(r.content || "").replace(/\r?\n/g, " ")]));
-    const csv = rows.map(r => r.map(x => `"${String(x).replace(/"/g, '""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "gratitude.csv"; a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  /* ---------- Styles (small mobile tweaks) ---------- */
-  const styles = (
-    <style>{`
-      .g-toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap }
-      .g-pill { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; background:#f1f5f9; border:1px solid #e5e7eb; font-size:12px }
-      .g-prompts { display:flex; gap:6px; flex-wrap:wrap }
-      .g-chip { padding:6px 10px; border-radius:999px; border:1px solid #d1d5db; background:#fff; font-size:12px }
-      .g-chip:active { transform: scale(0.98) }
-      .g-vault { border:1px dashed #cbd5e1; background:#f8fafc; border-radius:10px; padding:10px }
-    `}</style>
-  );
-
-  return (
-    <div className="page-gratitude" style={{ display: "grid", gap: 12 }}>
-      {styles}
-
-      {/* Title card with Alfred */}
-      <div className="card" style={{ position: "relative", paddingRight: 64 }}>
-        <button
-          onClick={() => setShowHelp(true)}
-          aria-label="Open Gratitude help"
-          title="Need a hand? Ask Alfred"
-          style={{ position: "absolute", top: 8, right: 8, border: "none", background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10 }}
-        >
-          {imgOk ? (
-            <img src={GRAT_ALFRED_SRC} alt="Gratitude Alfred — open help" style={{ width: 48, height: 48 }} onError={() => setImgOk(false)} />
-          ) : (
-            <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db", background: "#f9fafb", fontWeight: 700 }}>?</span>
-          )}
-        </button>
-        <h1 style={{ margin: 0 }}>Gratitude Journal</h1>
-        <div className="g-toolbar" style={{ marginTop: 8 }}>
-          <div className="g-pill" title="Current streak">🔥 {streak} day{streak===1?"":"s"}</div>
-          <div className="g-pill" title="Best streak">🏅 Best: {bestStreak}</div>
-          <div className="g-pill">{countToday}/8 today</div>
-        </div>
-      </div>
-
-      {/* Toolbar (date + export) */}
-      <div className="card" style={{ display: "grid", gap: 10 }}>
-        <div className="g-toolbar">
-          <button onClick={gotoToday}>Today</button>
-          <button onClick={gotoPrev} aria-label="Previous day">←</button>
-          <input type="date" value={dateISO} onChange={e => setDateISO(e.target.value)} />
-          <button onClick={gotoNext} aria-label="Next day">→</button>
-          <button className="btn-soft" onClick={exportCSV} style={{ marginLeft: "auto" }}>Export CSV</button>
-        </div>
-
-        {/* Daily prompts */}
-        <div>
-          <div className="section-title" style={{ marginBottom: 6 }}>Today’s prompts</div>
-          <div className="g-prompts">
-            {promptSet.map((p, i) => (
-              <button key={i} className="g-chip" onClick={() => usePrompt(p)} title="Tap to add to the next empty line">
-                {p}
-              </button>
-            ))}
-            <button className="g-chip" onClick={shufflePrompts} title="Shuffle prompts">↻ Shuffle</button>
-          </div>
-        </div>
-
-        {err && <div style={{ color: "red" }}>{err}</div>}
-      </div>
-
-      {/* Editor */}
-      <div className="card card--wash" style={{ display: "grid", gap: 10 }}>
-        {INDEXES.map((idx) => {
-          const localUnsynced = unsynced[idx] != null;
-          return (
-            <div key={idx} style={{ display: "grid", gap: 6 }}>
-              <div className="section-title">Gratitude {idx}</div>
-              <input
-                type="text"
-                inputMode="text"
-                autoComplete="off"
-                placeholder={SIMPLE_PLACEHOLDER}
-                value={draft[idx] ?? ""}
-                onChange={(e) => {
-                  const v = e.currentTarget.value;
-                  setDraft((d) => ({ ...d, [idx]: v }));
-                }}
-                onBlur={() => saveIdx(idx)}
-                disabled={loading || savingIdx === idx}
-                aria-label={`Gratitude ${idx}`}
-              />
-              {savingIdx === idx && <span className="muted">Saving…</span>}
-              {localUnsynced && savingIdx !== idx && (
-                <div className="muted" style={{ fontSize: 12 }}>
-                  Saved locally — will sync when possible.{" "}
-                  <button className="btn-soft" onClick={() => saveIdx(idx)}>Retry now</button>
-                </div>
-              )}
-            </div>
-          );
-        })}
-
-        {Object.keys(unsynced).length > 0 && (
-          <div className="muted" style={{ marginTop: 4 }}>
-            {Object.keys(unsynced).length} item(s) waiting to sync.{" "}
-            <button className="btn-soft" onClick={retrySyncAll}>Retry all</button>
-          </div>
-        )}
-      </div>
-
-      {/* From the vault (random resurfacing) */}
-      <div className="card">
-        <div className="g-vault">
-          <div className="section-title" style={{ marginBottom: 6 }}>From the vault</div>
-          {!vaultItem ? (
-            <div className="muted">No past entries yet. Your throwbacks will appear here.</div>
-          ) : (
-            <div style={{ display: "grid", gap: 6 }}>
-              <div className="muted">{vaultItem.entry_date}</div>
-              <div style={{ fontWeight: 600 }}>{vaultItem.content}</div>
-              <div>
-                <button className="btn-soft" onClick={() => pickVault()}>Another</button>
-                <button className="btn-soft" style={{ marginLeft: 8 }} onClick={() => setDateISO(vaultItem.entry_date)}>Open day</button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Recent history list (last year grouped; still compact for mobile) */}
-      <div className="card" style={{ display: "grid", gap: 8 }}>
-        <h2 style={{ margin: 0 }}>Recent days</h2>
-        <ul className="list">
-          {Object.keys(history).length === 0 && <li className="muted">No recent entries.</li>}
-          {Object.entries(history).sort((a, b) => (a[0] < b[0] ? 1 : -1)).slice(0, 30).map(([d, rows]) => (
-            <li key={d} className="item" style={{ alignItems: "center" }}>
-              <div>
-                <div style={{ fontWeight: 600 }}>{d}</div>
-                <div className="muted" style={{ marginTop: 4 }}>
-                  {(rows || []).map(r => r.content).slice(0, 2).join(" · ")}
-                  {rows.length > 2 ? " · …" : ""}
-                </div>
-              </div>
-              <button onClick={() => setDateISO(d)}>Open</button>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      {/* Help modal */}
-      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Gratitude — Help">
-        <div style={{ display: "flex", gap: 16 }}>
-          {imgOk && <img src={GRAT_ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
-          <div style={{ flex: 1 }}>
-            <GratitudeHelpContent />
-          </div>
-        </div>
-      </Modal>
-    </div>
-  );
-}
+    const rows = [["date", "item_index", "content
