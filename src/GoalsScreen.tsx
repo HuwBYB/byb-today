@@ -1,6 +1,20 @@
 import { useEffect, useState, useRef, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
-import BigGoalWizard from "./BigGoalWizard";
+import BigGoalWizardModule from "./BigGoalWizard";
+
+/** ── Wizard adapter ─────────────────────────────────────────────
+ * Accepts onClose/onCreated (optional) and renders whatever
+ * ./BigGoalWizard exports (function component, default object, etc).
+ * This removes the TS2322 “IntrinsicAttributes” error regardless of
+ * how BigGoalWizard’s props are typed.
+ */
+type WizardProps = { onClose?: () => void; onCreated?: () => void };
+function BigGoalWizardAdapter(props: WizardProps) {
+  const Comp: any = (BigGoalWizardModule as any)?.default ?? BigGoalWizardModule;
+  if (typeof Comp === "function") return <Comp {...props} />;
+  if (Comp && typeof Comp === "object") return <Comp.type {...{ ...(Comp.props || {}), ...props }} />;
+  return <div className="muted">Big Goal Wizard unavailable.</div>;
+}
 
 /** Public path helper (works with Vite/CRA/Vercel/GH Pages) */
 function publicPath(p: string) {
@@ -166,11 +180,6 @@ export default function GoalsScreen() {
   const [showHelp, setShowHelp] = useState(false);
   const [imgIdx, setImgIdx] = useState(0); // which candidate we’re trying
 
-  useEffect(() => {
-    console.log("Alfred image candidates:", ALFRED_CANDIDATES);
-  }, []);
-
-  /* ----- auth ----- */
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -422,11 +431,9 @@ export default function GoalsScreen() {
             alt="Alfred — open help"
             style={{ width: 56, height: 56, display: "block" }}
             onError={() => {
-              // try the next candidate (jpg/jpeg/webp)
               if (imgIdx < ALFRED_CANDIDATES.length - 1) {
                 setImgIdx(imgIdx + 1);
               } else {
-                // hide if none found
                 (document.activeElement as HTMLElement | null)?.blur?.();
               }
               console.warn("Alfred image not found at:", currentAlfredSrc);
@@ -443,7 +450,7 @@ export default function GoalsScreen() {
             <span className="muted">Title</span>
             <input value={sgTitle} onChange={e => setSgTitle(e.target.value)} placeholder="e.g., Read 12 books" />
           </label>
-        {/* date + category row */}
+          {/* date + category row */}
           <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
             <label style={{ flex: 1 }}>
               <div className="muted">Target date (optional)</div>
@@ -495,7 +502,7 @@ export default function GoalsScreen() {
 
         {showWizard && (
           <div style={{ marginTop: 8 }}>
-            <BigGoalWizard
+            <BigGoalWizardAdapter
               onClose={() => setShowWizard(false)}
               onCreated={() => { setShowWizard(false); loadGoals(); }}
             />
