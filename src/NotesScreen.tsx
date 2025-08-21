@@ -39,7 +39,6 @@ function escapeHtml(s: string) {
 function highlight(text: string, terms: string[]) {
   if (!terms.length) return escapeHtml(text);
   let html = escapeHtml(text);
-  // simple multi-term highlighter (case-insensitive)
   terms.forEach(t => {
     if (!t) return;
     const re = new RegExp(`(${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "ig");
@@ -179,7 +178,6 @@ export default function NotesScreen() {
         .limit(1000);
       if (error) throw error;
       setNotes((data as Note[]) || []);
-      // keep selection if still present, else first
       const nextId = (data as Note[] || []).some(n => n.id === activeId)
         ? activeId
         : (data as Note[] || [])[0]?.id ?? null;
@@ -336,15 +334,6 @@ export default function NotesScreen() {
   }, [notes]);
 
   /* ---------- Backlinks ---------- */
-  const titleIndex = useMemo(() => {
-    const m = new Map<string, Note>();
-    notes.forEach(n => {
-      const key = normalizeTitle(n.title || firstLine(n.content));
-      if (key) m.set(key, n);
-    });
-    return m;
-  }, [notes]);
-
   const backlinks = useMemo(() => {
     if (!activeNote) return [] as { from: Note; snippet: string }[];
     const myTitle = activeNote.title || firstLine(activeNote.content);
