@@ -1,28 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-/* -------- categories + colours (match DB constraint) --------
-   Allowed in DB: 'health' | 'personal' | 'financial' | 'career' | 'other'
----------------------------------------------------------------- */
+/* ---------- Categories (match DB) ---------- */
 const CATS = [
   { key: "personal",  label: "Personal",  color: "#a855f7" }, // purple
   { key: "health",    label: "Health",    color: "#22c55e" }, // green
-  { key: "career",    label: "Business",  color: "#3b82f6" }, // blue
+  { key: "career",    label: "Business",  color: "#3b82f6" }, // blue (stored as 'career')
   { key: "financial", label: "Finance",   color: "#f59e0b" }, // amber
   { key: "other",     label: "Other",     color: "#6b7280" }, // gray
 ] as const;
 type AllowedCategory = typeof CATS[number]["key"];
-const colorOf = (k: AllowedCategory | null | undefined) =>
-  CATS.find(c => c.key === k)?.color || "#6b7280";
+const colorOf = (k?: AllowedCategory | null) => CATS.find(c => c.key === k)?.color || "#6b7280";
 
-/* -------- date helpers -------- */
+/* ---------- Date utils ---------- */
 function toISO(d: Date) {
-  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,"0"), dd=String(d.getDate()).padStart(2,"0");
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
 function fromISO(s: string) {
-  const [y,m,d] = s.split("-").map(Number);
-  return new Date(y,(m??1)-1,d??1);
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
 function clampDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -35,16 +32,66 @@ function addMonthsClamped(base: Date, months: number, anchorDay?: number) {
   const ld = lastDayOfMonth(first.getFullYear(), first.getMonth());
   return new Date(first.getFullYear(), first.getMonth(), Math.min(anchor, ld));
 }
-function addDays(d: Date, n: number) {
-  const x = new Date(d);
-  x.setDate(x.getDate() + n);
-  return x;
+
+/* ---------- DB row types (subset) ---------- */
+type GoalRow = {
+  id: number;
+  user_id: string;
+  title: string;
+  goal_type: string | null;
+  category: AllowedCategory;
+  category_color: string | null;
+  start_date: string;   // YYYY-MM-DD
+  target_date: string;  // YYYY-MM-DD
+  halfway_note: string | null;
+  halfway_date: string | null;
+  status: "active" | "paused" | "done" | string;
+};
+
+type TaskRow = {
+  id: number;
+  user_id: string;
+  title: string;
+  due_date: string | null;
+  status: "pending" | "done" | string;
+  priority: number | null;
+  source: string | null;
+  category: AllowedCategory | null;
+  category_color: string | null;
+  completed_at: string | null;
+};
+
+/* ---------- Modal ---------- */
+function Modal({
+  open, onClose, title, children,
+}: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+  if (!open) return null;
+  return (
+    <div
+      role="dialog" aria-modal="true" aria-label={title}
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,.35)",
+        display: "grid", placeItems: "center", padding: 16, zIndex: 2500
+      }}
+    >
+      <div className="card" style={{ width: "min(840px, 94vw)", maxHeight: "86vh", overflow: "auto" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap: 8 }}>
+          <h2 style={{ margin: 0 }}>{title}</h2>
+          <button onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div style={{ marginTop: 10 }}>{children}</div>
+      </div>
+    </div>
+  );
 }
 
-/* ======================= BIG GOAL WIZARD (kept in-file, defined FIRST) ======================= */
+/* =========================================================================
+   Big Goal Wizard (implementation name) + alias to keep <BigGoalWizard/> working
+   ========================================================================= */
 type WizardProps = { onClose?: () => void; onCreated?: () => void };
 
-function BigGoalWizard({ onClose, onCreated }: WizardProps) {
+const GoalWizardView: React.FC<WizardProps> = ({ onClose, onCreated }) => {
   const todayISO = useMemo(() => toISO(new Date()), []);
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState<AllowedCategory>("other");
@@ -54,15 +101,12 @@ function BigGoalWizard({ onClose, onCreated }: WizardProps) {
   const [monthlyCommit, setMonthlyCommit] = useState("");
   const [weeklyCommit, setWeeklyCommit] = useState("");
   const [dailyCommit, setDailyCommit] = useState("");
-  const [autoReviews, setAutoReviews] = useState<"" | "weekly" | "monthly">("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const [userId, setUserId] = useState<string | null>(null);
-  useEffect(() => { supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null)); }, []);
-
   const catColor = colorOf(category);
 
+  // halfway = exact midpoint between start and target
   const computedHalfDate = useMemo(() => {
     if (!targetDate) return "";
     const a = fromISO(startDate), b = fromISO(targetDate);
@@ -74,10 +118,13 @@ function BigGoalWizard({ onClose, onCreated }: WizardProps) {
     setErr(null);
     if (!title.trim()) { setErr("Please enter a goal title."); return; }
     if (!targetDate)   { setErr("Please choose a target date."); return; }
-    if (!userId) { setErr("Not signed in."); return; }
-
     setBusy(true);
     try {
+      const { data: userData, error: uerr } = await supabase.auth.getUser();
+      if (uerr) throw uerr;
+      const userId = userData.user?.id;
+      if (!userId) throw new Error("Not signed in.");
+
       // 1) create goal
       const { data: goal, error: gerr } = await supabase.from("goals")
         .insert({
@@ -96,85 +143,91 @@ function BigGoalWizard({ onClose, onCreated }: WizardProps) {
         .single();
       if (gerr) throw gerr;
 
-      // 2) seed tasks linked to goal_id
+      // 2) seed tasks (Top Priorities) — monthly, weekly, daily
       const start = fromISO(startDate), end = fromISO(targetDate);
       if (end < start) throw new Error("Target date is before start date.");
 
-      const tasks: any[] = [];
+      const tasks: Partial<TaskRow & { user_id: string }>[] = [];
       const cat = goal.category as AllowedCategory;
-      const col = goal.category_color;
+      const col = goal.category_color || colorOf(cat);
 
       // Milestones
       tasks.push({
-        user_id:userId, title:`BIG GOAL — Target: ${goal.title}`, due_date: targetDate,
-        source:"big_goal_target", status:"pending", priority:2, goal_id: goal.id,
-        category:cat, category_color:col
+        user_id:userId,
+        title:`BIG GOAL — Target: ${goal.title}`,
+        due_date: targetDate,
+        source:"big_goal_target",
+        priority:2,
+        category:cat,
+        category_color:col
       });
       if (computedHalfDate && halfwayNote.trim()) {
         tasks.push({
-          user_id:userId, title:`BIG GOAL — Halfway: ${halfwayNote.trim()}`, due_date: computedHalfDate,
-          source:"big_goal_halfway", status:"pending", priority:2, goal_id: goal.id,
-          category:cat, category_color:col
+          user_id:userId,
+          title:`BIG GOAL — Halfway: ${halfwayNote.trim()}`,
+          due_date: computedHalfDate,
+          source:"big_goal_halfway",
+          priority:2,
+          category:cat,
+          category_color:col
         });
       }
 
-      // Monthly commitment
+      // Monthly — start next month, same DOM
       if (monthlyCommit.trim()) {
         let d = addMonthsClamped(start, 1, start.getDate());
         while (d <= end) {
           tasks.push({
-            user_id:userId, title:`BIG GOAL — Monthly: ${monthlyCommit.trim()}`, due_date: toISO(d),
-            source:"big_goal_monthly", status:"pending", priority:2, goal_id: goal.id,
-            category:cat, category_color:col
+            user_id:userId,
+            title:`BIG GOAL — Monthly: ${monthlyCommit.trim()}`,
+            due_date: toISO(d),
+            source:"big_goal_monthly",
+            priority:2,
+            category:cat,
+            category_color:col
           });
           d = addMonthsClamped(d, 1, start.getDate());
         }
       }
 
-      // Weekly commitment
+      // Weekly — start next week (same weekday)
       if (weeklyCommit.trim()) {
         let d = new Date(start); d.setDate(d.getDate() + 7);
         while (d <= end) {
           tasks.push({
-            user_id:userId, title:`BIG GOAL — Weekly: ${weeklyCommit.trim()}`, due_date: toISO(d),
-            source:"big_goal_weekly", status:"pending", priority:2, goal_id: goal.id,
-            category:cat, category_color:col
+            user_id:userId,
+            title:`BIG GOAL — Weekly: ${weeklyCommit.trim()}`,
+            due_date: toISO(d),
+            source:"big_goal_weekly",
+            priority:2,
+            category:cat,
+            category_color:col
           });
           d.setDate(d.getDate() + 7);
         }
       }
 
-      // Daily commitment
+      // Daily — from today (or future start) through end
       if (dailyCommit.trim()) {
         let d = clampDay(new Date(Math.max(Date.now(), start.getTime())));
         while (d <= end) {
           tasks.push({
-            user_id:userId, title:`BIG GOAL — Daily: ${dailyCommit.trim()}`, due_date: toISO(d),
-            source:"big_goal_daily", status:"pending", priority:2, goal_id: goal.id,
-            category:cat, category_color:col
+            user_id:userId,
+            title:`BIG GOAL — Daily: ${dailyCommit.trim()}`,
+            due_date: toISO(d),
+            source:"big_goal_daily",
+            priority:2,
+            category:cat,
+            category_color:col
           });
           d.setDate(d.getDate() + 1);
         }
       }
 
-      // Auto-schedule reviews (optional)
-      if (autoReviews) {
-        let d = clampDay(new Date());
-        const count = autoReviews === "weekly" ? 8 : 6;
-        for (let i = 0; i < count; i++) {
-          tasks.push({
-            user_id:userId, title:`Review: ${goal.title}`, due_date: toISO(d),
-            source:`goal_review_${autoReviews}`, status:"pending", priority:2, goal_id: goal.id,
-            category:cat, category_color:col
-          });
-          d = autoReviews === "weekly" ? addDays(d, 7) : addMonthsClamped(d, 1, d.getDate());
-        }
-      }
-
-      // 3) bulk insert
+      // 3) bulk insert tasks
       for (let i = 0; i < tasks.length; i += 500) {
         const slice = tasks.slice(i, i + 500);
-        const { error: terr } = await supabase.from("tasks").insert(slice);
+        const { error: terr } = await supabase.from("tasks").insert(slice as any);
         if (terr) throw terr;
       }
 
@@ -190,16 +243,14 @@ function BigGoalWizard({ onClose, onCreated }: WizardProps) {
 
   return (
     <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 16, background: "#fff" }}>
-      <h2 style={{ fontSize: 18, marginBottom: 8 }}>Create a Big Goal (guided)</h2>
+      <h3 style={{ fontSize: 18, marginBottom: 8 }}>Create a Big Goal (guided)</h3>
 
       <div style={{ display: "grid", gap: 10 }}>
-        {/* title */}
         <label>
           <div className="muted">Big goal title</div>
           <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g., Get 30 new customers" />
         </label>
 
-        {/* category */}
         <label>
           <div className="muted">Category</div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -210,7 +261,6 @@ function BigGoalWizard({ onClose, onCreated }: WizardProps) {
           </div>
         </label>
 
-        {/* dates */}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <label style={{ flex: 1, minWidth: 220 }}>
             <div className="muted">Start date</div>
@@ -222,14 +272,12 @@ function BigGoalWizard({ onClose, onCreated }: WizardProps) {
           </label>
         </div>
 
-        {/* halfway note */}
         <label>
           <div className="muted">How will you know you’re halfway?</div>
           <input value={halfwayNote} onChange={e=>setHalfwayNote(e.target.value)} placeholder="e.g., 15 customers or £X MRR" />
           {computedHalfDate && <div className="muted" style={{ marginTop:6 }}>Halfway milestone: <b>{computedHalfDate}</b></div>}
         </label>
 
-        {/* commitments — Monthly → Weekly → Daily */}
         <label>
           <div className="muted">Monthly commitment (optional)</div>
           <input value={monthlyCommit} onChange={e=>setMonthlyCommit(e.target.value)} placeholder="e.g., At least 2 new customers" />
@@ -248,57 +296,30 @@ function BigGoalWizard({ onClose, onCreated }: WizardProps) {
           <div className="muted" style={{ marginTop:6 }}>Seeds every day from today (or future start) through target date.</div>
         </label>
 
-        {/* review cadence */}
-        <label>
-          <div className="muted">Auto-schedule reviews (optional)</div>
-          <select value={autoReviews} onChange={e => setAutoReviews(e.target.value as "" | "weekly" | "monthly")}>
-            <option value="">None</option>
-            <option value="weekly">Weekly (next 8)</option>
-            <option value="monthly">Monthly (next 6)</option>
-          </select>
-        </label>
-
         {err && <div style={{ color: "red" }}>{err}</div>}
 
-        <div style={{ display:"flex", gap:8, marginTop:8, justifyContent:"flex-end" }}>
-          <button onClick={onClose} disabled={busy}>Cancel</button>
+        <div style={{ display:"flex", gap:8, marginTop:8 }}>
           <button onClick={create} disabled={busy} className="btn-primary" style={{ borderRadius:8 }}>{busy?"Creating…":"Create Big Goal"}</button>
+          <button onClick={onClose} disabled={busy}>Cancel</button>
         </div>
       </div>
     </div>
   );
-}
-
-/* ========================= MAIN SCREEN ========================= */
-type Goal = {
-  id: number;
-  user_id: string;
-  title: string;
-  goal_type: string | null;
-  category: AllowedCategory;
-  category_color: string | null;
-  start_date: string;
-  target_date: string;
-  halfway_date: string | null;
-  halfway_note: string | null;
-  status: string | null;
-};
-type TaskLite = {
-  id: number;
-  goal_id: number | null;
-  status: string | null; // 'pending' | 'done'
-  source: string | null;
 };
 
+// 🔗 Alias keeps external usage <BigGoalWizard .../> working as a *value*
+const BigGoalWizard = GoalWizardView;
+
+/* =========================================================================
+   Goals Screen
+   ========================================================================= */
 export default function GoalsScreen() {
   const [userId, setUserId] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [goals, setGoals] = useState<GoalRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
-  const [goals, setGoals] = useState<Goal[]>([]);
-  const [progressByGoal, setProgressByGoal] = useState<Record<number, { total: number; done: number }>>({});
-
-  // New Goal wizard toggle
+  // UI
   const [showWizard, setShowWizard] = useState(false);
 
   useEffect(() => {
@@ -314,85 +335,75 @@ export default function GoalsScreen() {
     if (!userId) return;
     setLoading(true); setErr(null);
     try {
-      // load active (or all non-archived) goals
-      const { data: gRows, error: gErr } = await supabase
+      const { data, error } = await supabase
         .from("goals")
-        .select("*")
+        .select("id,user_id,title,goal_type,category,category_color,start_date,target_date,halfway_note,halfway_date,status")
         .eq("user_id", userId)
-        .neq("status", "archived")
         .order("id", { ascending: true });
-      if (gErr) throw gErr;
-      const gs = (gRows || []) as Goal[];
-      setGoals(gs);
-
-      // link to tasks via goal_id
-      const ids = gs.map(g => g.id);
-      if (ids.length) {
-        const { data: tRows, error: tErr } = await supabase
-          .from("tasks")
-          .select("id,goal_id,status,source")
-          .in("goal_id", ids);
-        if (tErr) throw tErr;
-        const map: Record<number, { total: number; done: number }> = {};
-        (tRows || []).forEach((t: TaskLite) => {
-          if (!t.goal_id) return;
-          const key = t.goal_id;
-          (map[key] ||= { total: 0, done: 0 }).total += 1;
-          if ((t.status || "") === "done") map[key].done += 1;
-        });
-        setProgressByGoal(map);
-      } else {
-        setProgressByGoal({});
-      }
-    } catch (e: any) {
+      if (error) throw error;
+      setGoals((data as GoalRow[]) || []);
+    } catch (e:any) {
       setErr(e.message || String(e));
-      setGoals([]); setProgressByGoal({});
+      setGoals([]);
     } finally {
       setLoading(false);
     }
   }
 
-  /* ----- Balance metrics ----- */
-  const balance = useMemo(() => {
-    const active = goals.filter(g => (g.status || "active") !== "archived");
-    const total = active.length || 1;
-    const counts: Record<AllowedCategory, number> = { personal:0, health:0, career:0, financial:0, other:0 };
-    active.forEach(g => { counts[g.category] = (counts[g.category] ?? 0) + 1; });
-    const entries = CATS.map(c => ({ key: c.key as AllowedCategory, label: c.label, color: c.color, count: counts[c.key], pct: Math.round((counts[c.key] / total) * 100) }));
-    const dominant = entries.reduce((a,b)=> b.count > a.count ? b : a, entries[0]);
-    const nonZeroCats = entries.filter(e => e.count > 0).length;
-    const isBalanced = dominant.pct <= 40 && nonZeroCats >= 3; // simple heuristic
-    return { entries, dominant, total: active.length, isBalanced, nonZeroCats };
-  }, [goals]);
+  // Balance / distribution across categories (active goals)
+  const activeGoals = goals.filter(g => g.status !== "done");
+  const catCounts = useMemo(() => {
+    const map: Record<AllowedCategory, number> = { personal:0, health:0, career:0, financial:0, other:0 };
+    for (const g of activeGoals) map[g.category] = (map[g.category] ?? 0) + 1;
+    return map;
+  }, [activeGoals]);
 
-  /* ----- Actions: schedule review tasks ----- */
-  async function scheduleReviews(g: Goal, cadence: "weekly" | "monthly", count = cadence === "weekly" ? 8 : 6) {
+  const imbalanceNote = useMemo(() => {
+    const total = activeGoals.length;
+    if (total === 0) return "";
+    const entries = Object.entries(catCounts) as Array<[AllowedCategory, number]>;
+    const max = Math.max(...entries.map(([,n]) => n));
+    const min = Math.min(...entries.map(([,n]) => n));
+    if (max <= 2 || max - min <= 1) return ""; // reasonably balanced
+    const topCats = entries.filter(([,n]) => n === max).map(([k]) => CATS.find(c=>c.key===k)!.label).join(", ");
+    const lowCats = entries.filter(([,n]) => n === min).map(([k]) => CATS.find(c=>c.key===k)!.label).join(", ");
+    return `Heavily focused on ${topCats}. Consider adding a goal in ${lowCats} for better balance.`;
+  }, [catCounts, activeGoals.length]);
+
+  // Time-based progress % for each goal (simple + robust)
+  function timeProgress(g: GoalRow) {
+    const start = fromISO(g.start_date);
+    const end = fromISO(g.target_date);
+    const now = new Date();
+    if (end <= start) return 0;
+    const pct = ((now.getTime() - start.getTime()) / (end.getTime() - start.getTime())) * 100;
+    return Math.max(0, Math.min(100, Math.round(pct)));
+  }
+
+  // Optional: Seed a weekly "Review goals" task (nice cadence)
+  async function seedWeeklyReview() {
     if (!userId) return;
-    setErr(null);
     try {
-      const start = clampDay(new Date()); // from today
-      const rows: any[] = [];
-      let d = new Date(start);
-      for (let i = 0; i < count; i++) {
-        const due = toISO(d);
-        rows.push({
+      const title = "Weekly Goals Review";
+      const today = clampDay(new Date());
+      // create 12 weekly occurrences
+      const rows: Omit<TaskRow,"id">[] = Array.from({ length: 12 }, (_, i) => {
+        const d = new Date(today); d.setDate(d.getDate() + 7 * (i + 1));
+        return {
           user_id: userId,
-          title: `Review: ${g.title}`,
-          due_date: due,
+          title,
+          due_date: toISO(d),
           status: "pending",
           priority: 2,
-          source: `goal_review_${cadence}`,
-          goal_id: g.id,
-          category: g.category,
-          category_color: colorOf(g.category),
-        });
-        if (cadence === "weekly") d = addDays(d, 7);
-        else d = addMonthsClamped(d, 1, d.getDate());
-      }
+          source: "goals_weekly_review",
+          category: "other",
+          category_color: colorOf("other"),
+          completed_at: null,
+        } as any;
+      });
       const { error } = await supabase.from("tasks").insert(rows as any);
       if (error) throw error;
-      await loadAll();
-      alert(`${cadence === "weekly" ? "Weekly" : "Monthly"} reviews scheduled for “${g.title}”.`);
+      alert("Weekly review tasks created for the next 12 weeks.");
     } catch (e:any) {
       setErr(e.message || String(e));
     }
@@ -401,146 +412,134 @@ export default function GoalsScreen() {
   return (
     <div style={{ display: "grid", gap: 12 }}>
       {/* Header */}
-      <div className="card" style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, flexWrap:"wrap" }}>
+      <div className="card" style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap: 8, flexWrap:"wrap" }}>
         <div>
           <h1 style={{ margin: 0 }}>Goals</h1>
-          <div className="muted">Plan → Commit → Review</div>
+          <div className="muted">{loading ? "Loading…" : `${goals.length} total · ${activeGoals.length} active`}</div>
         </div>
-        <button className="btn-primary" onClick={() => setShowWizard(true)} style={{ borderRadius: 8 }}>
-          New Goal
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn-soft" onClick={loadAll} disabled={loading}>{loading ? "Refreshing…" : "Refresh"}</button>
+          <button className="btn-soft" onClick={seedWeeklyReview}>Seed Weekly Review</button>
+          <button className="btn-primary" onClick={() => setShowWizard(true)} style={{ borderRadius: 8 }}>
+            New Big Goal
+          </button>
+        </div>
       </div>
 
-      {/* Balance card */}
-      <div className="card" style={{ display: "grid", gap: 10 }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, flexWrap:"wrap" }}>
-          <h2 style={{ margin:0, fontSize:18 }}>Goal Balance</h2>
-          <div className="muted">{balance.total} active goal{balance.total === 1 ? "" : "s"}</div>
+      {/* Balance panel */}
+      <div className="card" style={{ display:"grid", gap: 10 }}>
+        <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", gap: 8, flexWrap:"wrap" }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>Balance</h2>
+          <div className="muted">Active goals by category</div>
         </div>
 
-        {/* Segmented bar */}
-        <div style={{ border:"1px solid var(--border)", borderRadius: 10, overflow:"hidden" }}>
+        {/* Distribution bar */}
+        <div style={{ border:"1px solid var(--border)", borderRadius: 12, overflow:"hidden" }}>
           <div style={{ display:"flex", height: 16 }}>
-            {balance.entries.map(e => (
-              <div key={e.key} title={`${e.label}: ${e.count} (${e.pct}%)`} style={{ width: `${e.pct}%`, background: e.color }} />
-            ))}
+            {CATS.map(cat => {
+              const n = catCounts[cat.key] || 0;
+              const pct = activeGoals.length ? (n / activeGoals.length) * 100 : 0;
+              return (
+                <div key={cat.key} title={`${cat.label}: ${n}`} style={{ width: `${pct}%`, background: cat.color }} />
+              );
+            })}
           </div>
         </div>
 
         {/* Legend */}
-        <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
-          {balance.entries.map(e => (
-            <span key={e.key} className="muted" style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
-              <span style={{ width:10, height:10, borderRadius:999, background:e.color, border:"1px solid #d1d5db" }} />
-              {e.label} {e.count ? `· ${e.count}` : ""}
+        <div style={{ display:"flex", gap: 12, flexWrap:"wrap" }}>
+          {CATS.map(cat => (
+            <span key={cat.key} className="muted" style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 999, background: cat.color, border:"1px solid #d1d5db" }} />
+              {cat.label}: <b>{catCounts[cat.key] || 0}</b>
             </span>
           ))}
         </div>
 
-        {/* Nudge */}
-        {!balance.isBalanced && balance.total > 0 && (
-          <div className="card card--wash" style={{ borderRadius: 8 }}>
-            <strong>Heads up:</strong> most of your goals are in <b>{balance.dominant.label}</b>.
-            Consider adding one in {suggestOtherCats(balance.dominant.key)} for better balance.
+        {!!imbalanceNote && (
+          <div className="card card--wash" style={{ borderRadius: 10 }}>
+            {imbalanceNote}
           </div>
         )}
       </div>
 
-      {/* Goals list */}
+      {/* Active goals list */}
       <div className="card" style={{ display:"grid", gap: 10 }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, flexWrap:"wrap" }}>
-          <h2 style={{ margin:0, fontSize:18 }}>Your Goals</h2>
-          <button onClick={loadAll} disabled={loading}>{loading ? "Refreshing…" : "Refresh"}</button>
+        <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", gap: 8, flexWrap:"wrap" }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>Active Goals</h2>
+          <div className="muted">{activeGoals.length} active</div>
         </div>
 
-        {goals.length === 0 ? (
-          <div className="muted">No goals yet. Click <b>New Goal</b> to create one.</div>
+        {activeGoals.length === 0 ? (
+          <div className="muted">No active goals yet. Create your first Big Goal.</div>
         ) : (
           <ul className="list">
-            {goals.map(g => {
-              const timePct = timeProgressPct(g.start_date, g.target_date);
-              const tp = progressByGoal[g.id] || { total: 0, done: 0 };
-              const taskPct = tp.total > 0 ? Math.round((tp.done / tp.total) * 100) : null;
+            {activeGoals.map(g => {
+              const pct = timeProgress(g);
+              const start = g.start_date;
+              const end = g.target_date;
+              const catLabel = CATS.find(c => c.key === g.category)?.label || g.category;
               return (
-                <li key={g.id} className="item" style={{ alignItems:"flex-start" }}>
+                <li key={g.id} className="item">
                   <div style={{ display:"grid", gap:6, flex: 1 }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
-                      <span
-                        title={g.category}
-                        style={{ width:12, height:12, borderRadius:999, background: colorOf(g.category), border:"1px solid #d1d5db" }}
-                      />
-                      <div style={{ fontWeight:700 }}>{g.title}</div>
-                      <span className="badge">{labelOf(g.category)}</span>
-                      <span className="muted">→ Target: {g.target_date}</span>
+                    <div style={{ display:"flex", alignItems:"center", gap: 8, flexWrap:"wrap" }}>
+                      <span style={{
+                        display:"inline-block", width:10, height:10, borderRadius:999,
+                        background: g.category_color || colorOf(g.category), border: "1px solid #d1d5db"
+                      }} />
+                      <div style={{ fontWeight: 700 }}>{g.title}</div>
+                      <span className="badge">{catLabel}</span>
+                      <span className="muted">{start} → {end}</span>
                     </div>
 
-                    {/* Time progress */}
-                    <Bar label="Time" pct={timePct} tone="time" />
-
-                    {/* Task progress (if linked tasks exist) */}
-                    {taskPct != null && <Bar label={`Tasks (${tp.done}/${tp.total})`} pct={taskPct} tone="tasks" />}
-
-                    <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                      <button className="btn-soft" onClick={() => scheduleReviews(g, "weekly")}>Schedule weekly reviews (8)</button>
-                      <button className="btn-soft" onClick={() => scheduleReviews(g, "monthly")}>Schedule monthly reviews (6)</button>
+                    {/* Progress bar (time-based) */}
+                    <div style={{ border:"1px solid var(--border)", borderRadius:999, overflow:"hidden", background:"#f8fafc" }}>
+                      <div style={{
+                        height: 10,
+                        width: `${pct}%`,
+                        background: g.category_color || colorOf(g.category),
+                        transition: "width .4s ease"
+                      }} />
                     </div>
+                    <div className="muted">{pct}% of time elapsed</div>
                   </div>
                 </li>
               );
             })}
           </ul>
         )}
-
-        {err && <div style={{ color:"red" }}>{err}</div>}
       </div>
 
-      {/* Wizard modal */}
-      {showWizard && (
-        <div
-          onClick={() => setShowWizard(false)}
-          style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.35)", display:"grid", placeItems:"center", zIndex:2100 }}
-        >
-          <div className="card" style={{ width: "min(760px, 92vw)", maxHeight:"90vh", overflow:"auto" }} onClick={e => e.stopPropagation()}>
-            <BigGoalWizard
-              onClose={() => setShowWizard(false)}
-              onCreated={() => { setShowWizard(false); loadAll(); }}
-            />
-          </div>
+      {/* Completed goals */}
+      {goals.some(g => g.status === "done") && (
+        <div className="card" style={{ display:"grid", gap: 10 }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>Completed</h2>
+          <ul className="list">
+            {goals.filter(g => g.status === "done").map(g => (
+              <li key={g.id} className="item">
+                <div style={{ display:"flex", alignItems:"center", gap: 8 }}>
+                  <span style={{
+                    display:"inline-block", width:10, height:10, borderRadius:999,
+                    background: g.category_color || colorOf(g.category), border: "1px solid #d1d5db"
+                  }} />
+                  <span style={{ textDecoration: "line-through" }}>{g.title}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
+
+      {err && <div style={{ color: "red" }}>{err}</div>}
+
+      {/* Wizard modal */}
+      <Modal open={showWizard} onClose={() => setShowWizard(false)} title="New Big Goal">
+        {/* The alias means you can keep using <BigGoalWizard …/> */}
+        <BigGoalWizard
+          onClose={() => setShowWizard(false)}
+          onCreated={() => { setShowWizard(false); loadAll(); }}
+        />
+      </Modal>
     </div>
   );
-}
-
-/* ======================= SUB COMPONENTS ======================= */
-
-function Bar({ label, pct, tone }: { label: string; pct: number; tone?: "time" | "tasks" }) {
-  const bg = tone === "tasks" ? "#dcfce7" : "#e0f2fe";
-  const fill = tone === "tasks" ? "#16a34a" : "#0ea5e9";
-  return (
-    <div>
-      <div className="muted" style={{ fontSize:12, marginBottom:4 }}>{label}: {pct}%</div>
-      <div style={{ height:10, borderRadius:999, background:bg, border:"1px solid var(--border)", overflow:"hidden" }}>
-        <div style={{ width:`${Math.max(0, Math.min(100, pct))}%`, height: "100%", background: fill, transition:"width .35s ease" }} />
-      </div>
-    </div>
-  );
-}
-
-function labelOf(k: AllowedCategory) {
-  return CATS.find(c => c.key === k)?.label || k;
-}
-function suggestOtherCats(dominant: AllowedCategory) {
-  const others = CATS.filter(c => c.key !== dominant).map(c => c.label);
-  if (others.length <= 2) return others.join(", ");
-  return `${others[0]}, ${others[1]} or ${others[2]}`;
-}
-function timeProgressPct(startISO?: string, targetISO?: string) {
-  const now = new Date();
-  const start = startISO ? fromISO(startISO) : now;
-  const end = targetISO ? fromISO(targetISO) : now;
-  const total = Math.max(0, end.getTime() - start.getTime());
-  if (total <= 0) return 100;
-  const elapsed = Math.min(Math.max(0, now.getTime() - start.getTime()), total);
-  return Math.round((elapsed / total) * 100);
 }
