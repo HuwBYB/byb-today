@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import type React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* ---------- Categories (match DB) ---------- */
@@ -88,11 +87,11 @@ function Modal({
 }
 
 /* =========================================================================
-   Big Goal Wizard (implementation)
+   Big Goal Wizard (inner implementation)
    ========================================================================= */
-type WizardProps = { onClose?: () => void; onCreated?: () => void };
+interface BigGoalWizardProps { onClose?: () => void; onCreated?: () => void; }
 
-function GoalWizardView({ onClose, onCreated }: WizardProps) {
+function GoalWizardInner({ onClose, onCreated }: BigGoalWizardProps) {
   const todayISO = useMemo(() => toISO(new Date()), []);
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState<AllowedCategory>("other");
@@ -308,8 +307,10 @@ function GoalWizardView({ onClose, onCreated }: WizardProps) {
   );
 }
 
-/* 🔗 Explicitly typed wrapper so <BigGoalWizard …/> props are recognized */
-const BigGoalWizard: React.FC<WizardProps> = (props) => <GoalWizardView {...props} />;
+/* ✅ Named function component so JSX sees a real VALUE called BigGoalWizard */
+function BigGoalWizard(props: BigGoalWizardProps): JSX.Element {
+  return <GoalWizardInner {...props} />;
+}
 
 /* =========================================================================
    Goals Screen
@@ -381,13 +382,12 @@ export default function GoalsScreen() {
     return Math.max(0, Math.min(100, Math.round(pct)));
   }
 
-  // Optional: Seed a weekly "Review goals" task (nice cadence)
+  // Optional: Seed a weekly "Review goals" task
   async function seedWeeklyReview() {
     if (!userId) return;
     try {
       const title = "Weekly Goals Review";
       const today = clampDay(new Date());
-      // create 12 weekly occurrences
       const rows: Omit<TaskRow,"id">[] = Array.from({ length: 12 }, (_, i) => {
         const d = new Date(today); d.setDate(d.getDate() + 7 * (i + 1));
         return {
@@ -416,7 +416,6 @@ export default function GoalsScreen() {
       <div className="card" style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap: 8, flexWrap:"wrap" }}>
         <div>
           <h1 style={{ margin: 0 }}>Goals</h1>
-          <div className="muted">{loading ? "Loading…" : `${goals.length} total · ${activeGoals.length} active`}</div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button className="btn-soft" onClick={loadAll} disabled={loading}>{loading ? "Refreshing…" : "Refresh"}</button>
@@ -438,7 +437,7 @@ export default function GoalsScreen() {
         <div style={{ border:"1px solid var(--border)", borderRadius: 12, overflow:"hidden" }}>
           <div style={{ display:"flex", height: 16 }}>
             {CATS.map(cat => {
-              const n = catCounts[cat.key] || 0;
+              const n = (catCounts as any)[cat.key] || 0;
               const pct = activeGoals.length ? (n / activeGoals.length) * 100 : 0;
               return (
                 <div key={cat.key} title={`${cat.label}: ${n}`} style={{ width: `${pct}%`, background: cat.color }} />
@@ -452,12 +451,13 @@ export default function GoalsScreen() {
           {CATS.map(cat => (
             <span key={cat.key} className="muted" style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
               <span style={{ width: 10, height: 10, borderRadius: 999, background: cat.color, border:"1px solid #d1d5db" }} />
-              {cat.label}: <b>{catCounts[cat.key] || 0}</b>
+              {cat.label}: <b>{(catCounts as any)[cat.key] || 0}</b>
             </span>
           ))}
         </div>
 
-        {!!imbalanceNote && (
+        {/* Imbalance nudge */}
+        {imbalanceNote && (
           <div className="card card--wash" style={{ borderRadius: 10 }}>
             {imbalanceNote}
           </div>
@@ -535,7 +535,7 @@ export default function GoalsScreen() {
 
       {/* Wizard modal */}
       <Modal open={showWizard} onClose={() => setShowWizard(false)} title="New Big Goal">
-        {/* Keep using the same JSX tag name */}
+        {/* Keep the same JSX tag name exactly as you requested */}
         <BigGoalWizard
           onClose={() => setShowWizard(false)}
           onCreated={() => { setShowWizard(false); loadAll(); }}
