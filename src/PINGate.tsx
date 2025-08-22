@@ -6,7 +6,7 @@ async function sha256Hex(input: string): Promise<string> {
   const enc = new TextEncoder();
   const buf = await crypto.subtle.digest("SHA-256", enc.encode(input));
   const bytes = Array.from(new Uint8Array(buf));
-  return bytes.map(b => b.toString(16).padStart(2, "0")).join("");
+  return bytes.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 const ATTEMPT_KEY = "byb:pin_attempts";
@@ -37,6 +37,7 @@ export default function PINGate() {
         .select("pin_enabled,pin_hash")
         .eq("id", uid)
         .single();
+
       if (prof?.pin_enabled && prof?.pin_hash) {
         setPinHash(prof.pin_hash);
         setNeedPin(true);
@@ -49,7 +50,8 @@ export default function PINGate() {
   if (!needPin) return null;
 
   const now = Date.now();
-  const isLocked = lockedUntil && now < lockedUntil;
+  // ✅ Force a strict boolean
+  const isLocked: boolean = Boolean(lockedUntil && now < lockedUntil);
 
   async function submit() {
     if (!userId || !pinHash) return;
@@ -103,8 +105,13 @@ export default function PINGate() {
       aria-modal="true"
       aria-label="Enter PIN"
       style={{
-        position: "fixed", inset: 0, background: "rgba(0,0,0,.35)",
-        display: "grid", placeItems: "center", zIndex: 3000, padding: 16
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,.35)",
+        display: "grid",
+        placeItems: "center",
+        zIndex: 3000,
+        padding: 16,
       }}
     >
       <div className="card" style={{ width: 360, display: "grid", gap: 10 }}>
@@ -112,15 +119,25 @@ export default function PINGate() {
         <input
           inputMode="numeric"
           maxLength={4}
-          pattern="\d{4}"
+          pattern="\\d{4}"
           value={pin}
-          onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+          onChange={(e) =>
+            setPin(e.target.value.replace(/\D/g, "").slice(0, 4))
+          }
           onKeyDown={(e) => e.key === "Enter" && !isLocked && submit()}
           placeholder="••••"
           style={{ textAlign: "center", fontSize: 22, letterSpacing: 8 }}
         />
-        {err && <div style={{ color: "crimson", textAlign: "center" }}>{err}</div>}
-        <button className="btn-primary" onClick={submit} disabled={isLocked} style={{ borderRadius: 8 }}>
+        {err && (
+          <div style={{ color: "crimson", textAlign: "center" }}>{err}</div>
+        )}
+        <button
+          className="btn-primary"
+          onClick={submit}
+          disabled={isLocked}
+          style={{ borderRadius: 8 }}
+          title={isLocked ? "Locked due to failed attempts" : undefined}
+        >
           Unlock
         </button>
         <button className="btn-ghost" onClick={forgot} title="Sign out to reset PIN">
