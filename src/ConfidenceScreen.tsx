@@ -16,7 +16,6 @@ function publicPath(p: string) {
   const withSlash = p.startsWith("/") ? p : `/${p}`;
   return `${base.replace(/\/$/, "")}${withSlash}`;
 }
-// tolerate space/underscore variants
 const CONF_ALFRED_SRC = publicPath("/alfred/Confidence_Alfred.png");
 
 /* ---------- Modal ---------- */
@@ -273,7 +272,7 @@ export default function ConfidenceScreen() {
           <TabButton active={tab === "affirm"} onClick={() => setTab("affirm")} label="Affirmations" />
         </div>
 
-        {tab === "pose" && <PowerPose onRep={async () => { await log("pose", { reps: 1 }); }} />}
+        {tab === "pose"   && <PowerPose onRep={async () => { await log("pose", { reps: 1 }); }} />}
         {tab === "breath" && <BloomBreath running={running} onRep={async (pattern) => { await log("breath", { reps: 1, pattern }); }} />}
         {tab === "affirm" && <AffirmationsList running={running} onRep={async (text) => { await log("affirm", { reps: 1, text }); }} />}
 
@@ -424,7 +423,7 @@ function PoseSVG() {
 }
 
 /* =========================================================
-   Breathing (Bloom pacer)
+   Breathing (Bloom pacer) — stacked layout (instructions top, flower centered)
    ========================================================= */
 function BloomBreath({ running, onRep }:{ running:boolean; onRep:(pattern: string)=>void|Promise<void> }) {
   const [patternKey, setPatternKey] = useState<BreathPatternKey>("box");
@@ -462,39 +461,52 @@ function BloomBreath({ running, onRep }:{ running:boolean; onRep:(pattern: strin
   const petalOpacity = phase === "Hold" ? 0.9 : 1.0;
 
   return (
-    <div className="card confidence-layout" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
-      <div style={{ display:"grid", placeItems:"center", minHeight:240 }}>
-        <svg viewBox="0 0 220 220" width={220} height={220} aria-label="Bloom breath pacer">
-          <defs>
-            <radialGradient id="petalGrad" cx="50%" cy="50%" r="65%">
-              <stop offset="0%" stopColor="hsl(var(--pastel-hsl, 210 95% 78%))" stopOpacity="1" />
-              <stop offset="100%" stopColor="hsl(var(--pastel-hsl, 210 95% 78%))" stopOpacity="0.2" />
-            </radialGradient>
-          </defs>
-          <g transform="translate(110,110)">
-            {[0,1,2,3,4,5].map(i => (
-              <g key={i} transform={`rotate(${i*60}) scale(${petalScale})`} style={{ transition: "transform 900ms ease-in-out", opacity: petalOpacity }}>
-                <path d="M0 0 C 20 -14, 40 -44, 0 -70 C -40 -44, -20 -14, 0 0 Z" fill="url(#petalGrad)" />
-              </g>
-            ))}
-            <circle r="6" fill="#111" opacity=".8" />
-          </g>
-        </svg>
-        <div style={{ marginTop: 12, textAlign: "center" }}>
-          <div style={{ fontWeight: 700 }}>{phase}</div>
-          <div className="muted">{phaseLeft}s</div>
-        </div>
-      </div>
-
-      <div style={{ display:"grid", gap:10 }}>
+    <div className="card" style={{ display: "grid", gap: 12 }}>
+      {/* Instructions + controls */}
+      <div style={{ display: "grid", gap: 8 }}>
         <h2 style={{ margin: 0 }}>Guided breathing</h2>
-        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <PatternButton current={patternKey} setKey={setPatternKey} k="box" label="Box 4-4-4-4" />
           <PatternButton current={patternKey} setKey={setPatternKey} k="478" label="4-7-8" />
           <PatternButton current={patternKey} setKey={setPatternKey} k="coherent" label="Coherent 5/5" />
         </div>
-        <div className="muted">Bloom opens on inhale, softens on hold, closes gently on exhale.</div>
-        <div><button onClick={() => onRep(patternKey)}>✓ Log breath rep</button></div>
+
+        <div className="muted">
+          Bloom opens on <b>inhale</b>, softens on <b>hold</b>, and gently closes on <b>exhale</b>.
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ fontWeight: 700 }}>{phase}</div>
+          <div className="muted" style={{ fontVariantNumeric: "tabular-nums" }}>{phaseLeft}s</div>
+          <div style={{ marginLeft: "auto" }}>
+            <button onClick={() => onRep(patternKey)} title="Log a breath rep" style={{ borderRadius: 8 }}>
+              ✓ Log breath rep
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Flower centered below */}
+      <div style={{ display: "grid", placeItems: "center", minHeight: 260, paddingBlock: 6 }}>
+        <div style={{ width: "min(66vw, 280px)", height: "min(66vw, 280px)", maxWidth: 320, maxHeight: 320 }}>
+          <svg viewBox="0 0 220 220" width="100%" height="100%" aria-label="Bloom breath pacer">
+            <defs>
+              <radialGradient id="petalGrad" cx="50%" cy="50%" r="65%">
+                <stop offset="0%" stopColor="hsl(var(--pastel-hsl, 210 95% 78%))" stopOpacity="1" />
+                <stop offset="100%" stopColor="hsl(var(--pastel-hsl, 210 95% 78%))" stopOpacity="0.2" />
+              </radialGradient>
+            </defs>
+            <g transform="translate(110,110)">
+              {[0,1,2,3,4,5].map(i => (
+                <g key={i} transform={`rotate(${i*60}) scale(${petalScale})`} style={{ transition: "transform 900ms ease-in-out", opacity: petalOpacity }}>
+                  <path d="M0 0 C 20 -14, 40 -44, 0 -70 C -40 -44, -20 -14, 0 0 Z" fill="url(#petalGrad)" />
+                </g>
+              ))}
+              <circle r="6" fill="#111" opacity=".8" />
+            </g>
+          </svg>
+        </div>
       </div>
     </div>
   );
@@ -531,7 +543,6 @@ const CAT_COLORS: Record<string, { bg: string; border: string; text: string }> =
   personal:      { bg: "#EFF6FF", border: "#BFDBFE", text: "#1E3A8A" }, // light blue
   health:        { bg: "#ECFEFF", border: "#A5F3FC", text: "#164E63" }, // light teal
 };
-
 function colorFor(cat?: string) {
   return CAT_COLORS[(cat || "").toLowerCase()] || { bg: "#F8FAFC", border: "#E5E7EB", text: "#0F172A" };
 }
@@ -556,7 +567,7 @@ function AffirmationsList({ running, onRep }:{ running:boolean; onRep:(text:stri
 
   const hasSet = items.length > 0;
 
-  // Optional speech-through of the full list
+  // Optional: speak through full list while timer runs
   const [speak, setSpeak] = useState(false);
   useEffect(() => {
     if (!speak || !hasSet) return;
