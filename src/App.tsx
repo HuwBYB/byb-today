@@ -1,6 +1,9 @@
-import { useMemo, useState } from "react";
+// App.tsx
+import { useEffect, useMemo, useState } from "react";
 import AuthGate from "./AuthGate";
+import { supabase } from "./lib/supabaseClient";
 
+/* Existing screens */
 import TodayScreen from "./TodayScreen";
 import CalendarScreen from "./CalendarScreen";
 import GoalsScreen from "./GoalsScreen";
@@ -12,7 +15,13 @@ import AlfredScreen from "./AlfredScreen";
 import ConfidenceScreen from "./ConfidenceScreen";
 import NotesScreen from "./NotesScreen";
 import FocusAlfredScreen from "./FocusAlfredScreen";
-import AffirmationBuilderScreen from "./AffirmationBuilder"; // ⬅️ NEW
+
+/* New screens */
+import OnboardingScreen from "./OnboardingScreen";
+import SettingsScreen from "./SettingsScreen";
+
+/* Overlay gate */
+import PINGate from "./PINGate";
 
 type Tab =
   | "today"
@@ -26,11 +35,25 @@ type Tab =
   | "alfred"
   | "focus"
   | "confidence"
-  | "builder"; // ⬅️ NEW
+  | "settings";
+
+type ProfileRow = {
+  id: string;
+  display_name: string | null;
+  title: string | null;
+  dob: string | null;
+  onboarded_at: string | null;
+  pin_enabled?: boolean | null;
+  pin_hash?: string | null;
+};
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("today");
   const [externalDateISO, setExternalDateISO] = useState<string | undefined>(undefined);
+
+  const [userId, setUserId] = useState<string | null>(null);
+  const [profile, setProfile] = useState<ProfileRow | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   function openTodayFor(iso: string) {
     setExternalDateISO(iso);
@@ -40,102 +63,186 @@ export default function App() {
   const tabs = useMemo(
     () =>
       [
-        { key: "today",      label: "Today",       icon: "✅" },
-        { key: "calendar",   label: "Calendar",    icon: "🗓️" },
-        { key: "goals",      label: "Goals",       icon: "🎯" },
-        { key: "vision",     label: "Vision",      icon: "🖼️" },
-        { key: "gratitude",  label: "Gratitude",   icon: "🙏" },
-        { key: "exercise",   label: "Exercise",    icon: "🏋️" },
-        { key: "notes",      label: "Notes",       icon: "📝" },
-        { key: "wins",       label: "Successes",   icon: "🏆" },
-        { key: "alfred",     label: "Alfred",      icon: "🤖" },
-        { key: "focus",      label: "Focus",       icon: "⏱️" },
-        { key: "confidence", label: "Confidence",  icon: "⚡" },
-        { key: "builder",    label: "Builder",     icon: "✨" }, // ⬅️ NEW
+        { key: "today",      label: "Today",      icon: "✅" },
+        { key: "calendar",   label: "Calendar",   icon: "🗓️" },
+        { key: "goals",      label: "Goals",      icon: "🎯" },
+        { key: "vision",     label: "Vision",     icon: "🖼️" },
+        { key: "gratitude",  label: "Gratitude",  icon: "🙏" },
+        { key: "exercise",   label: "Exercise",   icon: "🏋️" },
+        { key: "notes",      label: "Notes",      icon: "📝" },
+        { key: "wins",       label: "Successes",  icon: "🏆" },
+        { key: "alfred",     label: "Alfred",     icon: "🤖" },
+        { key: "focus",      label: "Focus",      icon: "⏱️" },
+        { key: "confidence", label: "Confidence", icon: "⚡" },
+        { key: "settings",   label: "Settings",   icon: "⚙️" },
       ] as Array<{ key: Tab; label: string; icon: string }>,
     []
   );
 
+  /* ---------------- Load/ensure profile ---------------- */
+  useEffect(() => {
+    let cancelled = false;
+
+    async function ensureProfile() {
+      setProfileLoading(true);
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth.user?.id ?? null;
+      if (cancelled) return;
+
+      setUserId(uid);
+      if (!uid) {
+        setProfile(null);
+        setProfileLoading(false);
+        return;
+      }
+
+      // Try fetch profile
+      const { data: row, error } = await supabase
+        .from("profiles")
+        .select("id,display_name,title,dob,onboarded_at,pin_enabled,pin_hash")
+        .eq("id", uid)
+        .single();
+
+      if (!cancelled) {
+        if (row) {
+          setProfile(row as ProfileRow);
+        } else {
+          // If missing, create a stub profile row
+          if (error?.code === "PGRST116" || error?.message?.toLowerCase().includes("row not found")) {
+            await supabase.from("profiles").insert({
+              id: uid,
+              display_name: null,
+              title: null,
+              dob: null,
+              onboarded_at: null,
+            } as any);
+            // re-fetch
+            const { data: row2 } = await supabase
+              .from("profiles")
+              .select("id,display_name,title,dob,onboarded_at,pin_enabled,pin_hash")
+              .eq("id", uid)
+              .single();
+            setProfile((row2 || null) as any);
+          } else {
+            setProfile(null);
+          }
+        }
+        setProfileLoading(false);
+      }
+    }
+
+    ensureProfile();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Simple refresher after onboarding/save
+  async function refreshProfile() {
+    if (!userId) return;
+    const { data } = await supabase
+      .from("profiles")
+      .select("id,display_name,title,dob,onboarded_at,pin_enabled,pin_hash")
+      .eq("id", userId)
+      .single();
+    setProfile((data || null) as any);
+  }
+
+  /* ---------------- Onboarding guard ---------------- */
+  const needsOnboarding = !!userId && !profileLoading && !profile?.onboarded_at;
+
   return (
     <AuthGate>
+      {/* PIN lock overlay (only shows if enabled in profile) */}
+      <PINGate />
+
       {/* Page-scoped styles for header visibility + bottom tabbar */}
       <style>{CSS_APP}</style>
 
-      {/* Desktop header (hidden on small screens via CSS) */}
-      <div className="only-desktop">
-        <div className="container" style={{ padding: 12 }}>
-          <div
-            className="card"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              justifyContent: "space-between",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <strong>Best You Blueprint</strong>
-              <span className="muted">• build your ideal day</span>
-            </div>
-            <nav style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {tabs.map((t) => (
-                <button
-                  key={t.key}
-                  onClick={() => {
-                    if (t.key === "today") setExternalDateISO(undefined);
-                    setTab(t.key);
-                  }}
-                  className={tab === t.key ? "btn-primary" : ""}
-                  style={{ borderRadius: 10 }}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </nav>
+      {/* If onboarding needed, show it *instead* of the app */}
+      {needsOnboarding ? (
+        <div className="app-shell">
+          <div className="container" style={{ display: "grid", gap: 12 }}>
+            <OnboardingScreen onFinished={refreshProfile} />
           </div>
         </div>
-      </div>
+      ) : (
+        <>
+          {/* Desktop header (hidden on small screens via CSS) */}
+          <div className="only-desktop">
+            <div className="container" style={{ padding: 12 }}>
+              <div
+                className="card"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  justifyContent: "space-between",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <strong>Best You Blueprint</strong>
+                  <span className="muted">• build your ideal day</span>
+                </div>
+                <nav style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {tabs.map((t) => (
+                    <button
+                      key={t.key}
+                      onClick={() => {
+                        if (t.key === "today") setExternalDateISO(undefined);
+                        setTab(t.key);
+                      }}
+                      className={tab === t.key ? "btn-primary" : ""}
+                      style={{ borderRadius: 10 }}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </nav>
+              </div>
+            </div>
+          </div>
 
-      {/* Content shell (inside container; extra bottom padding for tabbar) */}
-      <div className="app-shell">
-        <div className="container" style={{ display: "grid", gap: 12 }}>
-          {tab === "today" && <TodayScreen externalDateISO={externalDateISO} />}
+          {/* Content shell (inside container; extra bottom padding for tabbar) */}
+          <div className="app-shell">
+            <div className="container" style={{ display: "grid", gap: 12 }}>
+              {tab === "today" && <TodayScreen externalDateISO={externalDateISO} />}
 
-          {tab === "calendar" && (
-            <CalendarScreen onSelectDate={(iso) => openTodayFor(iso)} />
-          )}
+              {tab === "calendar" && (
+                <CalendarScreen onSelectDate={(iso) => openTodayFor(iso)} />
+              )}
 
-          {tab === "goals" && <GoalsScreen />}
+              {tab === "goals" && <GoalsScreen />}
 
-          {tab === "vision" && <VisionBoardScreen />}
+              {tab === "vision" && <VisionBoardScreen />}
 
-          {tab === "gratitude" && <GratitudeScreen />}
+              {tab === "gratitude" && <GratitudeScreen />}
 
-          {tab === "exercise" && <ExerciseDiaryScreen />}
+              {tab === "exercise" && <ExerciseDiaryScreen />}
 
-          {tab === "notes" && <NotesScreen />}
+              {tab === "notes" && <NotesScreen />}
 
-          {tab === "wins" && <WinsScreen />}
+              {tab === "wins" && <WinsScreen />}
 
-          {tab === "alfred" && <AlfredScreen />}
+              {tab === "alfred" && <AlfredScreen />}
 
-          {tab === "focus" && <FocusAlfredScreen />}
+              {tab === "focus" && <FocusAlfredScreen />}
 
-          {tab === "confidence" && <ConfidenceScreen />}
+              {tab === "confidence" && <ConfidenceScreen />}
 
-          {tab === "builder" && <AffirmationBuilderScreen />}{/* ⬅️ NEW */}
-        </div>
-      </div>
+              {tab === "settings" && <SettingsScreen onProfileSaved={refreshProfile} />}
+            </div>
+          </div>
 
-      {/* Mobile sticky bottom tab bar */}
-      <MobileTabbar
-        active={tab}
-        setActive={(t) => {
-          if (t === "today") setExternalDateISO(undefined);
-          setTab(t);
-        }}
-        tabs={tabs}
-      />
+          {/* Mobile sticky bottom tab bar */}
+          <MobileTabbar
+            active={tab}
+            setActive={(t) => {
+              if (t === "today") setExternalDateISO(undefined);
+              setTab(t);
+            }}
+            tabs={tabs}
+          />
+        </>
+      )}
     </AuthGate>
   );
 }
