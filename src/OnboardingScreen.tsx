@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-/* ---------------------------------------------
-   Helpers
-----------------------------------------------*/
+/* ------------------ helpers ------------------ */
 type FunTitleKey =
   | "first_name" | "king" | "queen" | "prince" | "princess"
   | "bossman" | "bosslady" | "boss" | "sir" | "madam"
@@ -46,18 +44,17 @@ async function sha256Hex(input: string): Promise<string> {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-/* ---------------------------------------------
-   Component
-----------------------------------------------*/
+/* -------------- component -------------- */
 export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
   const [userId, setUserId] = useState<string | null>(null);
 
   // Basic fields
   const [firstName, setFirstName] = useState("");
   const [titleChoice, setTitleChoice] = useState<FunTitleKey>("first_name");
-  const displayNamePreview = titleChoice === "first_name"
-    ? (firstName || "…")
-    : (TITLE_CHOICES.find(t => t.key === titleChoice)?.label ?? "…");
+  const displayNamePreview =
+    titleChoice === "first_name"
+      ? (firstName || "…")
+      : (TITLE_CHOICES.find(t => t.key === titleChoice)?.label ?? "…");
 
   // DOB (dropdowns)
   const now = new Date();
@@ -81,14 +78,13 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
     return Array.from({ length: n }, (_, i) => i + 1);
   }, [dobYear, dobMonth]);
   useEffect(() => {
-    // clamp day if month/year changed to fewer days
     if (dobDay && dobYear && dobMonth) {
       const max = daysInMonth(dobYear, dobMonth);
       if (dobDay > max) setDobDay(max);
     }
   }, [dobYear, dobMonth]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Options (kept lightweight to avoid schema mismatches)
+  // Options kept minimal & safe (no pronouns etc.)
   const [openMore, setOpenMore] = useState(false);
   const [reminderTime, setReminderTime] = useState("09:00");
   const [theme, setTheme] = useState<"system" | "light" | "dark">("system");
@@ -109,29 +105,24 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
   function pinLooksValid(p: string) { return /^\d{4}$/.test(p); }
 
   async function upsertProfile(payload: Record<string, any>) {
-    // Robust upsert: try once; if we hit a "column ... does not exist" error,
-    // strip that key and retry exactly once. This avoids crashes when the DB
-    // schema hasn’t caught up yet (e.g., 'pronouns' column missing).
-    const tryOnce = async (pl: Record<string, any>) => {
-      const { error } = await supabase.from("profiles").upsert(pl, { onConflict: "id" });
-      return error;
-    };
+    // Defensive: retry once if a column-missing error appears.
+    const once = async (pl: Record<string, any>) =>
+      (await supabase.from("profiles").upsert(pl, { onConflict: "id" })).error;
 
-    let error = await tryOnce(payload);
+    let error = await once(payload);
     if (error && /column .* does not exist/i.test(error.message)) {
-      // extract offending column name if present
       const m = error.message.match(/column\s+"?([a-z0-9_]+)"?\s+does not exist/i);
       if (m?.[1]) {
         const bad = m[1];
         const copy = { ...payload };
         delete copy[bad as keyof typeof copy];
-        error = await tryOnce(copy);
+        error = await once(copy);
       }
     }
     if (error) throw error;
   }
 
-  async function saveAll(skip: boolean = false) {
+  async function saveAll(skip = false) {
     if (!userId) return;
     setSaving(true);
     setErr(null);
@@ -241,15 +232,30 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
           <div style={{ display: "grid", gap: 6 }}>
             <div className="section-title">Date of birth</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <select value={dobMonth ?? ""} onChange={(e) => setDobMonth(e.target.value ? Number(e.target.value) : undefined)}>
+              <select
+                value={dobMonth ?? ""}
+                onChange={(e) => setDobMonth(e.target.value ? Number(e.target.value) : undefined)}
+                aria-label="Month"
+              >
                 <option value="">Month</option>
                 {months.map(m => <option key={m.n} value={m.n}>{m.label}</option>)}
               </select>
-              <select value={dobDay ?? ""} onChange={(e) => setDobDay(e.target.value ? Number(e.target.value) : undefined)} disabled={!dobMonth || !dobYear}>
+
+              <select
+                value={dobDay ?? ""}
+                onChange={(e) => setDobDay(e.target.value ? Number(e.target.value) : undefined)}
+                disabled={!dobMonth || !dobYear}
+                aria-label="Day"
+              >
                 <option value="">Day</option>
                 {days.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
-              <select value={dobYear ?? ""} onChange={(e) => setDobYear(e.target.value ? Number(e.target.value) : undefined)}>
+
+              <select
+                value={dobYear ?? ""}
+                onChange={(e) => setDobYear(e.target.value ? Number(e.target.value) : undefined)}
+                aria-label="Year"
+              >
                 <option value="">Year</option>
                 {years.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
@@ -308,7 +314,7 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
               </div>
             </div>
 
-            {/* A couple of safe prefs */}
+            {/* Safe preferences */}
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
               <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 Daily reminder
