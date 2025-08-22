@@ -79,7 +79,7 @@ export default function App() {
     []
   );
 
-  /* ---------------- Load/ensure profile ---------------- */
+  /* -------- Load/ensure profile -------- */
   useEffect(() => {
     let cancelled = false;
 
@@ -96,36 +96,33 @@ export default function App() {
         return;
       }
 
-      // Try fetch profile
       const { data: row, error } = await supabase
         .from("profiles")
         .select("id,display_name,title,dob,onboarded_at,pin_enabled,pin_hash")
         .eq("id", uid)
         .single();
 
-      if (!cancelled) {
-        if (row) {
-          setProfile(row as ProfileRow);
-        } else {
-          // If missing, create a stub profile row
-          if (error?.code === "PGRST116" || error?.message?.toLowerCase().includes("row not found")) {
-            await supabase.from("profiles").insert({
-              id: uid,
-              display_name: null,
-              title: null,
-              dob: null,
-              onboarded_at: null,
-            } as any);
-            // re-fetch
-            const { data: row2 } = await supabase
-              .from("profiles")
-              .select("id,display_name,title,dob,onboarded_at,pin_enabled,pin_hash")
-              .eq("id", uid)
-              .single();
-            setProfile((row2 || null) as any);
-          } else {
-            setProfile(null);
-          }
+      if (cancelled) return;
+
+      if (row) {
+        setProfile(row as ProfileRow);
+        setProfileLoading(false);
+      } else {
+        // Create a stub row if missing, then refetch
+        if (error?.code === "PGRST116" || error?.message?.toLowerCase().includes("row not found")) {
+          await supabase.from("profiles").insert({
+            id: uid,
+            display_name: null,
+            title: null,
+            dob: null,
+            onboarded_at: null,
+          } as any);
+          const { data: row2 } = await supabase
+            .from("profiles")
+            .select("id,display_name,title,dob,onboarded_at,pin_enabled,pin_hash")
+            .eq("id", uid)
+            .single();
+          setProfile((row2 || null) as any);
         }
         setProfileLoading(false);
       }
@@ -135,7 +132,6 @@ export default function App() {
     return () => { cancelled = true; };
   }, []);
 
-  // Simple refresher after onboarding/save
   async function refreshProfile() {
     if (!userId) return;
     const { data } = await supabase
@@ -146,27 +142,26 @@ export default function App() {
     setProfile((data || null) as any);
   }
 
-  /* ---------------- Onboarding guard ---------------- */
+  /* -------- Onboarding guard -------- */
   const needsOnboarding = !!userId && !profileLoading && !profile?.onboarded_at;
 
   return (
     <AuthGate>
-      {/* PIN lock overlay (only shows if enabled in profile) */}
+      {/* PIN lock overlay (only shows if enabled via profile) */}
       <PINGate />
 
-      {/* Page-scoped styles for header visibility + bottom tabbar */}
       <style>{CSS_APP}</style>
 
-      {/* If onboarding needed, show it *instead* of the app */}
       {needsOnboarding ? (
         <div className="app-shell">
           <div className="container" style={{ display: "grid", gap: 12 }}>
-            <OnboardingScreen onFinished={refreshProfile} />
+            {/* OnboardingScreen expects onDone (not onFinished) */}
+            <OnboardingScreen onDone={refreshProfile} />
           </div>
         </div>
       ) : (
         <>
-          {/* Desktop header (hidden on small screens via CSS) */}
+          {/* Desktop header */}
           <div className="only-desktop">
             <div className="container" style={{ padding: 12 }}>
               <div
@@ -201,7 +196,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Content shell (inside container; extra bottom padding for tabbar) */}
+          {/* Content */}
           <div className="app-shell">
             <div className="container" style={{ display: "grid", gap: 12 }}>
               {tab === "today" && <TodayScreen externalDateISO={externalDateISO} />}
@@ -228,11 +223,12 @@ export default function App() {
 
               {tab === "confidence" && <ConfidenceScreen />}
 
-              {tab === "settings" && <SettingsScreen onProfileSaved={refreshProfile} />}
+              {/* SettingsScreen doesn't need props here */}
+              {tab === "settings" && <SettingsScreen />}
             </div>
           </div>
 
-          {/* Mobile sticky bottom tab bar */}
+          {/* Mobile tabs */}
           <MobileTabbar
             active={tab}
             setActive={(t) => {
@@ -278,16 +274,11 @@ function MobileTabbar({
   );
 }
 
-/* --- Local CSS to guarantee correct mobile layout & bottom nav --------- */
+/* --- Local CSS for correct mobile layout & bottom nav --- */
 const CSS_APP = `
-/* hide desktop header on small screens */
 .only-desktop { display: block; }
 @media (max-width: 900px){ .only-desktop { display: none; } }
-
-/* keep content clear of the fixed bottom bar (with iOS safe area) */
 .app-shell { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
-
-/* bottom tab bar */
 .tabbar{
   position: fixed; left: 0; right: 0; bottom: 0;
   background: rgba(255,255,255,.85);
@@ -297,26 +288,15 @@ const CSS_APP = `
   padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px));
 }
 @media (min-width: 900px){ .tabbar { display: none; } }
-
-.tabbar-inner{
-  display: flex;
-  justify-content: space-around;
-  gap: 8px;
-}
-
-/* pill-style buttons that reflect active tab */
+.tabbar-inner{ display: flex; justify-content: space-around; gap: 8px; }
 .tab-btn{
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   border: 1px solid var(--border);
-  background: #fff;
-  color: var(--text);
-  border-radius: 12px;
-  padding: 8px 10px;
-  min-width: 72px;
+  background: #fff; color: var(--text);
+  border-radius: 12px; padding: 8px 10px; min-width: 72px;
 }
 .tab-btn .icon{ font-size: 18px; line-height: 1; }
 .tab-btn .label{ font-size: 12px; }
-
 .tab-btn[data-active="true"]{
   background: hsl(var(--pastel-hsl) / .60);
   border-color: hsl(var(--pastel-hsl) / .75);
