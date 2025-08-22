@@ -84,7 +84,7 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
     }
   }, [dobYear, dobMonth]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Options kept minimal & safe (no pronouns etc.)
+  // Minimal safe options
   const [openMore, setOpenMore] = useState(false);
   const [reminderTime, setReminderTime] = useState("09:00");
   const [theme, setTheme] = useState<"system" | "light" | "dark">("system");
@@ -122,7 +122,7 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
     if (error) throw error;
   }
 
-  async function saveAll(skip = false) {
+  async function saveAll() {
     if (!userId) return;
     setSaving(true);
     setErr(null);
@@ -338,10 +338,10 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-          <button onClick={() => saveAll(true)} disabled={saving}>Skip for now</button>
+          <button onClick={saveAll} disabled={saving}>Skip for now</button>
           <button
             className="btn-primary"
-            onClick={() => saveAll(false)}
+            onClick={saveAll}
             disabled={saving}
             style={{ borderRadius: 10 }}
           >
