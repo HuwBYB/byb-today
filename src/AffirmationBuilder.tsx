@@ -24,8 +24,8 @@ type AffirmationRow = {
 };
 
 /* ---------- Storage keys ---------- */
-const LS_VAULT = "byb:affirmations:v1";          // All saved affirmations (vault)
-const LS_CONF_TODAY = "byb:confidence:today";    // Sent to Confidence rotation (today’s set)
+const LS_VAULT = "byb:affirmations:v1";
+const LS_CONF_TODAY = "byb:confidence:today";
 
 /* ---------- Modal ---------- */
 function Modal({
@@ -84,10 +84,7 @@ function BuilderHelpContent() {
 /* ---------- Utils ---------- */
 function todayISO() {
   const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 function speakText(t: string) {
   try {
@@ -107,7 +104,6 @@ async function sendToConfidenceTodayLocal(row: AffirmationRow) {
   try {
     const key = `${LS_CONF_TODAY}:${todayISO()}`;
     const arr: AffirmationRow[] = JSON.parse(localStorage.getItem(key) || "[]");
-    // Avoid exact duplicates per category per day
     const exists = arr.some(a => a.category === row.category && a.text.trim() === row.text.trim());
     if (!exists) {
       arr.push(row);
@@ -123,12 +119,14 @@ export default function AffirmationBuilderScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [active, setActive] = useState<Category>("business");
 
-  const [text, setText] = useState("");             // editor text
-  const [theme, setTheme] = useState("");           // optional prompt theme
+  const [text, setText] = useState("");
+  const [theme, setTheme] = useState("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [selIdx, setSelIdx] = useState<number | null>(null); // highlight selected suggestion
   const [busySuggest, setBusySuggest] = useState(false);
   const [busySave, setBusySave] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [savedToast, setSavedToast] = useState<string | null>(null);
 
   const [showHelp, setShowHelp] = useState(false);
   const [imgOk, setImgOk] = useState(true);
@@ -160,33 +158,29 @@ export default function AffirmationBuilderScreen() {
 
   async function askAlfred() {
     setErr(null);
+    setSelIdx(null);
     setBusySuggest(true);
     try {
-      // Use your existing Alfred API route. We bias it to output 2–3 short options.
       const prompt =
-`Help me write 3 short, present-tense affirmations for the "${active}" area.
-Theme (optional): ${theme || "(none)"}
-Rules: under 12 words, positive, believable, in my control. Output as bullet points.`;
+`Give me 3 short, present-tense affirmations for "${active}".
+Theme (optional): ${theme || "(none)"}.
+Rules: under 12 words, positive, believable, in my control.
+Output as bullet points only.`;
       const res = await fetch("/api/alfred", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "friend",
-          messages: [
-            { role: "user", content: prompt }
-          ],
-        }),
+        body: JSON.stringify({ mode: "friend", messages: [{ role: "user", content: prompt }] }),
       });
       if (!res.ok) throw new Error(`Alfred error: ${res.status}`);
       const data = await res.json();
-      const textResp: string = data.text || "";
+      const textResp: string = data.text || data.reply || "";
       const lines = textResp.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
       const bulls = lines
         .filter(l => /^[-*•]\s+/.test(l) || /^\d+\.\s+/.test(l))
         .map(l => l.replace(/^([-*•]\s+|\d+\.\s+)/, "").trim());
-      const opts = bulls.length ? bulls : lines.slice(0, 3);
-      setSuggestions(opts.slice(0, 3));
-      if (opts[0]) setText(opts[0]);
+      const opts = (bulls.length ? bulls : lines).slice(0, 3);
+      setSuggestions(opts);
+      if (opts[0]) { setText(opts[0]); setSelIdx(0); }
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -198,24 +192,20 @@ Rules: under 12 words, positive, believable, in my control. Output as bullet poi
     if (!text.trim()) return;
     setErr(null);
     setBusySuggest(true);
+    setSelIdx(null);
     try {
       const prompt =
 `Rewrite this affirmation with a ${kind} tone.
-Keep it present-tense, positive, under 12 words, believable:
+Keep present tense, positive, believable, under 12 words:
 "${text}"`;
       const res = await fetch("/api/alfred", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "friend",
-          messages: [
-            { role: "user", content: prompt }
-          ],
-        }),
+        body: JSON.stringify({ mode: "friend", messages: [{ role: "user", content: prompt }] }),
       });
       if (!res.ok) throw new Error(`Alfred error: ${res.status}`);
       const data = await res.json();
-      const out = (data.text || "").trim().split(/\r?\n/).find(Boolean) || "";
+      const out = (data.text || data.reply || "").trim().split(/\r?\n/).find(Boolean) || "";
       if (out) setText(out.replace(/^"|"$/g, ""));
     } catch (e: any) {
       setErr(e.message || String(e));
@@ -231,37 +221,32 @@ Keep it present-tense, positive, under 12 words, believable:
     setBusySave(true);
     const row: AffirmationRow = { user_id: userId, category: active, text: clean };
 
-    // 1) Supabase (best-effort)
     try {
       if (userId) {
-        await supabase.from("affirmations").insert({
-          user_id: userId,
-          category: active,
-          text: clean,
-        });
+        await supabase.from("affirmations").insert({ user_id: userId, category: active, text: clean });
       }
-    } catch (e) {
-      // non-fatal
-      console.warn("Supabase save failed, falling back to local vault.");
+    } catch {
+      // non-fatal: local fallback covers it
+    } finally {
+      await saveToVaultLocal(row);
+      await sendToConfidenceTodayLocal(row);
+      setBusySave(false);
+      setSavedToast("Saved to vault and sent to Confidence for today ✅");
+      setTimeout(() => setSavedToast(null), 2200);
+      if ((navigator as any).vibrate) (navigator as any).vibrate(6);
     }
-
-    // 2) Local vault (always)
-    await saveToVaultLocal(row);
-
-    // 3) Send to Confidence for today’s rotation (local)
-    await sendToConfidenceTodayLocal(row);
-
-    setBusySave(false);
-    if ((navigator as any).vibrate) (navigator as any).vibrate(6);
   }
 
-  function pickSuggestion(s: string) {
+  function pickSuggestion(s: string, idx: number) {
     setText(s);
+    setSelIdx(idx);
     if ((navigator as any).vibrate) (navigator as any).vibrate(3);
   }
 
   return (
     <div className="page-affirmation-builder" style={{ maxWidth: "100%", overflowX: "hidden" }}>
+      <style>{CSS_LOCAL}</style>
+
       <div className="container" style={{ display: "grid", gap: 12 }}>
         {/* Header with Alfred help */}
         <div className="card" style={{ position: "relative", paddingRight: 64 }}>
@@ -269,27 +254,12 @@ Keep it present-tense, positive, under 12 words, believable:
             onClick={() => setShowHelp(true)}
             aria-label="Open builder help"
             title="Need a hand? Ask Alfred"
-            style={{
-              position: "absolute", top: 8, right: 8, border: "none", background: "transparent",
-              padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10,
-            }}
+            style={{ position: "absolute", top: 8, right: 8, border: "none", background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10 }}
           >
             {imgOk ? (
-              <img
-                src={ALFRED_SRC}
-                alt="Alfred — open help"
-                style={{ width: 48, height: 48 }}
-                onError={() => setImgOk(false)}
-              />
+              <img src={ALFRED_SRC} alt="Alfred — open help" style={{ width: 48, height: 48 }} onError={() => setImgOk(false)} />
             ) : (
-              <span
-                style={{
-                  display: "inline-flex", alignItems: "center", justifyContent: "center",
-                  width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db", background: "#f9fafb", fontWeight: 700,
-                }}
-              >
-                ?
-              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db", background: "#f9fafb", fontWeight: 700 }}>?</span>
             )}
           </button>
           <h1 style={{ margin: 0 }}>Affirmation Builder</h1>
@@ -303,14 +273,8 @@ Keep it present-tense, positive, under 12 words, believable:
             return (
               <button
                 key={c.key}
-                onClick={() => setActive(c.key)}
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: 8,
-                  border: "1px solid",
-                  borderColor: activeCat ? "hsl(var(--pastel-hsl))" : "#e5e7eb",
-                  background: activeCat ? "hsl(var(--pastel-hsl) / .45)" : "#fff",
-                }}
+                onClick={() => { setActive(c.key); setSelIdx(null); }}
+                className={activeCat ? "pill active" : "pill"}
                 aria-pressed={activeCat}
               >
                 {c.label}
@@ -324,7 +288,7 @@ Keep it present-tense, positive, under 12 words, believable:
           <div className="section-title">Write your own</div>
           <input
             value={text}
-            onChange={e => setText(e.target.value)}
+            onChange={e => { setText(e.target.value); setSelIdx(null); }}
             placeholder="e.g., I lead with calm, decisive action."
             aria-label="Affirmation text"
           />
@@ -352,13 +316,23 @@ Keep it present-tense, positive, under 12 words, believable:
           </div>
 
           {!!suggestions.length && (
-            <div style={{ display: "grid", gap: 6 }}>
-              <div className="muted">Suggestions (tap to use)</div>
-              {suggestions.map((s, i) => (
-                <button key={i} onClick={() => pickSuggestion(s)} style={{ textAlign: "left" }}>
-                  {s}
-                </button>
-              ))}
+            <div style={{ display: "grid", gap: 8 }}>
+              <div className="muted">Suggestions (tap to select)</div>
+              <div className="suggest-grid">
+                {suggestions.map((s, i) => {
+                  const activeS = selIdx === i;
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => pickSuggestion(s, i)}
+                      className={activeS ? "suggest active" : "suggest"}
+                      title="Use this"
+                    >
+                      {s}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -372,27 +346,23 @@ Keep it present-tense, positive, under 12 words, believable:
           {/* Preview card */}
           <div
             aria-label="Affirmation preview"
-            style={{
-              padding: 18, border: "1px solid #e5e7eb", borderRadius: 12,
-              fontSize: 22, fontWeight: 800, lineHeight: 1.3, textAlign: "center",
-            }}
+            className="preview"
           >
             {text || "Your affirmation will appear here…"}
           </div>
 
-          {/* Actions */}
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-            <button onClick={() => setText("")} disabled={!text}>Clear</button>
-            <button onClick={saveToVaultAndConfidence} className="btn-primary" disabled={!text || busySave} style={{ borderRadius: 10 }}>
+          {/* Big CTA */}
+          <div>
+            <button
+              onClick={saveToVaultAndConfidence}
+              className="btn-primary cta"
+              disabled={!text || busySave}
+              title="Save to vault and send to Confidence"
+            >
               {busySave ? "Saving…" : "Save & send to Confidence"}
             </button>
+            {savedToast && <div className="toast">{savedToast}</div>}
           </div>
-        </div>
-
-        {/* Tiny link to Confidence page (optional route name) */}
-        <div className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div className="muted">Saved items go to your Confidence page’s rotation for today.</div>
-          <a href="/confidence" className="btn-link">Open Confidence →</a>
         </div>
       </div>
 
@@ -408,3 +378,65 @@ Keep it present-tense, positive, under 12 words, believable:
     </div>
   );
 }
+
+/* ---------- Local visual tweaks ---------- */
+const CSS_LOCAL = `
+.pill{
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+}
+.pill.active{
+  background: hsl(var(--pastel-hsl, 210 95% 78%) / .45);
+  border-color: hsl(var(--pastel-hsl, 210 95% 78%));
+}
+
+.suggest-grid{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+.suggest{
+  text-align: left;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 12px;
+  padding: 10px 12px;
+  line-height: 1.2;
+}
+.suggest.active{
+  background: #111;
+  color: #fff;
+  border-color: #111;
+}
+
+.preview{
+  padding: 18px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.cta{
+  display: block;
+  width: 100%;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.toast{
+  margin-top: 8px;
+  font-size: 12px;
+  color: #065f46;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+`;
