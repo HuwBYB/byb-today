@@ -12,7 +12,7 @@ import AlfredScreen from "./AlfredScreen";
 import ConfidenceScreen from "./ConfidenceScreen";
 import NotesScreen from "./NotesScreen";
 import FocusAlfredScreen from "./FocusAlfredScreen";
-import AffirmationBuilderScreen from "./AffirmationBuilderScreen"; // ⬅️ NEW
+import AffirmationBuilderScreen from "./AffirmationBuilder"; // ⬅️ NEW
 
 type Tab =
   | "today"
