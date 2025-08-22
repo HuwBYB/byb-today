@@ -23,6 +23,9 @@ import SettingsScreen from "./SettingsScreen";
 /* Overlay gate */
 import PINGate from "./PINGate";
 
+/* ---------- local onboarding flag so we never get stuck ---------- */
+const ONBOARD_KEY = "byb:onboarded:v1";
+
 type Tab =
   | "today"
   | "calendar"
@@ -42,7 +45,7 @@ type ProfileRow = {
   display_name: string | null;
   title: string | null;
   dob: string | null;
-  onboarded_at: string | null;
+  onboarded_at: string | null; // if null => hasn’t finished onboarding
   pin_enabled?: boolean | null;
   pin_hash?: string | null;
 };
@@ -54,11 +57,6 @@ export default function App() {
   const [userId, setUserId] = useState<string | null>(null);
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
-
-  function openTodayFor(iso: string) {
-    setExternalDateISO(iso);
-    setTab("today");
-  }
 
   const tabs = useMemo(
     () =>
@@ -79,12 +77,18 @@ export default function App() {
     []
   );
 
+  function openTodayFor(iso: string) {
+    setExternalDateISO(iso);
+    setTab("today");
+  }
+
   /* -------- Load/ensure profile -------- */
   useEffect(() => {
     let cancelled = false;
 
     async function ensureProfile() {
       setProfileLoading(true);
+
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth.user?.id ?? null;
       if (cancelled) return;
@@ -106,9 +110,8 @@ export default function App() {
 
       if (row) {
         setProfile(row as ProfileRow);
-        setProfileLoading(false);
       } else {
-        // Create a stub row if missing, then refetch
+        // Create a stub row if missing, then refetch once.
         if (error?.code === "PGRST116" || error?.message?.toLowerCase().includes("row not found")) {
           await supabase.from("profiles").insert({
             id: uid,
@@ -124,8 +127,8 @@ export default function App() {
             .single();
           setProfile((row2 || null) as any);
         }
-        setProfileLoading(false);
       }
+      setProfileLoading(false);
     }
 
     ensureProfile();
@@ -143,11 +146,12 @@ export default function App() {
   }
 
   /* -------- Onboarding guard -------- */
-  const needsOnboarding = !!userId && !profileLoading && !profile?.onboarded_at;
+  const onboardedLocal = (typeof window !== "undefined") && localStorage.getItem(ONBOARD_KEY) === "1";
+  const needsOnboarding = !!userId && !profileLoading && !profile?.onboarded_at && !onboardedLocal;
 
   return (
     <AuthGate>
-      {/* PIN lock overlay (only shows if enabled via profile) */}
+      {/* PIN lock overlay always available */}
       <PINGate />
 
       <style>{CSS_APP}</style>
@@ -155,8 +159,13 @@ export default function App() {
       {needsOnboarding ? (
         <div className="app-shell">
           <div className="container" style={{ display: "grid", gap: 12 }}>
-            {/* OnboardingScreen expects onDone (not onFinished) */}
-            <OnboardingScreen onDone={refreshProfile} />
+            {/* Onboarding: when done, set local flag and refresh DB profile */}
+            <OnboardingScreen
+              onDone={async () => {
+                localStorage.setItem(ONBOARD_KEY, "1");
+                await refreshProfile();
+              }}
+            />
           </div>
         </div>
       ) : (
@@ -206,24 +215,14 @@ export default function App() {
               )}
 
               {tab === "goals" && <GoalsScreen />}
-
               {tab === "vision" && <VisionBoardScreen />}
-
               {tab === "gratitude" && <GratitudeScreen />}
-
               {tab === "exercise" && <ExerciseDiaryScreen />}
-
               {tab === "notes" && <NotesScreen />}
-
               {tab === "wins" && <WinsScreen />}
-
               {tab === "alfred" && <AlfredScreen />}
-
               {tab === "focus" && <FocusAlfredScreen />}
-
               {tab === "confidence" && <ConfidenceScreen />}
-
-              {/* SettingsScreen doesn't need props here */}
               {tab === "settings" && <SettingsScreen />}
             </div>
           </div>
