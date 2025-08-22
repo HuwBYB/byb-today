@@ -8,8 +8,8 @@ type Task = {
   title: string;
   due_date: string | null;
   status: "pending" | "done" | string;
-  priority: number | null;
-  source: string | null;
+  priority: number | null; // 2 => Top
+  source: string | null;   // e.g., today_repeat_daily
   goal_id: number | null;
   completed_at: string | null;
 };
@@ -44,12 +44,13 @@ function addDays(iso: string, n: number) {
 /* ===== repeat config ===== */
 type Repeat = "" | "daily" | "weekdays" | "weekly" | "monthly" | "annually";
 const REPEAT_COUNTS: Record<Exclude<Repeat, "">, number> = {
-  daily: 14, // 2 weeks
-  weekdays: 20, // ~4 work weeks
-  weekly: 12, // 12 weeks
-  monthly: 12, // 12 months
-  annually: 5 // 5 years
+  daily: 14,
+  weekdays: 20,
+  weekly: 12,
+  monthly: 12,
+  annually: 5
 };
+const REPEAT_PREFIX = "today_repeat_";
 
 function generateOccurrences(startISO: string, repeat: Repeat): string[] {
   if (!repeat) return [startISO];
@@ -77,6 +78,15 @@ function generateOccurrences(startISO: string, repeat: Repeat): string[] {
     out.push(toISO(d));
   }
   return out;
+}
+function getRepeatFromSource(source: string | null): Repeat {
+  if (!source || !source.startsWith(REPEAT_PREFIX)) return "";
+  const suffix = source.slice(REPEAT_PREFIX.length) as Repeat;
+  if (["daily", "weekdays", "weekly", "monthly", "annually"].includes(suffix)) return suffix;
+  return "";
+}
+function makeSeriesKey(repeat: Repeat) {
+  return repeat ? `${REPEAT_PREFIX}${repeat}` : "manual";
 }
 
 /* ===== summary types ===== */
@@ -108,6 +118,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   // Sticky "Now" widget: clock + quick capture
   const [now, setNow] = useState<Date>(new Date());
   const [quickTitle, setQuickTitle] = useState("");
+  theQuickTop:
   const [quickTop, setQuickTop] = useState(false);
   const [savingQuick, setSavingQuick] = useState(false);
 
@@ -121,6 +132,16 @@ export default function TodayScreen({ externalDateISO }: Props) {
     streak: 0,
     bestStreak: 0
   });
+
+  // Edit modal state
+  const [editOpen, setEditOpen] = useState(false);
+  const [editing, setEditing] = useState<Task | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editTop, setEditTop] = useState(false);
+  const [editDue, setEditDue] = useState<string | null>(null);
+  const [editRepeat, setEditRepeat] = useState<Repeat>("");
+  const [applyFuture, setApplyFuture] = useState(false); // apply title/top to future in series
+  const [busyEdit, setBusyEdit] = useState(false);
 
   useEffect(() => {
     if (externalDateISO) setDateISO(externalDateISO);
@@ -153,9 +174,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     try {
       const { data, error } = await supabase
         .from("tasks")
-        .select(
-          "id,user_id,title,due_date,status,priority,source,goal_id,completed_at"
-        )
+        .select("id,user_id,title,due_date,status,priority,source,goal_id,completed_at")
         .eq("user_id", userId)
         .lte("due_date", dateISO)
         .order("priority", { ascending: false })
@@ -170,9 +189,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
       setTasks(list);
 
       const ids = Array.from(
-        new Set(
-          list.map((t) => t.goal_id).filter((v): v is number => typeof v === "number")
-        )
+        new Set(list.map((t) => t.goal_id).filter((v): v is number => typeof v === "number"))
       );
       if (ids.length) {
         const { data: gs, error: ge } = await supabase
@@ -187,7 +204,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         setGoalMap({});
       }
 
-      // compute per-day summary (win/lose) from the loaded list
+      // compute daily summary
       const doneToday = list.filter(
         (t) => t.due_date === dateISO && t.status === "done"
       ).length;
@@ -199,18 +216,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
       );
       const topDone = topToday.filter((t) => t.status === "done").length;
       const topTotal = topToday.length;
-
-      // "Win" rule: if you had at least 1 top priority done OR 3+ tasks done.
       const isWin = topDone >= 1 || doneToday >= 3;
 
-      setSummary((s) => ({
-        ...s,
-        doneToday,
-        pendingToday,
-        topDone,
-        topTotal,
-        isWin
-      }));
+      setSummary((s) => ({ ...s, doneToday, pendingToday, topDone, topTotal, isWin }));
     } catch (e: any) {
       setErr(e.message || String(e));
       setTasks([]);
@@ -220,7 +228,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 
-  // compute streaks over the last 180 days, based on completed_at
+  // compute streaks over the last 180 days
   async function loadStreaks() {
     if (!userId) return;
     try {
@@ -242,7 +250,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         days.add(toISO(new Date(d.getFullYear(), d.getMonth(), d.getDate())));
       }
 
-      // current streak counted up to REAL today (not selected date)
+      // current streak up to today
       let streak = 0;
       let cursor = todayISO();
       while (days.has(cursor)) {
@@ -251,14 +259,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
       }
 
       // best streak
-      const sorted = Array.from(days).sort(); // asc
+      const sorted = Array.from(days).sort();
       let best = 0;
       let run = 0;
       let prev: string | null = null;
       for (const d of sorted) {
-        if (!prev) {
-          run = 1;
-        } else {
+        if (!prev) run = 1;
+        else {
           const nextOfPrev = addDays(prev, 1);
           run = d === nextOfPrev ? run + 1 : 1;
         }
@@ -267,8 +274,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
       }
 
       setSummary((s) => ({ ...s, streak, bestStreak: best }));
-    } catch (e: any) {
-      // don't block UI on streak errors
+    } catch {
+      // ignore
     }
   }
 
@@ -342,7 +349,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
       due_date: iso,
       status: "pending",
       priority: top ? 2 : 0,
-      source: repeat ? `today_repeat_${repeat}` : "manual"
+      source: repeat ? makeSeriesKey(repeat) : "manual"
     }));
     const { error } = await supabase.from("tasks").insert(rows as any);
     if (error) throw error;
@@ -423,6 +430,135 @@ export default function TodayScreen({ externalDateISO }: Props) {
   }
 
   const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  /* =========================
+     Edit modal helpers
+     ========================= */
+  function openEdit(t: Task) {
+    setEditing(t);
+    setEditTitle(t.title || "");
+    setEditTop((t.priority ?? 0) >= 2);
+    setEditDue(t.due_date);
+    setEditRepeat(getRepeatFromSource(t.source));
+    setApplyFuture(false);
+    setEditOpen(true);
+  }
+
+  async function saveEdit() {
+    if (!editing || !userId) return;
+    setBusyEdit(true);
+    setErr(null);
+
+    const originalRepeat = getRepeatFromSource(editing.source);
+    const originalSeriesKey = editing.source?.startsWith(REPEAT_PREFIX) ? editing.source : null;
+    const newSeriesKey = editRepeat ? makeSeriesKey(editRepeat) : "manual";
+    const title = editTitle.trim();
+    const top = editTop ? 2 : 0;
+    const due = editDue || editing.due_date || dateISO;
+
+    try {
+      // 1) Update this task
+      const updateThis = supabase
+        .from("tasks")
+        .update({ title, priority: top, due_date: due, source: newSeriesKey })
+        .eq("id", editing.id);
+
+      // 2) If applyFuture for a series: update future rows' title/priority
+      let updateFuture: Promise<any> | null = null;
+      if (applyFuture && originalSeriesKey) {
+        updateFuture = supabase
+          .from("tasks")
+          .update({ title, priority: top })
+          .eq("user_id", userId)
+          .eq("source", originalSeriesKey)
+          .gte("due_date", editing.due_date || due);
+      }
+
+      // 3) Handle repeat changes
+      // Cases:
+      // A) original series -> new series (different OR removed)
+      // B) manual -> new series
+      let changeRepeatOps: Promise<any>[] = [];
+
+      // Remove future rows from old series if changing/removing repeat
+      if (originalSeriesKey && editRepeat !== originalRepeat) {
+        const delFuture = supabase
+          .from("tasks")
+          .delete()
+          .eq("user_id", userId)
+          .eq("source", originalSeriesKey)
+          .gte("due_date", (editing.due_date || due) as string)
+          .neq("id", editing.id);
+        changeRepeatOps.push(delFuture);
+      }
+
+      // If new repeat selected (including manual->series OR series->different series), generate new future occurrences
+      if (editRepeat && editRepeat !== originalRepeat) {
+        const occurrences = generateOccurrences(due, editRepeat).slice(1); // future only
+        if (occurrences.length) {
+          const rows = occurrences.map((iso) => ({
+            user_id: userId,
+            title,
+            due_date: iso,
+            status: "pending",
+            priority: top,
+            source: makeSeriesKey(editRepeat)
+          }));
+          const ins = supabase.from("tasks").insert(rows as any);
+          changeRepeatOps.push(ins as any);
+        }
+      }
+
+      await updateThis;
+      if (updateFuture) await updateFuture;
+      if (changeRepeatOps.length) await Promise.all(changeRepeatOps);
+
+      setEditOpen(false);
+      setEditing(null);
+      await loadAll();
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusyEdit(false);
+    }
+  }
+
+  async function deleteTask(scope: "one" | "future" | "all") {
+    if (!editing || !userId) return;
+    setBusyEdit(true);
+    setErr(null);
+    try {
+      const originalSeriesKey = editing.source?.startsWith(REPEAT_PREFIX) ? editing.source : null;
+
+      if (scope === "one") {
+        await supabase.from("tasks").delete().eq("id", editing.id);
+      } else if (scope === "future" && originalSeriesKey) {
+        await supabase
+          .from("tasks")
+          .delete()
+          .eq("user_id", userId)
+          .eq("source", originalSeriesKey)
+          .gte("due_date", editing.due_date || dateISO);
+      } else if (scope === "all" && originalSeriesKey) {
+        await supabase
+          .from("tasks")
+          .delete()
+          .eq("user_id", userId)
+          .eq("source", originalSeriesKey);
+      } else {
+        // fallback to single delete if no series
+        await supabase.from("tasks").delete().eq("id", editing.id);
+      }
+
+      setEditOpen(false);
+      setEditing(null);
+      await loadAll();
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusyEdit(false);
+    }
+  }
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
@@ -559,6 +695,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
                       >
                         <span>{displayTitle(t)}</span>
                         {overdue && <span className="badge">Overdue</span>}
+                        <button
+                          className="btn-ghost"
+                          style={{ marginLeft: "auto" }}
+                          onClick={() => openEdit(t)}
+                          title="Edit task"
+                        >
+                          Edit
+                        </button>
                       </div>
                       {overdue && (
                         <div className="muted" style={{ marginTop: 4 }}>
@@ -609,6 +753,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
                       >
                         <span>{displayTitle(t)}</span>
                         {overdue && <span className="badge">Overdue</span>}
+                        <button
+                          className="btn-ghost"
+                          style={{ marginLeft: "auto" }}
+                          onClick={() => openEdit(t)}
+                          title="Edit task"
+                        >
+                          Edit
+                        </button>
                       </div>
                       {overdue && (
                         <div className="muted" style={{ marginTop: 4 }}>
@@ -637,7 +789,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
           <div className="section-title">Task title</div>
           <input
             type="text"
-            placeholder="e.g., Buy gift for Carys"
+            placeholder="Enter task…"
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             onKeyDown={(e) => {
@@ -689,6 +841,155 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
+
+      {/* ===== Edit Modal ===== */}
+      {editOpen && editing && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Edit task"
+          onClick={() => !busyEdit && setEditOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            zIndex: 2000
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="card"
+            style={{ width: "min(720px, 96vw)", borderRadius: 12, padding: 16, background: "#fff" }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <h3 style={{ margin: 0, fontSize: 18 }}>Edit task</h3>
+              <span className="muted" style={{ marginLeft: "auto" }}>
+                {getRepeatFromSource(editing.source) ? "Recurring" : "Single"}
+              </span>
+              <button onClick={() => setEditOpen(false)} disabled={busyEdit} title="Close">✕</button>
+            </div>
+
+            <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+              <label style={{ display: "grid", gap: 6 }}>
+                <div className="section-title">Title</div>
+                <input
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  placeholder="Enter task…"
+                />
+              </label>
+
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={editTop}
+                    onChange={(e) => setEditTop(e.target.checked)}
+                  />
+                  Mark as Top Priority
+                </label>
+
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  Due
+                  <input
+                    type="date"
+                    value={editDue || ""}
+                    onChange={(e) => setEditDue(e.target.value || null)}
+                  />
+                </label>
+
+                {getRepeatFromSource(editing.source) ? (
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    Repeat
+                    <select
+                      value={editRepeat}
+                      onChange={(e) => setEditRepeat(e.target.value as Repeat)}
+                      title="Change frequency"
+                    >
+                      <option value="">No repeat</option>
+                      <option value="daily">Daily</option>
+                      <option value="weekdays">Daily (Mon–Fri)</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                      <option value="annually">Annually</option>
+                    </select>
+                  </label>
+                ) : (
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    Repeat
+                    <select
+                      value={editRepeat}
+                      onChange={(e) => setEditRepeat(e.target.value as Repeat)}
+                      title="Make this a repeating task"
+                    >
+                      <option value="">No repeat</option>
+                      <option value="daily">Daily</option>
+                      <option value="weekdays">Daily (Mon–Fri)</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                      <option value="annually">Annually</option>
+                    </select>
+                  </label>
+                )}
+              </div>
+
+              {getRepeatFromSource(editing.source) && (
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={applyFuture}
+                    onChange={(e) => setApplyFuture(e.target.checked)}
+                  />
+                  Apply title/priority changes to all <b>future</b> items in this series
+                </label>
+              )}
+
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap", marginTop: 6 }}>
+                <button
+                  onClick={() => deleteTask("one")}
+                  disabled={busyEdit}
+                  title="Delete just this task"
+                >
+                  Delete this
+                </button>
+
+                {getRepeatFromSource(editing.source) && (
+                  <>
+                    <button
+                      onClick={() => deleteTask("future")}
+                      disabled={busyEdit}
+                      title="Delete this and all future in series"
+                    >
+                      Delete future in series
+                    </button>
+                    <button
+                      onClick={() => deleteTask("all")}
+                      disabled={busyEdit}
+                      title="Delete entire series"
+                    >
+                      Delete entire series
+                    </button>
+                  </>
+                )}
+
+                <button
+                  className="btn-primary"
+                  onClick={saveEdit}
+                  disabled={busyEdit || !editTitle.trim()}
+                  style={{ borderRadius: 8 }}
+                  title={getRepeatFromSource(editing.source) !== editRepeat ? "Saves and updates series from the selected due date" : "Save"}
+                >
+                  {busyEdit ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
