@@ -118,7 +118,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
   // Sticky "Now" widget: clock + quick capture
   const [now, setNow] = useState<Date>(new Date());
   const [quickTitle, setQuickTitle] = useState("");
-  theQuickTop:
   const [quickTop, setQuickTop] = useState(false);
   const [savingQuick, setSavingQuick] = useState(false);
 
@@ -458,43 +457,39 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
     try {
       // 1) Update this task
-      const updateThis = supabase
-        .from("tasks")
-        .update({ title, priority: top, due_date: due, source: newSeriesKey })
-        .eq("id", editing.id);
+      {
+        const { error } = await supabase
+          .from("tasks")
+          .update({ title, priority: top, due_date: due, source: newSeriesKey })
+          .eq("id", editing.id);
+        if (error) throw error;
+      }
 
       // 2) If applyFuture for a series: update future rows' title/priority
-      let updateFuture: Promise<any> | null = null;
       if (applyFuture && originalSeriesKey) {
-        updateFuture = supabase
+        const { error } = await supabase
           .from("tasks")
           .update({ title, priority: top })
           .eq("user_id", userId)
           .eq("source", originalSeriesKey)
-          .gte("due_date", editing.due_date || due);
+          .gte("due_date", (editing.due_date || due) as string);
+        if (error) throw error;
       }
 
-      // 3) Handle repeat changes
-      // Cases:
-      // A) original series -> new series (different OR removed)
-      // B) manual -> new series
-      let changeRepeatOps: Promise<any>[] = [];
-
-      // Remove future rows from old series if changing/removing repeat
+      // 3) Handle repeat changes (delete old future; insert new future)
       if (originalSeriesKey && editRepeat !== originalRepeat) {
-        const delFuture = supabase
+        const { error } = await supabase
           .from("tasks")
           .delete()
           .eq("user_id", userId)
           .eq("source", originalSeriesKey)
           .gte("due_date", (editing.due_date || due) as string)
           .neq("id", editing.id);
-        changeRepeatOps.push(delFuture);
+        if (error) throw error;
       }
 
-      // If new repeat selected (including manual->series OR series->different series), generate new future occurrences
       if (editRepeat && editRepeat !== originalRepeat) {
-        const occurrences = generateOccurrences(due, editRepeat).slice(1); // future only
+        const occurrences = generateOccurrences(due as string, editRepeat).slice(1); // future only
         if (occurrences.length) {
           const rows = occurrences.map((iso) => ({
             user_id: userId,
@@ -504,14 +499,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
             priority: top,
             source: makeSeriesKey(editRepeat)
           }));
-          const ins = supabase.from("tasks").insert(rows as any);
-          changeRepeatOps.push(ins as any);
+          const { error } = await supabase.from("tasks").insert(rows as any);
+          if (error) throw error;
         }
       }
-
-      await updateThis;
-      if (updateFuture) await updateFuture;
-      if (changeRepeatOps.length) await Promise.all(changeRepeatOps);
 
       setEditOpen(false);
       setEditing(null);
@@ -531,23 +522,27 @@ export default function TodayScreen({ externalDateISO }: Props) {
       const originalSeriesKey = editing.source?.startsWith(REPEAT_PREFIX) ? editing.source : null;
 
       if (scope === "one") {
-        await supabase.from("tasks").delete().eq("id", editing.id);
+        const { error } = await supabase.from("tasks").delete().eq("id", editing.id);
+        if (error) throw error;
       } else if (scope === "future" && originalSeriesKey) {
-        await supabase
+        const { error } = await supabase
           .from("tasks")
           .delete()
           .eq("user_id", userId)
           .eq("source", originalSeriesKey)
           .gte("due_date", editing.due_date || dateISO);
+        if (error) throw error;
       } else if (scope === "all" && originalSeriesKey) {
-        await supabase
+        const { error } = await supabase
           .from("tasks")
           .delete()
           .eq("user_id", userId)
           .eq("source", originalSeriesKey);
+        if (error) throw error;
       } else {
         // fallback to single delete if no series
-        await supabase.from("tasks").delete().eq("id", editing.id);
+        const { error } = await supabase.from("tasks").delete().eq("id", editing.id);
+        if (error) throw error;
       }
 
       setEditOpen(false);
@@ -902,39 +897,21 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   />
                 </label>
 
-                {getRepeatFromSource(editing.source) ? (
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    Repeat
-                    <select
-                      value={editRepeat}
-                      onChange={(e) => setEditRepeat(e.target.value as Repeat)}
-                      title="Change frequency"
-                    >
-                      <option value="">No repeat</option>
-                      <option value="daily">Daily</option>
-                      <option value="weekdays">Daily (Mon–Fri)</option>
-                      <option value="weekly">Weekly</option>
-                      <option value="monthly">Monthly</option>
-                      <option value="annually">Annually</option>
-                    </select>
-                  </label>
-                ) : (
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    Repeat
-                    <select
-                      value={editRepeat}
-                      onChange={(e) => setEditRepeat(e.target.value as Repeat)}
-                      title="Make this a repeating task"
-                    >
-                      <option value="">No repeat</option>
-                      <option value="daily">Daily</option>
-                      <option value="weekdays">Daily (Mon–Fri)</option>
-                      <option value="weekly">Weekly</option>
-                      <option value="monthly">Monthly</option>
-                      <option value="annually">Annually</option>
-                    </select>
-                  </label>
-                )}
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  Repeat
+                  <select
+                    value={editRepeat}
+                    onChange={(e) => setEditRepeat(e.target.value as Repeat)}
+                    title={getRepeatFromSource(editing.source) ? "Change frequency" : "Make this a repeating task"}
+                  >
+                    <option value="">No repeat</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekdays">Daily (Mon–Fri)</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="annually">Annually</option>
+                  </select>
+                </label>
               </div>
 
               {getRepeatFromSource(editing.source) && (
