@@ -11,7 +11,8 @@ import WinsScreen from "./WinsScreen";
 import AlfredScreen from "./AlfredScreen";
 import ConfidenceScreen from "./ConfidenceScreen";
 import NotesScreen from "./NotesScreen";
-import FocusAlfredScreen from "./FocusAlfredScreen"; // ⬅️ NEW
+import FocusAlfredScreen from "./FocusAlfredScreen";
+import AffirmationBuilderScreen from "./AffirmationBuilderScreen"; // ⬅️ NEW
 
 type Tab =
   | "today"
@@ -23,8 +24,9 @@ type Tab =
   | "notes"
   | "wins"
   | "alfred"
-  | "focus"        // ⬅️ NEW
-  | "confidence";
+  | "focus"
+  | "confidence"
+  | "builder"; // ⬅️ NEW
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("today");
@@ -38,17 +40,18 @@ export default function App() {
   const tabs = useMemo(
     () =>
       [
-        { key: "today",      label: "Today",      icon: "✅" },
-        { key: "calendar",   label: "Calendar",   icon: "🗓️" },
-        { key: "goals",      label: "Goals",      icon: "🎯" },
-        { key: "vision",     label: "Vision",     icon: "🖼️" },
-        { key: "gratitude",  label: "Gratitude",  icon: "🙏" },
-        { key: "exercise",   label: "Exercise",   icon: "🏋️" },
-        { key: "notes",      label: "Notes",      icon: "📝" },
-        { key: "wins",       label: "Successes",  icon: "🏆" },
-        { key: "alfred",     label: "Alfred",     icon: "🤖" },
-        { key: "focus",      label: "Focus",      icon: "⏱️" }, // ⬅️ NEW
-        { key: "confidence", label: "Confidence", icon: "⚡" },
+        { key: "today",      label: "Today",       icon: "✅" },
+        { key: "calendar",   label: "Calendar",    icon: "🗓️" },
+        { key: "goals",      label: "Goals",       icon: "🎯" },
+        { key: "vision",     label: "Vision",      icon: "🖼️" },
+        { key: "gratitude",  label: "Gratitude",   icon: "🙏" },
+        { key: "exercise",   label: "Exercise",    icon: "🏋️" },
+        { key: "notes",      label: "Notes",       icon: "📝" },
+        { key: "wins",       label: "Successes",   icon: "🏆" },
+        { key: "alfred",     label: "Alfred",      icon: "🤖" },
+        { key: "focus",      label: "Focus",       icon: "⏱️" },
+        { key: "confidence", label: "Confidence",  icon: "⚡" },
+        { key: "builder",    label: "Builder",     icon: "✨" }, // ⬅️ NEW
       ] as Array<{ key: Tab; label: string; icon: string }>,
     []
   );
@@ -116,9 +119,11 @@ export default function App() {
 
           {tab === "alfred" && <AlfredScreen />}
 
-          {tab === "focus" && <FocusAlfredScreen />}{/* ⬅️ NEW */}
+          {tab === "focus" && <FocusAlfredScreen />}
 
           {tab === "confidence" && <ConfidenceScreen />}
+
+          {tab === "builder" && <AffirmationBuilderScreen />}{/* ⬅️ NEW */}
         </div>
       </div>
 
