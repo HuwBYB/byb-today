@@ -529,104 +529,30 @@ function PatternButton({ current, setKey, k, label }:{
 }
 
 /* =========================================================
-   Affirmation
+   Affirmation — integrates Builder (today’s set) with fallback
    ========================================================= */
+type TodayAff = { category?: string; text: string };
+
 function Affirmation({ running, onRep }:{ running:boolean; onRep:(text:string)=>void|Promise<void> }) {
-  const LS_KEY = "byb_affirmation";
-  const [text, setText] = useState<string>(() => localStorage.getItem(LS_KEY) || "I speak clearly and stay calm.");
-  const [speak, setSpeak] = useState<boolean>(false);
+  const TODAY_KEY = `byb:confidence:today:${todayISO()}`;
+  const FALLBACK_LS_KEY = "byb_affirmation";
 
-  useEffect(() => { try { localStorage.setItem(LS_KEY, text); } catch {} }, [text]);
-
+  // Load today's set (from Builder) once
+  const [items, setItems] = useState<TodayAff[]>([]);
   useEffect(() => {
-    if (!running || !speak) return;
-    const say = () => {
-      try {
-        const u = new SpeechSynthesisUtterance(text);
-        u.rate = 0.95; u.pitch = 1;
-        window.speechSynthesis.speak(u);
-      } catch {}
-    };
-    say();
-    const id = setInterval(say, 6000);
-    return () => clearInterval(id);
-  }, [running, speak, text]);
+    try {
+      const arr = JSON.parse(localStorage.getItem(TODAY_KEY) || "[]");
+      if (Array.isArray(arr) && arr.length) {
+        const mapped = arr.map((a: any) => ({ text: String(a.text || "").trim(), category: a.category || undefined }))
+                          .filter(a => a.text.length > 0);
+        setItems(mapped);
+      }
+    } catch {}
+  }, [TODAY_KEY]);
 
-  return (
-    <div className="card confidence-layout" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
-      <div style={{ display:"grid", gap:12 }}>
-        <h2 style={{ margin: 0 }}>Affirmation</h2>
-        <div style={{ padding: 20, border: "1px solid #e5e7eb", borderRadius: 12, fontSize: 22, fontWeight: 700, lineHeight: 1.3, textAlign: "center" }}>
-          {text}
-        </div>
-        <label style={{ display:"grid", gap:6 }}>
-          <div className="section-title">Edit</div>
-          <input value={text} onChange={e=>setText(e.target.value)} />
-        </label>
-        <label style={{ display:"inline-flex", alignItems:"center", gap:8 }}>
-          <input type="checkbox" checked={speak} onChange={e=>setSpeak(e.target.checked)} /> Speak it while the timer runs
-        </label>
-        <div><button onClick={() => onRep(text)}>✓ Log affirmation rep</button></div>
-      </div>
+  // If we have a set, rotate through them; else show single editable fallback
+  const hasSet = items.length > 0;
 
-      {/* Tiny suggestion list */}
-      <div style={{ display:"grid", gap:6 }}>
-        <div className="section-title">Ideas</div>
-        {[
-          "I follow through on what matters today.",
-          "I can handle this — one step at a time.",
-          "I speak clearly and stay calm.",
-        ].map((s,idx)=>(
-          <button key={idx} onClick={()=>setText(s)} style={{ textAlign:"left" }}>{s}</button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   Reflection card
-   ========================================================= */
-function ReflectionCard({ enabled, onSave }:{ enabled:boolean; onSave:(t:string)=>void|Promise<void> }) {
-  const [text, setText] = useState("");
-  if (!enabled) return null;
-  return (
-    <div className="card" style={{ display:"grid", gap:8 }}>
-      <div className="section-title">Wins reflection</div>
-      <input value={text} onChange={e=>setText(e.target.value)} placeholder="What felt strong in that minute?" />
-      <div style={{ display:"flex", justifyContent:"flex-end" }}>
-        <button className="btn-primary" onClick={async ()=>{ const v=text.trim(); if(!v) return; await onSave(v); setText(""); }}>
-          Save
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   Recent history
-   ========================================================= */
-function RecentHistory({ entries }:{ entries: ConfEntry[] }) {
-  if (!entries.length) return null;
-  return (
-    <div className="card" style={{ display:"grid", gap:8 }}>
-      <div className="section-title">Recent</div>
-      <ul className="list" style={{ margin: 0 }}>
-        {entries.map((e, i) => (
-          <li key={i} className="item" style={{ alignItems:"center" }}>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                {e.kind === "prompt" ? "Prompt" :
-                 e.kind === "pose" ? "Power pose rep" :
-                 e.kind === "breath" ? `Breath rep (${e.pattern})` :
-                 e.kind === "affirm" ? "Affirmation rep" :
-                 "Reflection"}{e.text ? ` — ${e.text}` : ""}
-              </div>
-              <div className="muted" style={{ marginTop:4 }}>{e.entry_date}</div>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
+  // ===== Multi (set) mode =====
+  const [idx, setIdx] = useState(0);
+  useEffect
