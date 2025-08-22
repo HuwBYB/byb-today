@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, useRef, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* ---------- Public path helper ---------- */
@@ -24,8 +24,34 @@ type AffirmationRow = {
 };
 
 /* ---------- Storage keys ---------- */
-const LS_VAULT = "byb:affirmations:v1";
-const LS_CONF_TODAY = "byb:confidence:today";
+const LS_VAULT = "byb:affirmations:v1";                 // All saved affirmations (vault)
+const LS_CONF_TODAY_PREFIX = "byb:confidence:today:";    // Per-day rotation for Confidence
+
+/* ---------- Utils ---------- */
+const todayISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+};
+const confidenceKeyForToday = () => `${LS_CONF_TODAY_PREFIX}${todayISO()}`;
+
+async function saveToVaultLocal(row: AffirmationRow) {
+  try {
+    const arr: AffirmationRow[] = JSON.parse(localStorage.getItem(LS_VAULT) || "[]");
+    arr.unshift({ ...row, created_at: new Date().toISOString() });
+    localStorage.setItem(LS_VAULT, JSON.stringify(arr));
+  } catch {}
+}
+async function sendToConfidenceTodayLocal(row: AffirmationRow) {
+  try {
+    const key = confidenceKeyForToday();
+    const arr: AffirmationRow[] = JSON.parse(localStorage.getItem(key) || "[]");
+    const exists = arr.some(a => a.category === row.category && a.text.trim() === row.text.trim());
+    if (!exists) {
+      arr.push(row);
+      localStorage.setItem(key, JSON.stringify(arr));
+    }
+  } catch {}
+}
 
 /* ---------- Modal ---------- */
 function Modal({
@@ -63,8 +89,7 @@ function BuilderHelpContent() {
         <li><b>Pick an area</b>: Business, Relationships, Financial, Personal, or Health.</li>
         <li><b>Write your own</b> or click <i>Ask Alfred</i> for 2–3 suggestions.</li>
         <li><b>Tweak tone</b> with one-taps: Shorter, Stronger, Gentler.</li>
-        <li><b>Say it aloud</b> — does it land? If not, adjust until it does.</li>
-        <li><b>Save</b> to your vault and <b>Send to Confidence</b> for today’s practice.</li>
+        <li><b>Save</b> to your vault and <b>Send to Confidence</b> for today’s practice set.</li>
       </ul>
 
       <h4 style={{ margin: 0 }}>Good affirmation rules</h4>
@@ -75,41 +100,10 @@ function BuilderHelpContent() {
       </ul>
 
       <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-        Tip: If a line feels fake, nudge the tone gentler or more specific until it’s believable.
+        Tip: Read it aloud once — if it feels clunky or fake, tweak until it’s natural.
       </p>
     </div>
   );
-}
-
-/* ---------- Utils ---------- */
-function todayISO() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-function speakText(t: string) {
-  try {
-    const u = new SpeechSynthesisUtterance(t);
-    u.rate = 0.98; u.pitch = 1;
-    window.speechSynthesis.speak(u);
-  } catch {}
-}
-async function saveToVaultLocal(row: AffirmationRow) {
-  try {
-    const arr: AffirmationRow[] = JSON.parse(localStorage.getItem(LS_VAULT) || "[]");
-    arr.unshift({ ...row, created_at: new Date().toISOString() });
-    localStorage.setItem(LS_VAULT, JSON.stringify(arr));
-  } catch {}
-}
-async function sendToConfidenceTodayLocal(row: AffirmationRow) {
-  try {
-    const key = `${LS_CONF_TODAY}:${todayISO()}`;
-    const arr: AffirmationRow[] = JSON.parse(localStorage.getItem(key) || "[]");
-    const exists = arr.some(a => a.category === row.category && a.text.trim() === row.text.trim());
-    if (!exists) {
-      arr.push(row);
-      localStorage.setItem(key, JSON.stringify(arr));
-    }
-  } catch {}
 }
 
 /* =========================================================
@@ -119,34 +113,21 @@ export default function AffirmationBuilderScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [active, setActive] = useState<Category>("business");
 
-  const [text, setText] = useState("");
-  const [theme, setTheme] = useState("");
+  const [text, setText] = useState("");           // editor text
+  const [theme, setTheme] = useState("");         // optional prompt theme
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [selIdx, setSelIdx] = useState<number | null>(null); // highlight selected suggestion
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+
   const [busySuggest, setBusySuggest] = useState(false);
   const [busySave, setBusySave] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [savedToast, setSavedToast] = useState<string | null>(null);
 
   const [showHelp, setShowHelp] = useState(false);
   const [imgOk, setImgOk] = useState(true);
 
-  // Speak toggle
-  const [speak, setSpeak] = useState(false);
-  const lastSpokenRef = useRef(0);
-
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
   }, []);
-
-  // Speak on change if enabled (debounced-ish)
-  useEffect(() => {
-    if (!speak || !text.trim()) return;
-    const now = Date.now();
-    if (now - lastSpokenRef.current < 900) return;
-    lastSpokenRef.current = now;
-    speakText(text);
-  }, [text, speak]);
 
   const CATS: { key: Category; label: string }[] = [
     { key: "business", label: "Business" },
@@ -156,31 +137,36 @@ export default function AffirmationBuilderScreen() {
     { key: "health", label: "Health" },
   ];
 
+  /* ---------- Alfred helpers (uses your /api/alfred contract) ---------- */
   async function askAlfred() {
     setErr(null);
-    setSelIdx(null);
     setBusySuggest(true);
+    setSelectedIdx(null);
     try {
       const prompt =
-`Give me 3 short, present-tense affirmations for "${active}".
-Theme (optional): ${theme || "(none)"}.
-Rules: under 12 words, positive, believable, in my control.
-Output as bullet points only.`;
+`Help me write 3 short, present-tense affirmations for the "${active}" area.
+Theme (optional): ${theme || "(none)"}
+Rules: under 12 words, positive, believable, in my control. Output as bullet points.`;
       const res = await fetch("/api/alfred", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "friend", messages: [{ role: "user", content: prompt }] }),
+        body: JSON.stringify({
+          // Your API expects { persona/history } OR { mode/messages } depending on your latest version.
+          // The latest you shared returns { reply } and accepts { mode, messages }:
+          mode: "friend",
+          messages: [{ role: "user", content: prompt }],
+        }),
       });
       if (!res.ok) throw new Error(`Alfred error: ${res.status}`);
       const data = await res.json();
-      const textResp: string = data.text || data.reply || "";
-      const lines = textResp.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      const reply: string = data.reply || data.text || "";
+      const lines = reply.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
       const bulls = lines
         .filter(l => /^[-*•]\s+/.test(l) || /^\d+\.\s+/.test(l))
         .map(l => l.replace(/^([-*•]\s+|\d+\.\s+)/, "").trim());
       const opts = (bulls.length ? bulls : lines).slice(0, 3);
       setSuggestions(opts);
-      if (opts[0]) { setText(opts[0]); setSelIdx(0); }
+      if (opts[0]) { setText(opts[0]); setSelectedIdx(0); }
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -192,26 +178,34 @@ Output as bullet points only.`;
     if (!text.trim()) return;
     setErr(null);
     setBusySuggest(true);
-    setSelIdx(null);
     try {
       const prompt =
 `Rewrite this affirmation with a ${kind} tone.
-Keep present tense, positive, believable, under 12 words:
+Keep it present-tense, positive, under 12 words, believable:
 "${text}"`;
       const res = await fetch("/api/alfred", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "friend", messages: [{ role: "user", content: prompt }] }),
+        body: JSON.stringify({
+          mode: "friend",
+          messages: [{ role: "user", content: prompt }],
+        }),
       });
       if (!res.ok) throw new Error(`Alfred error: ${res.status}`);
       const data = await res.json();
-      const out = (data.text || data.reply || "").trim().split(/\r?\n/).find(Boolean) || "";
-      if (out) setText(out.replace(/^"|"$/g, ""));
+      const out = (data.reply || data.text || "").trim().split(/\r?\n/).find(Boolean) || "";
+      if (out) { setText(out.replace(/^"|"$/g, "")); setSelectedIdx(null); }
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
       setBusySuggest(false);
     }
+  }
+
+  function pickSuggestion(s: string, i: number) {
+    setText(s);
+    setSelectedIdx(i);
+    if ((navigator as any).vibrate) (navigator as any).vibrate(3);
   }
 
   async function saveToVaultAndConfidence() {
@@ -221,32 +215,27 @@ Keep present tense, positive, believable, under 12 words:
     setBusySave(true);
     const row: AffirmationRow = { user_id: userId, category: active, text: clean };
 
+    // 1) Supabase (best-effort)
     try {
       if (userId) {
         await supabase.from("affirmations").insert({ user_id: userId, category: active, text: clean });
       }
-    } catch {
-      // non-fatal: local fallback covers it
-    } finally {
-      await saveToVaultLocal(row);
-      await sendToConfidenceTodayLocal(row);
-      setBusySave(false);
-      setSavedToast("Saved to vault and sent to Confidence for today ✅");
-      setTimeout(() => setSavedToast(null), 2200);
-      if ((navigator as any).vibrate) (navigator as any).vibrate(6);
+    } catch (e) {
+      console.warn("Supabase save failed, falling back to local vault.");
     }
-  }
 
-  function pickSuggestion(s: string, idx: number) {
-    setText(s);
-    setSelIdx(idx);
-    if ((navigator as any).vibrate) (navigator as any).vibrate(3);
+    // 2) Local vault (always)
+    await saveToVaultLocal(row);
+
+    // 3) Send to Confidence for today’s rotation (local)
+    await sendToConfidenceTodayLocal(row);
+
+    setBusySave(false);
+    if ((navigator as any).vibrate) (navigator as any).vibrate(6);
   }
 
   return (
     <div className="page-affirmation-builder" style={{ maxWidth: "100%", overflowX: "hidden" }}>
-      <style>{CSS_LOCAL}</style>
-
       <div className="container" style={{ display: "grid", gap: 12 }}>
         {/* Header with Alfred help */}
         <div className="card" style={{ position: "relative", paddingRight: 64 }}>
@@ -269,13 +258,19 @@ Keep present tense, positive, believable, under 12 words:
         {/* Category tabs */}
         <div className="card" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {CATS.map(c => {
-            const activeCat = c.key === active;
+            const isActive = c.key === active;
             return (
               <button
                 key={c.key}
-                onClick={() => { setActive(c.key); setSelIdx(null); }}
-                className={activeCat ? "pill active" : "pill"}
-                aria-pressed={activeCat}
+                onClick={() => { setActive(c.key); }}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid",
+                  borderColor: isActive ? "hsl(var(--pastel-hsl))" : "#e5e7eb",
+                  background: isActive ? "hsl(var(--pastel-hsl) / .45)" : "#fff",
+                }}
+                aria-pressed={isActive}
               >
                 {c.label}
               </button>
@@ -288,25 +283,17 @@ Keep present tense, positive, believable, under 12 words:
           <div className="section-title">Write your own</div>
           <input
             value={text}
-            onChange={e => { setText(e.target.value); setSelIdx(null); }}
+            onChange={e => { setText(e.target.value); setSelectedIdx(null); }}
             placeholder="e.g., I lead with calm, decisive action."
             aria-label="Affirmation text"
           />
-
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-              <input type="checkbox" checked={speak} onChange={e => setSpeak(e.target.checked)} />
-              Speak aloud while editing
-            </label>
-            {err && <span style={{ color: "red", marginLeft: "auto" }}>{err}</span>}
-          </div>
 
           <div className="section-title">Or ask Alfred</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <input
               value={theme}
               onChange={e => setTheme(e.target.value)}
-              placeholder={`Theme (optional) — e.g., money, calm, leadership`}
+              placeholder="Theme (optional) — e.g., money, calm, leadership"
               aria-label="Theme for Alfred"
               style={{ flex: 1, minWidth: 220 }}
             />
@@ -316,17 +303,29 @@ Keep present tense, positive, believable, under 12 words:
           </div>
 
           {!!suggestions.length && (
-            <div style={{ display: "grid", gap: 8 }}>
-              <div className="muted">Suggestions (tap to select)</div>
-              <div className="suggest-grid">
+            <div style={{ display: "grid", gap: 6 }}>
+              <div className="muted">Suggestions (tap to use)</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {suggestions.map((s, i) => {
-                  const activeS = selIdx === i;
+                  const activeChip = selectedIdx === i;
                   return (
                     <button
                       key={i}
                       onClick={() => pickSuggestion(s, i)}
-                      className={activeS ? "suggest active" : "suggest"}
-                      title="Use this"
+                      aria-pressed={activeChip}
+                      style={{
+                        padding: "8px 10px",
+                        borderRadius: 999,
+                        border: "1px solid",
+                        borderColor: activeChip ? "hsl(var(--pastel-hsl))" : "#e5e7eb",
+                        background: activeChip ? "hsl(var(--pastel-hsl) / .45)" : "#fff",
+                        fontWeight: activeChip ? 700 : 500,
+                        maxWidth: "100%",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                      title={s}
                     >
                       {s}
                     </button>
@@ -343,26 +342,41 @@ Keep present tense, positive, believable, under 12 words:
             <button onClick={() => refineTone("gentler")} disabled={!text || busySuggest}>Gentler</button>
           </div>
 
-          {/* Preview card */}
+          {/* Preview card + human tip (replaces TTS) */}
           <div
             aria-label="Affirmation preview"
-            className="preview"
+            style={{
+              padding: 18,
+              border: "1px solid #e5e7eb",
+              borderRadius: 12,
+              fontSize: 22,
+              fontWeight: 800,
+              lineHeight: 1.3,
+              textAlign: "center",
+            }}
           >
             {text || "Your affirmation will appear here…"}
           </div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            Tip: Read it aloud once — if it feels clunky, tweak the words until it feels natural.
+          </div>
 
-          {/* Big CTA */}
-          <div>
-            <button
-              onClick={saveToVaultAndConfidence}
-              className="btn-primary cta"
-              disabled={!text || busySave}
-              title="Save to vault and send to Confidence"
-            >
+          {/* Actions */}
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+            {err && <div style={{ color: "red", marginRight: "auto" }}>{err}</div>}
+            <button onClick={() => { setText(""); setSelectedIdx(null); }} disabled={!text}>Clear</button>
+            <button onClick={saveToVaultAndConfidence} className="btn-primary" disabled={!text || busySave} style={{ borderRadius: 10 }}>
               {busySave ? "Saving…" : "Save & send to Confidence"}
             </button>
-            {savedToast && <div className="toast">{savedToast}</div>}
           </div>
+        </div>
+
+        {/* Footer note + explicit button to Confidence */}
+        <div className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div className="muted">Saved items go to your Confidence page’s rotation for today.</div>
+          <a href="/confidence" className="btn-primary" style={{ borderRadius: 10, padding: "8px 12px", textDecoration: "none" }}>
+            Open Confidence →
+          </a>
         </div>
       </div>
 
@@ -378,65 +392,3 @@ Keep present tense, positive, believable, under 12 words:
     </div>
   );
 }
-
-/* ---------- Local visual tweaks ---------- */
-const CSS_LOCAL = `
-.pill{
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid #e5e7eb;
-  background: #fff;
-}
-.pill.active{
-  background: hsl(var(--pastel-hsl, 210 95% 78%) / .45);
-  border-color: hsl(var(--pastel-hsl, 210 95% 78%));
-}
-
-.suggest-grid{
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 8px;
-}
-.suggest{
-  text-align: left;
-  border: 1px solid #e5e7eb;
-  background: #fff;
-  border-radius: 12px;
-  padding: 10px 12px;
-  line-height: 1.2;
-}
-.suggest.active{
-  background: #111;
-  color: #fff;
-  border-color: #111;
-}
-
-.preview{
-  padding: 18px;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  font-size: 22px;
-  font-weight: 800;
-  line-height: 1.3;
-  text-align: center;
-}
-
-.cta{
-  display: block;
-  width: 100%;
-  border-radius: 12px;
-  padding: 12px 16px;
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.toast{
-  margin-top: 8px;
-  font-size: 12px;
-  color: #065f46;
-  background: #ecfdf5;
-  border: 1px solid #a7f3d0;
-  padding: 6px 8px;
-  border-radius: 8px;
-}
-`;
