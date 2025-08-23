@@ -91,19 +91,15 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-  supabase.auth.getUser().then(() => {
-    setAuthLoaded(true);
-  });
-  try {
-    const guess = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (guess) setTz(guess);
-  } catch {}
-}, []);
+    supabase.auth.getUser().then(() => {
+      setAuthLoaded(true);
     });
     try {
       const guess = Intl.DateTimeFormat().resolvedOptions().timeZone;
       if (guess) setTz(guess);
-    } catch {}
+    } catch {
+      // ignore
+    }
   }, []);
 
   const dobISO = useMemo(() => {
@@ -358,7 +354,7 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
                   <input
                     inputMode="numeric"
                     maxLength={4}
-                    pattern="\d{4}"
+                    pattern="\\d{4}"
                     placeholder="Enter PIN"
                     value={pin1}
                     onChange={(e) => setPin1(e.target.value.replace(/\D/g, "").slice(0, 4))}
@@ -367,7 +363,7 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
                   <input
                     inputMode="numeric"
                     maxLength={4}
-                    pattern="\d{4}"
+                    pattern="\\d{4}"
                     placeholder="Confirm PIN"
                     value={pin2}
                     onChange={(e) => setPin2(e.target.value.replace(/\D/g, "").slice(0, 4))}
