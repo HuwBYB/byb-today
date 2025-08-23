@@ -1,4 +1,3 @@
-// App.tsx
 import { useEffect, useMemo, useState } from "react";
 import AuthGate from "./AuthGate";
 import { supabase } from "./lib/supabaseClient";
@@ -146,8 +145,10 @@ export default function App() {
   }
 
   /* -------- Onboarding guard -------- */
-  const onboardedLocal = (typeof window !== "undefined") && localStorage.getItem(ONBOARD_KEY) === "1";
-  const needsOnboarding = !!userId && !profileLoading && !profile?.onboarded_at && !onboardedLocal;
+  const onboardedLocal =
+    typeof window !== "undefined" && localStorage.getItem(ONBOARD_KEY) === "1";
+  const needsOnboarding =
+    !!userId && !profileLoading && !profile?.onboarded_at && !onboardedLocal;
 
   return (
     <AuthGate>
