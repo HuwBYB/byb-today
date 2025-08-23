@@ -56,7 +56,6 @@ function daysInMonth(year: number, monthIndex: number) {
 
 export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
   const [authLoaded, setAuthLoaded] = useState(false);
-  const [userId, setUserId] = useState<string | null>(null);
 
   // Basic
   const [firstName, setFirstName] = useState("");
@@ -92,9 +91,14 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setUserId(data.user?.id ?? null);
-      setAuthLoaded(true);
+  supabase.auth.getUser().then(() => {
+    setAuthLoaded(true);
+  });
+  try {
+    const guess = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (guess) setTz(guess);
+  } catch {}
+}, []);
     });
     try {
       const guess = Intl.DateTimeFormat().resolvedOptions().timeZone;
