@@ -55,6 +55,7 @@ function daysInMonth(year: number, monthIndex: number) {
 }
 
 export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
+  const [authLoaded, setAuthLoaded] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
 
   // Basic
@@ -91,7 +92,10 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
+    supabase.auth.getUser().then(({ data }) => {
+      setUserId(data.user?.id ?? null);
+      setAuthLoaded(true);
+    });
     try {
       const guess = Intl.DateTimeFormat().resolvedOptions().timeZone;
       if (guess) setTz(guess);
@@ -132,16 +136,20 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
   }
 
   async function saveAll(skip: boolean = false) {
-    if (!userId) return;
     setSaving(true);
     setErr(null);
     try {
+      // Ensure we have a fresh user in case auth state changed
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth.user?.id ?? null;
+      if (!uid) throw new Error("You’re not signed in yet. Please wait a moment and try again.");
+
       // Compute display preference
       const display_name = addressMode === "first" ? (firstName.trim() || null) : null;
 
-      // Profile payload (match columns you created in Supabase)
+      // Profile payload — includes onboarded_at timestamp used by App.tsx
       const profilePayload: any = {
-        id: userId,
+        id: uid,
         first_name: firstName.trim() || null,
         display_name,                   // shown name if using first name
         title_choice: addressMode,      // "first" or "fun"
@@ -153,7 +161,7 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
         reminder_time: reminderTime,
         theme,
         reduce_motion: reduceMotion,
-        onboarding_done: true,
+        onboarded_at: new Date().toISOString(), // <-- what the gate reads
       };
 
       // Add PIN fields
@@ -161,7 +169,7 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
         if (!pinLooksValid(pin1) || pin1 !== pin2) {
           throw new Error("Please enter and confirm a 4-digit PIN.");
         }
-        const hash = await sha256Hex(`${userId}:${pin1}`);
+        const hash = await sha256Hex(`${uid}:${pin1}`);
         profilePayload.pin_enabled = true;
         profilePayload.pin_hash = hash;
         profilePayload.pin_updated_at = new Date().toISOString();
@@ -171,7 +179,7 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
         profilePayload.pin_updated_at = new Date().toISOString();
       }
 
-      // Upsert profile (primary key id handles conflict)
+      // Upsert profile
       const { error: pe } = await supabase.from("profiles").upsert(profilePayload);
       if (pe) throw pe;
 
@@ -180,7 +188,7 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
         const rows = dates
           .filter((r) => r.title.trim() && r.date)
           .map((r) => ({
-            user_id: userId,
+            user_id: uid,
             title: r.title.trim(),
             kind: r.kind,
             date: r.date,
@@ -482,11 +490,11 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-          <button onClick={() => saveAll(true)} disabled={saving}>Skip for now</button>
+          <button onClick={() => saveAll(true)} disabled={saving || !authLoaded}>Skip for now</button>
           <button
             className="btn-primary"
             onClick={() => saveAll(false)}
-            disabled={saving}
+            disabled={saving || !authLoaded}
             style={{ borderRadius: 10 }}
             title="Save profile and optional dates"
           >
@@ -494,6 +502,9 @@ export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
           </button>
         </div>
 
+        {!authLoaded && (
+          <div className="muted">Connecting… please wait a moment before finishing.</div>
+        )}
         {err && <div style={{ color: "red" }}>{err}</div>}
 
         <div className="muted" style={{ textAlign: "center" }}>
