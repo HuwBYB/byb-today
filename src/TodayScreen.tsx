@@ -40,6 +40,13 @@ function addDays(iso: string, n: number) {
   d.setDate(d.getDate() + n);
   return toISO(d);
 }
+function startEndOfDayForISO(localISO: string) {
+  // Build local midnight range for the *selected* date
+  const d = fromISO(localISO);
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 0, 0);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
 
 /* ===== repeat config ===== */
 type Repeat = "" | "daily" | "weekdays" | "weekly" | "monthly" | "annually";
@@ -171,6 +178,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     setLoading(true);
     setErr(null);
     try {
+      // 1) Main fetch: things scheduled up to and including the selected date
       const { data, error } = await supabase
         .from("tasks")
         .select("id,user_id,title,due_date,status,priority,source,goal_id,completed_at")
@@ -182,11 +190,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
       if (error) throw error;
 
       const raw = (data as Task[]) || [];
+
+      // 2) Build the visible list (today's + overdue pending)
       const list = raw.filter(
         (t) => t.due_date === dateISO || (t.due_date! < dateISO && t.status !== "done")
       );
       setTasks(list);
 
+      // 3) Goal titles (for items in the visible list)
       const ids = Array.from(
         new Set(list.map((t) => t.goal_id).filter((v): v is number => typeof v === "number"))
       );
@@ -203,21 +214,49 @@ export default function TodayScreen({ externalDateISO }: Props) {
         setGoalMap({});
       }
 
-      // compute daily summary
-      const doneToday = list.filter(
-        (t) => t.due_date === dateISO && t.status === "done"
-      ).length;
-      const pendingToday = list.filter(
-        (t) => t.due_date === dateISO && t.status !== "done"
-      ).length;
-      const topToday = list.filter(
-        (t) => t.due_date === dateISO && (t.priority ?? 0) >= 2
-      );
-      const topDone = topToday.filter((t) => t.status === "done").length;
-      const topTotal = topToday.length;
-      const isWin = topDone >= 1 || doneToday >= 3;
+      // 4) Extra fetch for "completed today", regardless of due_date
+      const { start, end } = startEndOfDayForISO(dateISO);
+      const { data: doneTodayRows, error: de } = await supabase
+        .from("tasks")
+        .select("id,user_id,title,due_date,status,priority,source,goal_id,completed_at")
+        .eq("user_id", userId)
+        .eq("status", "done")
+        .not("completed_at", "is", null)
+        .gte("completed_at", start)
+        .lt("completed_at", end);
 
-      setSummary((s) => ({ ...s, doneToday, pendingToday, topDone, topTotal, isWin }));
+      if (de) throw de;
+
+      const completedToday = (doneTodayRows as Task[]) || [];
+
+      // 5) Compute header numbers
+      const doneToday = completedToday.length;
+
+      // Top tasks due today or overdue & pending (denominator that matters for “today focus”)
+      const topScheduled = raw.filter(
+        (t) =>
+          (t.priority ?? 0) >= 2 &&
+          (t.due_date === dateISO || (t.due_date! < dateISO && t.status !== "done"))
+      );
+      const topTotal = topScheduled.length;
+
+      // Of the items actually completed today, how many were Top?
+      const topDoneToday = completedToday.filter((t) => (t.priority ?? 0) >= 2).length;
+
+      // Pending today (due today but not done)
+      const pendingToday = raw.filter((t) => t.due_date === dateISO && t.status !== "done").length;
+
+      // Win condition counts what you *did today*
+      const isWin = topDoneToday >= 1 || doneToday >= 3;
+
+      setSummary((s) => ({
+        ...s,
+        doneToday,
+        pendingToday,
+        topDone: topDoneToday,
+        topTotal,
+        isWin
+      }));
     } catch (e: any) {
       setErr(e.message || String(e));
       setTasks([]);
@@ -389,6 +428,34 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const top = tasks.filter((t) => (t.priority ?? 0) >= 2);
   const rest = tasks.filter((t) => (t.priority ?? 0) < 2);
   const overdueCount = tasks.filter(isOverdue).length;
+
+  // Build the “Completed today (from earlier)” list
+  const [completedEarlier, setCompletedEarlier] = useState<Task[]>([]);
+  useEffect(() => {
+    // Populate from a focused query on every load (mirrors the summary window)
+    async function loadCompletedEarlier() {
+      if (!userId) return;
+      try {
+        const { start, end } = startEndOfDayForISO(dateISO);
+        const { data, error } = await supabase
+          .from("tasks")
+          .select("id,user_id,title,due_date,status,priority,source,goal_id,completed_at")
+          .eq("user_id", userId)
+          .eq("status", "done")
+          .not("completed_at", "is", null)
+          .gte("completed_at", start)
+          .lt("completed_at", end);
+        if (error) throw error;
+        const rows = (data as Task[]) || [];
+        // Only those that were overdue (due_date < selected day)
+        const earlier = rows.filter((t) => t.due_date && t.due_date < dateISO);
+        setCompletedEarlier(earlier);
+      } catch {
+        setCompletedEarlier([]);
+      }
+    }
+    loadCompletedEarlier();
+  }, [userId, dateISO, summary.doneToday]); // refetch when date or today's count changes
 
   function Section({
     title,
@@ -598,11 +665,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
             <span className="badge" title="Tasks done today">
               Done: {summary.doneToday}
             </span>
-            {summary.topTotal > 0 && (
-              <span className="badge" title="Top priorities done / total">
-                Top: {summary.topDone}/{summary.topTotal}
-              </span>
-            )}
+            <span className="badge" title="Top priorities done / focus denominator">
+              Top: {summary.topDone}/{summary.topTotal}
+            </span>
             <span className="badge" title="Current streak (best)">
               🔥 {summary.streak} {summary.bestStreak > 0 ? `(best ${summary.bestStreak})` : ""}
             </span>
@@ -773,6 +838,49 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 </li>
               );
             })}
+          </ul>
+        )}
+      </Section>
+
+      {/* ===== Completed Today (from earlier) ===== */}
+      <Section title="Completed Today (from earlier)">
+        {completedEarlier.length === 0 ? (
+          <div className="muted">No previously-overdue tasks completed today.</div>
+        ) : (
+          <ul className="list">
+            {completedEarlier.map((t) => (
+              <li key={t.id} className="item">
+                <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1 }}>
+                  <input
+                    type="checkbox"
+                    checked={true}
+                    onChange={() => toggleDone(t)} // unchecking will reopen it
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        alignItems: "center",
+                        flexWrap: "wrap"
+                      }}
+                    >
+                      <span style={{ fontWeight: 600 }}>{displayTitle(t)}</span>
+                      <span className="badge">Overdue</span>
+                      {t.due_date && <span className="muted">Was due {t.due_date}</span>}
+                      <button
+                        className="btn-ghost"
+                        style={{ marginLeft: "auto" }}
+                        onClick={() => openEdit(t)}
+                        title="Edit task"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  </div>
+                </label>
+              </li>
+            ))}
           </ul>
         )}
       </Section>
