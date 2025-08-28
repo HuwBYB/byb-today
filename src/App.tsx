@@ -27,8 +27,7 @@ type ProfileRow = {
 
 /* LocalStorage fallback keys (keep in sync with OnboardingScreen) */
 const LS_DONE = "byb:onboarding_done";
-const LS_NAME = "byb:display_name";
-const LS_POOL = "byb:display_pool";
+
 
 /* Tabs */
 type Tab =
