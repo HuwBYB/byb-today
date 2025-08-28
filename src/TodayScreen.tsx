@@ -2,6 +2,51 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
+/** ========= Added greeting helpers (inline so you don't need extra files) ========= */
+const SS_GREETING_PICK = "byb:greet:pick"; // keep same pick for a whole app session
+const LS_NICKS = "byb:nicknames:v1";
+
+function getLocalNicknames(): string[] {
+  try {
+    const raw = localStorage.getItem(LS_NICKS);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) {
+      return arr.map((s) => String(s)).filter((s) => s.trim().length > 0);
+    }
+  } catch {}
+  return [];
+}
+
+function pickGreetingName(options: {
+  userName?: string | null;
+  nicknames: string[];
+  mode?: "mixed" | "name_only" | "nickname_only";
+}): string {
+  const { userName, nicknames, mode = "mixed" } = options;
+
+  const existing = sessionStorage.getItem(SS_GREETING_PICK);
+  if (existing) return existing;
+
+  const validNicks = (nicknames || []).filter((s) => s && s.trim().length > 0);
+  let choice = userName || "Friend";
+
+  if (mode === "name_only") {
+    // use name only
+  } else if (mode === "nickname_only" && validNicks.length > 0) {
+    choice = validNicks[Math.floor(Math.random() * validNicks.length)];
+  } else if (mode === "mixed") {
+    const useNick = validNicks.length > 0 && Math.random() < 0.5;
+    choice = useNick
+      ? validNicks[Math.floor(Math.random() * validNicks.length)]
+      : (userName || validNicks[Math.floor(Math.random() * validNicks.length)]);
+  }
+
+  sessionStorage.setItem(SS_GREETING_PICK, choice);
+  return choice;
+}
+/** ============================================================================= */
+
 type Task = {
   id: number;
   user_id: string;
@@ -39,13 +84,6 @@ function addDays(iso: string, n: number) {
   const d = fromISO(iso);
   d.setDate(d.getDate() + n);
   return toISO(d);
-}
-function startEndOfDayForISO(localISO: string) {
-  // Build local midnight range for the *selected* date
-  const d = fromISO(localISO);
-  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
-  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 0, 0);
-  return { start: start.toISOString(), end: end.toISOString() };
 }
 
 /* ===== repeat config ===== */
@@ -128,6 +166,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [quickTop, setQuickTop] = useState(false);
   const [savingQuick, setSavingQuick] = useState(false);
 
+  // Greeting
+  const [greetName, setGreetName] = useState<string>("");
+
   // Lightweight daily summary
   const [summary, setSummary] = useState<Summary>({
     doneToday: 0,
@@ -160,6 +201,52 @@ export default function TodayScreen({ externalDateISO }: Props) {
         return;
       }
       setUserId(data.user?.id ?? null);
+
+      // Load greeting once we know who the user is
+      (async () => {
+        const uid = data.user?.id ?? null;
+        if (!uid) {
+          setGreetName("");
+          return;
+        }
+        // Try to read profile prefs for nicknames + mode
+        let dbNicks: string[] = [];
+        let mode: "mixed" | "name_only" | "nickname_only" = "mixed";
+        let name: string | null =
+          data.user?.user_metadata?.full_name ||
+          data.user?.user_metadata?.name ||
+          (data.user?.email ? data.user.email.split("@")[0] : null);
+
+        try {
+          const { data: prof } = await supabase
+            .from("profiles")
+            .select("prefs, display_name, full_name")
+            .eq("id", uid)
+            .single();
+
+          if (prof) {
+            const dn = (prof as any).display_name || (prof as any).full_name || null;
+            if (dn) name = dn;
+            const prefs = (prof as any).prefs || {};
+            if (Array.isArray(prefs.nicknames)) dbNicks = prefs.nicknames;
+            if (prefs.greet_mode === "name_only" || prefs.greet_mode === "nickname_only") {
+              mode = prefs.greet_mode;
+            }
+          }
+        } catch {
+          // ignore, fall back to local
+        }
+
+        const localNicks = getLocalNicknames();
+        const nickMerged = Array.from(new Set([...(dbNicks || []), ...localNicks]));
+
+        const chosen = pickGreetingName({
+          userName: name,
+          nicknames: nickMerged,
+          mode
+        });
+        setGreetName(chosen);
+      })();
     });
   }, []);
 
@@ -178,7 +265,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
     setLoading(true);
     setErr(null);
     try {
-      // 1) Main fetch: things scheduled up to and including the selected date
       const { data, error } = await supabase
         .from("tasks")
         .select("id,user_id,title,due_date,status,priority,source,goal_id,completed_at")
@@ -190,14 +276,11 @@ export default function TodayScreen({ externalDateISO }: Props) {
       if (error) throw error;
 
       const raw = (data as Task[]) || [];
-
-      // 2) Build the visible list (today's + overdue pending)
       const list = raw.filter(
         (t) => t.due_date === dateISO || (t.due_date! < dateISO && t.status !== "done")
       );
       setTasks(list);
 
-      // 3) Goal titles (for items in the visible list)
       const ids = Array.from(
         new Set(list.map((t) => t.goal_id).filter((v): v is number => typeof v === "number"))
       );
@@ -214,49 +297,21 @@ export default function TodayScreen({ externalDateISO }: Props) {
         setGoalMap({});
       }
 
-      // 4) Extra fetch for "completed today", regardless of due_date
-      const { start, end } = startEndOfDayForISO(dateISO);
-      const { data: doneTodayRows, error: de } = await supabase
-        .from("tasks")
-        .select("id,user_id,title,due_date,status,priority,source,goal_id,completed_at")
-        .eq("user_id", userId)
-        .eq("status", "done")
-        .not("completed_at", "is", null)
-        .gte("completed_at", start)
-        .lt("completed_at", end);
-
-      if (de) throw de;
-
-      const completedToday = (doneTodayRows as Task[]) || [];
-
-      // 5) Compute header numbers
-      const doneToday = completedToday.length;
-
-      // Top tasks due today or overdue & pending (denominator that matters for “today focus”)
-      const topScheduled = raw.filter(
-        (t) =>
-          (t.priority ?? 0) >= 2 &&
-          (t.due_date === dateISO || (t.due_date! < dateISO && t.status !== "done"))
+      // compute daily summary
+      const doneToday = list.filter(
+        (t) => t.due_date === dateISO && t.status === "done"
+      ).length;
+      const pendingToday = list.filter(
+        (t) => t.due_date === dateISO && t.status !== "done"
+      ).length;
+      const topToday = list.filter(
+        (t) => t.due_date === dateISO && (t.priority ?? 0) >= 2
       );
-      const topTotal = topScheduled.length;
+      const topDone = topToday.filter((t) => t.status === "done").length;
+      const topTotal = topToday.length;
+      const isWin = topDone >= 1 || doneToday >= 3;
 
-      // Of the items actually completed today, how many were Top?
-      const topDoneToday = completedToday.filter((t) => (t.priority ?? 0) >= 2).length;
-
-      // Pending today (due today but not done)
-      const pendingToday = raw.filter((t) => t.due_date === dateISO && t.status !== "done").length;
-
-      // Win condition counts what you *did today*
-      const isWin = topDoneToday >= 1 || doneToday >= 3;
-
-      setSummary((s) => ({
-        ...s,
-        doneToday,
-        pendingToday,
-        topDone: topDoneToday,
-        topTotal,
-        isWin
-      }));
+      setSummary((s) => ({ ...s, doneToday, pendingToday, topDone, topTotal, isWin }));
     } catch (e: any) {
       setErr(e.message || String(e));
       setTasks([]);
@@ -428,34 +483,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const top = tasks.filter((t) => (t.priority ?? 0) >= 2);
   const rest = tasks.filter((t) => (t.priority ?? 0) < 2);
   const overdueCount = tasks.filter(isOverdue).length;
-
-  // Build the “Completed today (from earlier)” list
-  const [completedEarlier, setCompletedEarlier] = useState<Task[]>([]);
-  useEffect(() => {
-    // Populate from a focused query on every load (mirrors the summary window)
-    async function loadCompletedEarlier() {
-      if (!userId) return;
-      try {
-        const { start, end } = startEndOfDayForISO(dateISO);
-        const { data, error } = await supabase
-          .from("tasks")
-          .select("id,user_id,title,due_date,status,priority,source,goal_id,completed_at")
-          .eq("user_id", userId)
-          .eq("status", "done")
-          .not("completed_at", "is", null)
-          .gte("completed_at", start)
-          .lt("completed_at", end);
-        if (error) throw error;
-        const rows = (data as Task[]) || [];
-        // Only those that were overdue (due_date < selected day)
-        const earlier = rows.filter((t) => t.due_date && t.due_date < dateISO);
-        setCompletedEarlier(earlier);
-      } catch {
-        setCompletedEarlier([]);
-      }
-    }
-    loadCompletedEarlier();
-  }, [userId, dateISO, summary.doneToday]); // refetch when date or today's count changes
 
   function Section({
     title,
@@ -647,9 +674,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
             flexWrap: "wrap"
           }}
         >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
             <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: 1 }}>{timeStr}</div>
             <div className="muted">{dateISO}</div>
+            {greetName && (
+              <div className="muted" style={{ marginLeft: 10 }}>
+                Welcome back, <b>{greetName}</b> 👋
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             <span
@@ -665,9 +697,11 @@ export default function TodayScreen({ externalDateISO }: Props) {
             <span className="badge" title="Tasks done today">
               Done: {summary.doneToday}
             </span>
-            <span className="badge" title="Top priorities done / focus denominator">
-              Top: {summary.topDone}/{summary.topTotal}
-            </span>
+            {summary.topTotal > 0 && (
+              <span className="badge" title="Top priorities done / total">
+                Top: {summary.topDone}/{summary.topTotal}
+              </span>
+            )}
             <span className="badge" title="Current streak (best)">
               🔥 {summary.streak} {summary.bestStreak > 0 ? `(best ${summary.bestStreak})` : ""}
             </span>
@@ -838,49 +872,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 </li>
               );
             })}
-          </ul>
-        )}
-      </Section>
-
-      {/* ===== Completed Today (from earlier) ===== */}
-      <Section title="Completed Today (from earlier)">
-        {completedEarlier.length === 0 ? (
-          <div className="muted">No previously-overdue tasks completed today.</div>
-        ) : (
-          <ul className="list">
-            {completedEarlier.map((t) => (
-              <li key={t.id} className="item">
-                <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1 }}>
-                  <input
-                    type="checkbox"
-                    checked={true}
-                    onChange={() => toggleDone(t)} // unchecking will reopen it
-                  />
-                  <div style={{ flex: 1 }}>
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 8,
-                        alignItems: "center",
-                        flexWrap: "wrap"
-                      }}
-                    >
-                      <span style={{ fontWeight: 600 }}>{displayTitle(t)}</span>
-                      <span className="badge">Overdue</span>
-                      {t.due_date && <span className="muted">Was due {t.due_date}</span>}
-                      <button
-                        className="btn-ghost"
-                        style={{ marginLeft: "auto" }}
-                        onClick={() => openEdit(t)}
-                        title="Edit task"
-                      >
-                        Edit
-                      </button>
-                    </div>
-                  </div>
-                </label>
-              </li>
-            ))}
           </ul>
         )}
       </Section>
