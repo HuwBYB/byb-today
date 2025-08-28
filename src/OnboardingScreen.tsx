@@ -1,6 +1,6 @@
 // src/OnboardingScreen.tsx
 import { useEffect, useState, useMemo } from "react";
-import { supabase } from "../supabaseClient";
+import { supabase } from "./supabaseClient";
 
 /** Optional callback so App.tsx can do <OnboardingScreen onDone={...}/> */
 type Props = { onDone?: () => void };
