@@ -1,298 +1,227 @@
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "../lib/supabaseClient";
-import { useNavigate } from "react-router-dom";
+// src/OnboardingScreen.tsx
+import { useEffect, useState, useMemo } from "react";
+import { supabase } from "../supabaseClient";
 
-/** ---- Local helpers (kept here so you don't need extra files) ---- */
-const PRESET_NICKS = [
+/** Optional callback so App.tsx can do <OnboardingScreen onDone={...}/> */
+type Props = { onDone?: () => void };
+
+/** LocalStorage keys (fallback if DB write fails) */
+const LS_DONE = "byb:onboarding_done";
+const LS_NAME = "byb:display_name";
+const LS_POOL = "byb:display_pool";
+
+/** Default nickname suggestions */
+const DEFAULT_NICKNAMES = [
   "King",
   "Champ",
-  "Boss",
   "Legend",
-  "Hero",
-  "Superstar",
+  "Boss",
   "Chief",
-  "Captain",
+  "Star",
   "Ace",
-  "Champion",
+  "Hero",
+  "Captain",
+  "Tiger",
 ];
 
-const LS_ONBOARDED = "byb:onboarded:v1";
-const LS_NICKS = "byb:nicknames:v1";
-
-function saveLocalNicknames(nicks: string[]) {
-  const clean = Array.from(new Set(nicks.map((s) => s.trim()).filter(Boolean)));
-  localStorage.setItem(LS_NICKS, JSON.stringify(clean));
+function pickDefaultName(email?: string | null, fullName?: string | null) {
+  const n = (fullName || "").trim();
+  if (n) return n;
+  const e = (email || "").trim();
+  if (!e) return "Friend";
+  const handle = e.split("@")[0] || "Friend";
+  return handle.charAt(0).toUpperCase() + handle.slice(1);
 }
 
-/** ---- Nickname picker component ---- */
-function NicknamesPicker({
-  nicknames,
-  setNicknames,
-}: {
-  nicknames: string[];
-  setNicknames: (arr: string[]) => void;
-}) {
-  const [input, setInput] = useState("");
+function saveLocal(name: string, pool: string[]) {
+  try {
+    localStorage.setItem(LS_NAME, name);
+    localStorage.setItem(LS_POOL, JSON.stringify(pool));
+    localStorage.setItem(LS_DONE, "1");
+  } catch {
+    // ignore
+  }
+}
+
+async function saveProfileToDB(userId: string, name: string, pool: string[]) {
+  // If your "profiles" table doesn’t have these columns, this may error.
+  const payload = {
+    display_name: name,
+    display_pool: pool,
+    onboarding_done: true,
+  } as any;
+
+  const { error } = await supabase
+    .from("profiles")
+    .upsert({ id: userId, ...payload })
+    .select()
+    .limit(1);
+
+  if (error) throw error;
+}
+
+export default function OnboardingScreen({ onDone }: Props) {
+  const [userId, setUserId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Form state
+  const [name, setName] = useState<string>("");
+  const [pool, setPool] = useState<string[]>([]);
+  const [inputNick, setInputNick] = useState("");
+
+  // Live example greeting
+  const exampleGreeting = useMemo(() => {
+    if (pool.length === 0) return `Welcome back, ${name || "Friend"}!`;
+    const choices = [name || "Friend", ...pool];
+    const pick = choices[Math.floor(Math.random() * choices.length)];
+    return `Welcome back, ${pick}!`;
+  }, [name, pool]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data, error } = await supabase.auth.getUser();
+        if (error) throw error;
+        const u = data.user;
+        if (!u) return;
+        setUserId(u.id);
+
+        // Prefill name
+        const fullName = (u.user_metadata as any)?.full_name || (u.user_metadata as any)?.name || null;
+        const email = u.email || null;
+        setName(pickDefaultName(email, fullName));
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+  }, []);
 
   function toggleNick(n: string) {
     const v = n.trim();
     if (!v) return;
-    const exists = nicknames.includes(v);
-    setNicknames(exists ? nicknames.filter((x) => x !== v) : [...nicknames, v]);
-  }
-
-  function addFromInput() {
-    const parts = input
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (parts.length === 0) return;
-    const merged = Array.from(new Set([...nicknames, ...parts]));
-    setNicknames(merged);
-    setInput("");
-  }
-
-  return (
-    <div style={{ display: "grid", gap: 8 }}>
-      <div className="muted">Pick any you like, then add your own:</div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {PRESET_NICKS.map((n) => {
-          const on = nicknames.includes(n);
-          return (
-            <button
-              key={n}
-              type="button"
-              onClick={() => toggleNick(n)}
-              className="btn-soft"
-              style={{
-                borderRadius: 999,
-                background: on ? "#e0f2fe" : "",
-                border: on ? "1px solid #38bdf8" : "1px solid var(--border)",
-              }}
-              aria-pressed={on}
-            >
-              {n}
-            </button>
-          );
-        })}
-      </div>
-
-      <div
-        style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}
-      >
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Add more (comma-separated or one at a time)…"
-          style={{ flex: "1 1 220px", minWidth: 0 }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") addFromInput();
-          }}
-        />
-        <button type="button" className="btn-soft" onClick={addFromInput}>
-          Add
-        </button>
-      </div>
-
-      {nicknames.length > 0 && (
-        <div className="muted">Selected: {nicknames.join(" · ")}</div>
-      )}
-    </div>
-  );
-}
-
-/** ---- MAIN PAGE ---- */
-export default function OnboardingScreen() {
-  const nav = useNavigate();
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  const [userId, setUserId] = useState<string | null>(null);
-
-  // Basic identity (optional)
-  const [displayName, setDisplayName] = useState("");
-
-  // Nicknames + greeting mode
-  const [nicknames, setNicknames] = useState<string[]>([]);
-  const [greetMode, setGreetMode] = useState<"mixed" | "name_only" | "nickname_only">(
-    "mixed"
-  );
-
-  // Load session + any existing profile prefs (optional)
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const { data: auth } = await supabase.auth.getUser();
-        const uid = auth.user?.id ?? null;
-        if (!mounted) return;
-        setUserId(uid);
-
-        if (uid) {
-          // Try to read existing profile (to prefill)
-          const { data: prof } = await supabase
-            .from("profiles")
-            .select("display_name, full_name, prefs")
-            .eq("id", uid)
-            .single();
-
-          const name =
-            (prof as any)?.display_name ||
-            (prof as any)?.full_name ||
-            auth.user?.user_metadata?.full_name ||
-            auth.user?.user_metadata?.name ||
-            (auth.user?.email ? auth.user.email.split("@")[0] : "") ||
-            "";
-          setDisplayName(name);
-
-          const existingNicks =
-            ((prof as any)?.prefs?.nicknames as string[] | undefined) || [];
-          const existingMode =
-            ((prof as any)?.prefs?.greet_mode as
-              | "mixed"
-              | "name_only"
-              | "nickname_only"
-              | undefined) || "mixed";
-          setNicknames(existingNicks);
-          setGreetMode(existingMode);
-        }
-      } catch (e: any) {
-        setErr(e.message || String(e));
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  async function finishOnboarding() {
-    if (!userId) return;
-    setSaving(true);
-    setErr(null);
-    try {
-      // Save locally as a fallback (so greeting works even if DB update is blocked)
-      saveLocalNicknames(nicknames);
-
-      // Merge into profiles.prefs JSON if present, keep other prefs keys intact
-      const { data: profRead } = await supabase
-        .from("profiles")
-        .select("prefs")
-        .eq("id", userId)
-        .single();
-
-      const nextPrefs: any = {
-        ...(profRead?.prefs || {}),
-        nicknames,
-        greet_mode: greetMode,
-      };
-
-      // Upsert profile with onboarded flag + optional display_name
-      const payload: any = {
-        id: userId,
-        onboarded_at: new Date().toISOString(),
-        prefs: nextPrefs,
-      };
-      if (displayName.trim()) payload.display_name = displayName.trim();
-
-      const { error: upErr } = await supabase
-        .from("profiles")
-        .upsert(payload, { onConflict: "id" });
-      if (upErr) throw upErr;
-
-      // Local flag so the app gate lets you straight in even if cache is stale
-      localStorage.setItem(LS_ONBOARDED, "1");
-
-      // Go to Today
-      nav("/today", { replace: true });
-    } catch (e: any) {
-      console.error(e);
-      setErr(e.message || "Failed to save onboarding");
-    } finally {
-      setSaving(false);
+    if (pool.includes(v)) {
+      setPool(pool.filter((x) => x !== v));
+    } else {
+      setPool([...pool, v]);
     }
   }
 
-  const canSave = useMemo(() => {
-    // You can decide to require at least a name or at least 1 nickname; for now, allow save anytime
-    return true;
-  }, [displayName, nicknames, greetMode]);
+  function addFromInput() {
+    const parts = inputNick.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length === 0) return;
+    const merged = Array.from(new Set([...pool, ...parts]));
+    setPool(merged);
+    setInputNick("");
+  }
 
-  if (loading) {
-    return (
-      <div className="card" style={{ padding: 16 }}>
-        <div className="muted">Loading…</div>
-      </div>
-    );
+  async function finishOnboarding() {
+    if (!name.trim()) {
+      setErr("Please enter your name");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      if (userId) {
+        try {
+          await saveProfileToDB(userId, name.trim(), pool);
+        } catch (dbErr) {
+          console.warn("DB save failed, falling back to localStorage", dbErr);
+          saveLocal(name.trim(), pool);
+        }
+      } else {
+        saveLocal(name.trim(), pool);
+      }
+
+      // Local flag so App.tsx knows onboarding is complete
+      localStorage.setItem(LS_DONE, "1");
+
+      if (onDone) onDone();
+      else window.location.replace("/");
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <div className="page-onboarding" style={{ display: "grid", gap: 12 }}>
-      <div className="card" style={{ display: "grid", gap: 12 }}>
-        <h1 style={{ margin: 0 }}>Welcome to BYB</h1>
+    <div style={{ maxWidth: 600, margin: "0 auto", padding: 16 }}>
+      <h1>Welcome to BYB</h1>
+      <p>Let's set up how you'd like to be greeted.</p>
 
-        {/* Identity */}
-        <div className="card card--wash" style={{ display: "grid", gap: 10 }}>
-          <div className="section-title">Your name (optional)</div>
+      <div className="card" style={{ display: "grid", gap: 12, marginTop: 16 }}>
+        <label style={{ display: "grid", gap: 6 }}>
+          <div className="section-title">Your name</div>
           <input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="What should we call you?"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Enter your name"
           />
-          <div className="muted">
-            We’ll mix this with your chosen nicknames (you can change it later).
+        </label>
+
+        <div>
+          <div className="section-title">Nicknames (optional)</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+            {DEFAULT_NICKNAMES.map((n) => {
+              const on = pool.includes(n);
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => toggleNick(n)}
+                  className="btn-soft"
+                  style={{
+                    borderRadius: 999,
+                    background: on ? "#e0f2fe" : "",
+                    border: on ? "1px solid #38bdf8" : "1px solid var(--border)",
+                  }}
+                >
+                  {n}
+                </button>
+              );
+            })}
           </div>
-        </div>
 
-        {/* Nicknames */}
-        <div className="card card--wash" style={{ display: "grid", gap: 10 }}>
-          <div className="section-title">Nicknames</div>
-          <NicknamesPicker nicknames={nicknames} setNicknames={setNicknames} />
-          <div
-            style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}
-          >
-            <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-              <input
-                type="radio"
-                checked={greetMode === "mixed"}
-                onChange={() => setGreetMode("mixed")}
-              />
-              Mixed (your name or a nickname)
-            </label>
-            <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-              <input
-                type="radio"
-                checked={greetMode === "name_only"}
-                onChange={() => setGreetMode("name_only")}
-              />
-              Your name only
-            </label>
-            <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-              <input
-                type="radio"
-                checked={greetMode === "nickname_only"}
-                onChange={() => setGreetMode("nickname_only")}
-              />
-              Nicknames only
-            </label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              value={inputNick}
+              onChange={(e) => setInputNick(e.target.value)}
+              placeholder="Add custom nicknames (comma-separated)…"
+              style={{ flex: 1 }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addFromInput();
+              }}
+            />
+            <button type="button" onClick={addFromInput}>
+              Add
+            </button>
           </div>
-        </div>
 
-        {err && <div style={{ color: "red" }}>{err}</div>}
-
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button
-            className="btn-primary"
-            onClick={finishOnboarding}
-            disabled={!canSave || saving || !userId}
-            style={{ borderRadius: 8 }}
-          >
-            {saving ? "Saving…" : "Finish onboarding"}
-          </button>
+          {pool.length > 0 && (
+            <div className="muted" style={{ marginTop: 6 }}>
+              Selected: {pool.join(" · ")}
+            </div>
+          )}
         </div>
       </div>
+
+      <div style={{ marginTop: 20, fontStyle: "italic" }}>
+        Example: <span>{exampleGreeting}</span>
+      </div>
+
+      {err && <div style={{ color: "red", marginTop: 12 }}>{err}</div>}
+
+      <button
+        className="btn-primary"
+        onClick={finishOnboarding}
+        disabled={busy}
+        style={{ marginTop: 20, borderRadius: 8 }}
+      >
+        {busy ? "Saving…" : "Finish"}
+      </button>
     </div>
   );
 }
