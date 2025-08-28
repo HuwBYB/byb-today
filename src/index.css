@@ -54,6 +54,7 @@ button {
   padding:8px 12px; border-radius:10px;
   cursor:pointer;
   min-width: 0;
+  white-space: nowrap;            /* <== stops letter-by-letter wrapping */
 }
 button:disabled { opacity:.6; cursor:not-allowed; }
 
@@ -62,9 +63,7 @@ button:disabled { opacity:.6; cursor:not-allowed; }
   border-color: transparent;
 }
 .btn-primary:hover { filter: brightness(0.98); }
-.btn-ghost{
-  background: transparent;
-}
+.btn-ghost{ background: transparent; }
 
 /* ---- Cards / Lists ---- */
 .card{
@@ -90,7 +89,7 @@ button:disabled { opacity:.6; cursor:not-allowed; }
   overflow-x: hidden; /* belt-and-braces */
 }
 
-/* Utility: any inline "row" should wrap on small screens */
+/* Utility rows */
 .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .row-nowrap { display:flex; gap:8px; align-items:center; flex-wrap:nowrap; min-width:0; }
 
@@ -110,29 +109,32 @@ button:disabled { opacity:.6; cursor:not-allowed; }
   z-index: 9999; /* always on top */
 }
 
-/* >> KEY FIX: one horizontal, scrollable row — never wraps */
+/* one horizontal, scrollable row — never wraps */
 .tabbar-inner{
   height: var(--tabbar-height);
   display:flex; align-items:center; gap:6px;
   padding:8px 10px;
   overflow-x:auto; overflow-y:hidden;
-  flex-wrap: nowrap;            /* do not wrap to two lines */
+  flex-wrap: nowrap;
   -ms-overflow-style: none; scrollbar-width: none;
-  white-space: nowrap;          /* keep labels on one line */
+  white-space: nowrap;
 }
 .tabbar-inner::-webkit-scrollbar{ display:none; }
 
 /* tab buttons sized for scroll */
 .tab-btn{
   display:grid; gap:2px; place-items:center;
-  flex: 0 0 auto;              /* don’t flex-grow, keep fixed width */
+  flex: 0 0 auto;
   min-width:66px; padding:6px 8px;
   border-radius:12px; border:1px solid transparent;
   color:#1f2937; background: transparent;
   white-space:nowrap;
 }
 .tab-btn .icon{ font-size:18px; line-height:1; }
-.tab-btn .label{ font-size:11px; color:#334155; text-overflow:ellipsis; overflow:hidden; max-width: 82px; }
+.tab-btn .label{
+  font-size:11px; color:#334155;
+  text-overflow:ellipsis; overflow:hidden; max-width: 82px;
+}
 
 .tab-btn[data-active="true"]{
   background:#eef2ff;                  /* soft indigo bubble */
@@ -157,8 +159,6 @@ input[type="radio"] {
 }
 
 /* ===== Mobile overflow + layout fixes ===== */
-
-/* On small screens, collapse our common 2-col grids to 1 column */
 @media (max-width: 899px){
   /* Collapse inline-styled grids used across screens */
   [style*="grid-template-columns: 1fr 320px"],
@@ -167,25 +167,17 @@ input[type="radio"] {
   [style*="grid-template-columns: 300px 1fr"] {
     grid-template-columns: 1fr !important;
   }
-
-  /* Make sure inputs don’t push width */
   input, select, textarea { max-width: 100%; }
-
-  /* Give cards a little extra bottom padding so the tab bar never covers actions */
   .app-shell { padding-bottom: calc(var(--tabbar-height) + var(--safe-bottom) + 16px); }
 }
 
 /* === Calendar month grid: fit 7 columns on mobile === */
 @media (max-width: 899px){
-  /* Any inline 7-col grids (our month grid & weekday header) */
   [style*="grid-template-columns: repeat(7, 1fr)"] {
     grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
     width: 100% !important;
   }
-  /* Make sure day cells can shrink and don't force overflow */
-  [style*="grid-template-columns: repeat(7, 1fr)"] > * {
-    min-width: 0 !important;
-  }
+  [style*="grid-template-columns: repeat(7, 1fr)"] > * { min-width: 0 !important; }
 }
 
 /* Reusable two-col layout that stacks on mobile */
@@ -195,7 +187,6 @@ input[type="radio"] {
 }
 .sidebar-sticky { position: sticky; top: 12px; align-self: start; }
 
-/* Make the chat scroll area comfy on tall phones */
 @media (max-width: 899px){
   .two-col main.card { min-height: 60vh; }
 }
