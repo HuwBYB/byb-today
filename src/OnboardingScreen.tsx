@@ -97,8 +97,7 @@ export default function OnboardingScreen({ onDone }: Props) {
           null;
         const email = u.email || null;
         setName(pickDefaultName(email, fullName));
-      } catch (e) {
-        // Prefill "Friend" if we can't read user
+      } catch {
         setName("Friend");
       }
     })();
@@ -137,7 +136,7 @@ export default function OnboardingScreen({ onDone }: Props) {
       if (userId) {
         try {
           await saveProfileToDB(userId, cleanName, pool);
-        } catch (dbErr) {
+        } catch {
           // Fallback to local if DB table/columns aren't present
           saveLocal(cleanName, pool);
         }
