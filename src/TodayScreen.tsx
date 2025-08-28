@@ -89,19 +89,20 @@ function makeSeriesKey(repeat: Repeat) {
   return repeat ? `${REPEAT_PREFIX}${repeat}` : "manual";
 }
 
-/* ===== display-name helper (pulls from onboarding localStorage) ===== */
+/* ===== display-name helper (rotates name + nicknames) ===== */
 const LS_NAME = "byb:display_name";
 const LS_POOL = "byb:display_pool";
-function chooseGreetingName(): string {
+
+function pickGreetingLabel(): string {
   try {
-    const rawName = (localStorage.getItem(LS_NAME) || "").trim();
+    const name = (localStorage.getItem(LS_NAME) || "").trim();
     const pool = JSON.parse(localStorage.getItem(LS_POOL) || "[]") as string[];
-    const cleanPool = Array.isArray(pool) ? pool.filter(Boolean) : [];
-    // If there are nicknames, pick one randomly; otherwise fall back to your name.
-    if (cleanPool.length > 0) {
-      return cleanPool[Math.floor(Math.random() * cleanPool.length)];
-    }
-    return rawName || "";
+    const list = [
+      ...(name ? [name] : []),
+      ...(Array.isArray(pool) ? pool.filter(Boolean) : [])
+    ];
+    if (list.length === 0) return "";
+    return list[Math.floor(Math.random() * list.length)];
   } catch {
     return "";
   }
@@ -139,8 +140,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [quickTop, setQuickTop] = useState(false);
   const [savingQuick, setSavingQuick] = useState(false);
 
-  // Greeting (stable per page load)
+  // Greeting (varies between name and nicknames)
   const [greetName, setGreetName] = useState<string>("");
+  const [greetPrefix, setGreetPrefix] = useState<string>("Welcome back");
 
   // Lightweight daily summary
   const [summary, setSummary] = useState<Summary>({
@@ -173,13 +175,25 @@ export default function TodayScreen({ externalDateISO }: Props) {
         setErr(error.message);
         return;
       }
-      setUserId(data.user?.id ?? null);
-    });
-  }, []);
+      const user = data.user;
+      setUserId(user?.id ?? null);
 
-  useEffect(() => {
-    // pick a greeting name once on mount
-    setGreetName(chooseGreetingName());
+      // Greeting bits
+      setGreetName(pickGreetingLabel());
+
+      // “We missed you” if last sign-in was 2+ days ago
+      const last = user?.last_sign_in_at ? new Date(user.last_sign_in_at) : null;
+      if (last) {
+        const now = new Date();
+        const days = Math.floor(
+          (new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() -
+            new Date(last.getFullYear(), last.getMonth(), last.getDate()).getTime()) / 86400000
+        );
+        setGreetPrefix(days >= 2 ? "We missed you" : "Welcome back");
+      } else {
+        setGreetPrefix("Welcome back");
+      }
+    });
   }, []);
 
   // keep clock fresh
@@ -611,7 +625,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
             <div className="muted">{dateISO}</div>
           </div>
 
-          {/* Summary badges (stay right on wide screens, wrap on small) */}
+        {/* Summary badges (stay right on wide screens, wrap on small) */}
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             <span
               className="badge"
@@ -640,7 +654,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {/* Row 1.5: Greeting on its own line (mobile-friendly) */}
         {greetName && (
           <div style={{ fontWeight: 600 }}>
-            Welcome back, {greetName}
+            {greetPrefix}, {greetName}
           </div>
         )}
 
