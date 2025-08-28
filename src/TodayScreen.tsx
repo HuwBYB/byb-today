@@ -140,9 +140,20 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [quickTop, setQuickTop] = useState(false);
   const [savingQuick, setSavingQuick] = useState(false);
 
-  // Greeting (varies between name and nicknames)
+  // Greeting
   const [greetName, setGreetName] = useState<string>("");
   const [greetPrefix, setGreetPrefix] = useState<string>("Welcome back");
+
+  // Responsive: treat small screens < 420px as compact
+  const [isCompact, setIsCompact] = useState<boolean>(false);
+  useEffect(() => {
+    function check() {
+      setIsCompact(window.innerWidth < 420);
+    }
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
 
   // Lightweight daily summary
   const [summary, setSummary] = useState<Summary>({
@@ -162,7 +173,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [editTop, setEditTop] = useState(false);
   const [editDue, setEditDue] = useState<string | null>(null);
   const [editRepeat, setEditRepeat] = useState<Repeat>("");
-  const [applyFuture, setApplyFuture] = useState(false); // apply title/top to future in series
+  const [applyFuture, setApplyFuture] = useState(false);
   const [busyEdit, setBusyEdit] = useState(false);
 
   useEffect(() => {
@@ -178,7 +189,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
       const user = data.user;
       setUserId(user?.id ?? null);
 
-      // Greeting bits
       setGreetName(pickGreetingLabel());
 
       // “We missed you” if last sign-in was 2+ days ago
@@ -289,7 +299,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
         days.add(toISO(new Date(d.getFullYear(), d.getMonth(), d.getDate())));
       }
 
-      // current streak up to today
       let streak = 0;
       let cursor = todayISO();
       while (days.has(cursor)) {
@@ -297,7 +306,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
         cursor = addDays(cursor, -1);
       }
 
-      // best streak
       const sorted = Array.from(days).sort();
       let best = 0;
       let run = 0;
@@ -440,7 +448,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     right?: ReactNode;
   }) {
     return (
-      <div className="card" style={{ marginBottom: 12 }}>
+      <div className="card" style={{ marginBottom: 12, overflowX: "clip" }}>
         <div
           style={{
             display: "flex",
@@ -448,11 +456,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
             justifyContent: "space-between",
             marginBottom: 8,
             gap: 8,
-            flexWrap: "wrap"
+            flexWrap: "wrap",
+            width: "100%"
           }}
         >
-          <h2 style={{ margin: 0, fontSize: 18 }}>{title}</h2>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto" }}>
+          <h2 style={{ margin: 0, fontSize: 18, wordBreak: "break-word" }}>{title}</h2>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", minWidth: 0 }}>
             {right}
             <button onClick={loadAll} disabled={loading}>
               {loading ? "Refreshing…" : "Refresh"}
@@ -496,40 +505,29 @@ export default function TodayScreen({ externalDateISO }: Props) {
     const due = editDue || editing.due_date || dateISO;
 
     try {
-      // 1) Update this task
-      {
-        const { error } = await supabase
-          .from("tasks")
-          .update({ title, priority: top, due_date: due, source: newSeriesKey })
-          .eq("id", editing.id);
-        if (error) throw error;
-      }
+      await supabase.from("tasks").update({ title, priority: top, due_date: due, source: newSeriesKey }).eq("id", editing.id);
 
-      // 2) If applyFuture for a series: update future rows' title/priority
       if (applyFuture && originalSeriesKey) {
-        const { error } = await supabase
+        await supabase
           .from("tasks")
           .update({ title, priority: top })
           .eq("user_id", userId)
           .eq("source", originalSeriesKey)
           .gte("due_date", (editing.due_date || due) as string);
-        if (error) throw error;
       }
 
-      // 3) Handle repeat changes (delete old future; insert new future)
       if (originalSeriesKey && editRepeat !== originalRepeat) {
-        const { error } = await supabase
+        await supabase
           .from("tasks")
           .delete()
           .eq("user_id", userId)
           .eq("source", originalSeriesKey)
           .gte("due_date", (editing.due_date || due) as string)
           .neq("id", editing.id);
-        if (error) throw error;
       }
 
       if (editRepeat && editRepeat !== originalRepeat) {
-        const occurrences = generateOccurrences(due as string, editRepeat).slice(1); // future only
+        const occurrences = generateOccurrences(due as string, editRepeat).slice(1);
         if (occurrences.length) {
           const rows = occurrences.map((iso) => ({
             user_id: userId,
@@ -539,8 +537,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
             priority: top,
             source: makeSeriesKey(editRepeat)
           }));
-          const { error } = await supabase.from("tasks").insert(rows as any);
-          if (error) throw error;
+          await supabase.from("tasks").insert(rows as any);
         }
       }
 
@@ -562,27 +559,18 @@ export default function TodayScreen({ externalDateISO }: Props) {
       const originalSeriesKey = editing.source?.startsWith(REPEAT_PREFIX) ? editing.source : null;
 
       if (scope === "one") {
-        const { error } = await supabase.from("tasks").delete().eq("id", editing.id);
-        if (error) throw error;
+        await supabase.from("tasks").delete().eq("id", editing.id);
       } else if (scope === "future" && originalSeriesKey) {
-        const { error } = await supabase
+        await supabase
           .from("tasks")
           .delete()
           .eq("user_id", userId)
           .eq("source", originalSeriesKey)
           .gte("due_date", editing.due_date || dateISO);
-        if (error) throw error;
       } else if (scope === "all" && originalSeriesKey) {
-        const { error } = await supabase
-          .from("tasks")
-          .delete()
-          .eq("user_id", userId)
-          .eq("source", originalSeriesKey);
-        if (error) throw error;
+        await supabase.from("tasks").delete().eq("user_id", userId).eq("source", originalSeriesKey);
       } else {
-        // fallback to single delete if no series
-        const { error } = await supabase.from("tasks").delete().eq("id", editing.id);
-        if (error) throw error;
+        await supabase.from("tasks").delete().eq("id", editing.id);
       }
 
       setEditOpen(false);
@@ -596,7 +584,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   }
 
   return (
-    <div style={{ display: "grid", gap: 12 }}>
+    <div style={{ display: "grid", gap: 12, overflowX: "hidden" }}>
       {/* ===== Sticky NOW widget ===== */}
       <div
         className="card"
@@ -607,26 +595,27 @@ export default function TodayScreen({ externalDateISO }: Props) {
           display: "grid",
           gap: 8,
           border: "1px solid var(--border)",
-          background: "#fff"
+          background: "#fff",
+          overflowX: "clip"
         }}
       >
-        {/* Row 1: Clock + date */}
+        {/* Row 1: Clock + summary badges */}
         <div
           style={{
             display: "flex",
             gap: 10,
-            alignItems: "baseline",
+            alignItems: "center",
             justifyContent: "space-between",
-            flexWrap: "wrap"
+            flexWrap: "wrap",
+            width: "100%"
           }}
         >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
             <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: 1 }}>{timeStr}</div>
-            <div className="muted">{dateISO}</div>
+            <div className="muted" style={{ whiteSpace: "nowrap" }}>{dateISO}</div>
           </div>
 
-        {/* Summary badges (stay right on wide screens, wrap on small) */}
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
             <span
               className="badge"
               title="Win if 1+ top priority done or 3+ tasks done"
@@ -637,9 +626,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
             >
               {summary.isWin ? "Win" : "Keep going"}
             </span>
-            <span className="badge" title="Tasks done today">
-              Done: {summary.doneToday}
-            </span>
+            <span className="badge" title="Tasks done today">Done: {summary.doneToday}</span>
             {summary.topTotal > 0 && (
               <span className="badge" title="Top priorities done / total">
                 Top: {summary.topDone}/{summary.topTotal}
@@ -651,15 +638,15 @@ export default function TodayScreen({ externalDateISO }: Props) {
           </div>
         </div>
 
-        {/* Row 1.5: Greeting on its own line (mobile-friendly) */}
+        {/* Greeting on its own line */}
         {greetName && (
-          <div style={{ fontWeight: 600 }}>
+          <div style={{ fontWeight: 700, wordBreak: "break-word" }}>
             {greetPrefix}, {greetName}
           </div>
         )}
 
         {/* Row 2: Quick capture */}
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%" }}>
           <input
             type="text"
             value={quickTitle}
@@ -668,44 +655,53 @@ export default function TodayScreen({ externalDateISO }: Props) {
               if (e.key === "Enter" && quickTitle.trim() && !savingQuick) addQuick();
             }}
             placeholder="Quick add a task for today…"
-            style={{ flex: "1 1 220px", minWidth: 0 }}
+            style={{ flex: "1 1 220px", minWidth: 0, maxWidth: "100%" }}
           />
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <input
-              type="checkbox"
-              checked={quickTop}
-              onChange={(e) => setQuickTop(e.target.checked)}
-            />
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+            <input type="checkbox" checked={quickTop} onChange={(e) => setQuickTop(e.target.checked)} />
             Top
           </label>
           <button
             className="btn-primary"
             onClick={addQuick}
             disabled={!quickTitle.trim() || savingQuick}
-            style={{ borderRadius: 8 }}
+            style={{ borderRadius: 8, flex: isCompact ? "1 1 100%" : undefined }}
           >
             {savingQuick ? "Adding…" : "Add"}
           </button>
         </div>
 
-        {/* Row 3: date controls + overdue mover */}
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        {/* Row 3: overdue mover + date controls (stack on compact) */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%" }}>
           {overdueCount > 0 && (
             <button
               onClick={moveAllOverdueHere}
               className="btn-soft"
               title="Change due date for all overdue pending tasks to this day"
+              style={{ flex: isCompact ? "1 1 100%" : undefined, minWidth: 0 }}
             >
               Move all overdue here ({overdueCount})
             </button>
           )}
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              alignItems: "center",
+              marginLeft: "auto",
+              flexWrap: "wrap",
+              width: isCompact ? "100%" : "auto"
+            }}
+          >
             <input
               type="date"
               value={dateISO}
               onChange={(e) => setDateISO(e.target.value)}
+              style={{ flex: isCompact ? "1 1 220px" : undefined, minWidth: 0, maxWidth: "100%" }}
             />
-            <button onClick={() => setDateISO(todayString())}>Today</button>
+            <button onClick={() => setDateISO(todayString())} style={{ flex: isCompact ? "1 1 120px" : undefined }}>
+              Today
+            </button>
           </div>
         </div>
         {err && <div style={{ color: "red" }}>{err}</div>}
@@ -721,40 +717,29 @@ export default function TodayScreen({ externalDateISO }: Props) {
               const overdue = isOverdue(t);
               return (
                 <li key={t.id} className="item">
-                  <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1 }}>
-                    <input
-                      type="checkbox"
-                      checked={t.status === "done"}
-                      onChange={() => toggleDone(t)}
-                    />
-                    <div style={{ flex: 1 }}>
+                  <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                    <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <div
                         style={{
                           fontWeight: 600,
                           display: "flex",
                           gap: 8,
                           alignItems: "center",
-                          flexWrap: "wrap"
+                          flexWrap: "wrap",
+                          wordBreak: "break-word"
                         }}
                       >
                         <span>{displayTitle(t)}</span>
                         {overdue && <span className="badge">Overdue</span>}
-                        <button
-                          className="btn-ghost"
-                          style={{ marginLeft: "auto" }}
-                          onClick={() => openEdit(t)}
-                          title="Edit task"
-                        >
+                        <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => openEdit(t)} title="Edit task">
                           Edit
                         </button>
                       </div>
                       {overdue && (
                         <div className="muted" style={{ marginTop: 4 }}>
                           Due {t.due_date} ·{" "}
-                          <button
-                            className="btn-ghost"
-                            onClick={() => moveToSelectedDate(t.id)}
-                          >
+                          <button className="btn-ghost" onClick={() => moveToSelectedDate(t.id)}>
                             Move to {dateISO}
                           </button>
                         </div>
@@ -768,10 +753,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         )}
       </Section>
 
-      <Section
-        title="Everything Else"
-        right={overdueCount > 0 ? <span className="muted">{overdueCount} overdue</span> : null}
-      >
+      <Section title="Everything Else" right={overdueCount > 0 ? <span className="muted">{overdueCount} overdue</span> : null}>
         {rest.length === 0 ? (
           <div className="muted">Nothing else scheduled.</div>
         ) : (
@@ -780,39 +762,20 @@ export default function TodayScreen({ externalDateISO }: Props) {
               const overdue = isOverdue(t);
               return (
                 <li key={t.id} className="item">
-                  <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1 }}>
-                    <input
-                      type="checkbox"
-                      checked={t.status === "done"}
-                      onChange={() => toggleDone(t)}
-                    />
-                    <div style={{ flex: 1 }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: 8,
-                          alignItems: "center",
-                          flexWrap: "wrap"
-                        }}
-                      >
+                  <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                    <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word" }}>
                         <span>{displayTitle(t)}</span>
                         {overdue && <span className="badge">Overdue</span>}
-                        <button
-                          className="btn-ghost"
-                          style={{ marginLeft: "auto" }}
-                          onClick={() => openEdit(t)}
-                          title="Edit task"
-                        >
+                        <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => openEdit(t)} title="Edit task">
                           Edit
                         </button>
                       </div>
                       {overdue && (
                         <div className="muted" style={{ marginTop: 4 }}>
                           Due {t.due_date} ·{" "}
-                          <button
-                            className="btn-ghost"
-                            onClick={() => moveToSelectedDate(t.id)}
-                          >
+                          <button className="btn-ghost" onClick={() => moveToSelectedDate(t.id)}>
                             Move to {dateISO}
                           </button>
                         </div>
@@ -827,7 +790,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
       </Section>
 
       {/* ===== Add Task (advanced) ===== */}
-      <div className="card" style={{ display: "grid", gap: 8 }}>
+      <div className="card" style={{ display: "grid", gap: 8, overflowX: "clip" }}>
         <h2 style={{ margin: 0 }}>Add Task</h2>
         <label style={{ display: "grid", gap: 6 }}>
           <div className="section-title">Task title</div>
@@ -843,22 +806,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </label>
 
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <input
-              type="checkbox"
-              checked={newTop}
-              onChange={(e) => setNewTop(e.target.checked)}
-            />
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+            <input type="checkbox" checked={newTop} onChange={(e) => setNewTop(e.target.checked)} />
             Mark as Top Priority
           </label>
 
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
             <span className="muted">Repeat</span>
-            <select
-              value={newRepeat}
-              onChange={(e) => setNewRepeat(e.target.value as Repeat)}
-              title="Repeat (optional)"
-            >
+            <select value={newRepeat} onChange={(e) => setNewRepeat(e.target.value as Repeat)} title="Repeat (optional)">
               <option value="">No repeat</option>
               <option value="daily">Daily</option>
               <option value="weekdays">Daily (Mon–Fri)</option>
@@ -868,17 +823,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
             </select>
           </label>
 
-          <div className="muted">
+          <div className="muted" style={{ minWidth: 0, wordBreak: "break-word" }}>
             Will be created for {dateISO}
             {newRepeat ? " + future repeats" : ""}
           </div>
 
-          <button
-            onClick={addTask}
-            disabled={!newTitle.trim() || adding}
-            className="btn-primary"
-            style={{ marginLeft: "auto", borderRadius: 8 }}
-          >
+          <button onClick={addTask} disabled={!newTitle.trim() || adding} className="btn-primary" style={{ marginLeft: "auto", borderRadius: 8 }}>
             {adding ? "Adding…" : "Add"}
           </button>
         </div>
@@ -920,30 +870,18 @@ export default function TodayScreen({ externalDateISO }: Props) {
             <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
               <label style={{ display: "grid", gap: 6 }}>
                 <div className="section-title">Title</div>
-                <input
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  placeholder="Enter task…"
-                />
+                <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="Enter task…" />
               </label>
 
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <input
-                    type="checkbox"
-                    checked={editTop}
-                    onChange={(e) => setEditTop(e.target.checked)}
-                  />
+                  <input type="checkbox" checked={editTop} onChange={(e) => setEditTop(e.target.checked)} />
                   Mark as Top Priority
                 </label>
 
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                   Due
-                  <input
-                    type="date"
-                    value={editDue || ""}
-                    onChange={(e) => setEditDue(e.target.value || null)}
-                  />
+                  <input type="date" value={editDue || ""} onChange={(e) => setEditDue(e.target.value || null)} />
                 </label>
 
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -965,38 +903,22 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
               {getRepeatFromSource(editing.source) && (
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={applyFuture}
-                    onChange={(e) => setApplyFuture(e.target.checked)}
-                  />
+                  <input type="checkbox" checked={applyFuture} onChange={(e) => setApplyFuture(e.target.checked)} />
                   Apply title/priority changes to all <b>future</b> items in this series
                 </label>
               )}
 
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap", marginTop: 6 }}>
-                <button
-                  onClick={() => deleteTask("one")}
-                  disabled={busyEdit}
-                  title="Delete just this task"
-                >
+                <button onClick={() => deleteTask("one")} disabled={busyEdit} title="Delete just this task">
                   Delete this
                 </button>
 
                 {getRepeatFromSource(editing.source) && (
                   <>
-                    <button
-                      onClick={() => deleteTask("future")}
-                      disabled={busyEdit}
-                      title="Delete this and all future in series"
-                    >
+                    <button onClick={() => deleteTask("future")} disabled={busyEdit} title="Delete this and all future in series">
                       Delete future in series
                     </button>
-                    <button
-                      onClick={() => deleteTask("all")}
-                      disabled={busyEdit}
-                      title="Delete entire series"
-                    >
+                    <button onClick={() => deleteTask("all")} disabled={busyEdit} title="Delete entire series">
                       Delete entire series
                     </button>
                   </>
