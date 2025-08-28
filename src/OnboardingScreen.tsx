@@ -1,6 +1,6 @@
 // src/OnboardingScreen.tsx
-import { useEffect, useState, useMemo } from "react";
-import { supabase } from "./supabaseClient";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "./lib/supabaseClient";
 
 /** Optional callback so App.tsx can do <OnboardingScreen onDone={...}/> */
 type Props = { onDone?: () => void };
@@ -39,12 +39,13 @@ function saveLocal(name: string, pool: string[]) {
     localStorage.setItem(LS_POOL, JSON.stringify(pool));
     localStorage.setItem(LS_DONE, "1");
   } catch {
-    // ignore
+    // ignore storage errors
   }
 }
 
 async function saveProfileToDB(userId: string, name: string, pool: string[]) {
-  // If your "profiles" table doesn’t have these columns, this may error.
+  // Expects a "profiles" table with columns:
+  // id (uuid), display_name (text), display_pool (json/text[]), onboarding_done (bool)
   const payload = {
     display_name: name,
     display_pool: pool,
@@ -72,8 +73,9 @@ export default function OnboardingScreen({ onDone }: Props) {
 
   // Live example greeting
   const exampleGreeting = useMemo(() => {
-    if (pool.length === 0) return `Welcome back, ${name || "Friend"}!`;
-    const choices = [name || "Friend", ...pool];
+    if (!name.trim()) return "Welcome back!";
+    if (pool.length === 0) return `Welcome back, ${name}!`;
+    const choices = [name, ...pool];
     const pick = choices[Math.floor(Math.random() * choices.length)];
     return `Welcome back, ${pick}!`;
   }, [name, pool]);
@@ -85,14 +87,19 @@ export default function OnboardingScreen({ onDone }: Props) {
         if (error) throw error;
         const u = data.user;
         if (!u) return;
+
         setUserId(u.id);
 
-        // Prefill name
-        const fullName = (u.user_metadata as any)?.full_name || (u.user_metadata as any)?.name || null;
+        // Prefill a sensible name
+        const fullName =
+          (u.user_metadata as any)?.full_name ||
+          (u.user_metadata as any)?.name ||
+          null;
         const email = u.email || null;
         setName(pickDefaultName(email, fullName));
       } catch (e) {
-        console.error(e);
+        // Prefill "Friend" if we can't read user
+        setName("Friend");
       }
     })();
   }, []);
@@ -108,7 +115,10 @@ export default function OnboardingScreen({ onDone }: Props) {
   }
 
   function addFromInput() {
-    const parts = inputNick.split(",").map((s) => s.trim()).filter(Boolean);
+    const parts = inputNick
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
     if (parts.length === 0) return;
     const merged = Array.from(new Set([...pool, ...parts]));
     setPool(merged);
@@ -116,8 +126,9 @@ export default function OnboardingScreen({ onDone }: Props) {
   }
 
   async function finishOnboarding() {
-    if (!name.trim()) {
-      setErr("Please enter your name");
+    const cleanName = name.trim();
+    if (!cleanName) {
+      setErr("Please enter your name.");
       return;
     }
     setBusy(true);
@@ -125,16 +136,16 @@ export default function OnboardingScreen({ onDone }: Props) {
     try {
       if (userId) {
         try {
-          await saveProfileToDB(userId, name.trim(), pool);
+          await saveProfileToDB(userId, cleanName, pool);
         } catch (dbErr) {
-          console.warn("DB save failed, falling back to localStorage", dbErr);
-          saveLocal(name.trim(), pool);
+          // Fallback to local if DB table/columns aren't present
+          saveLocal(cleanName, pool);
         }
       } else {
-        saveLocal(name.trim(), pool);
+        saveLocal(cleanName, pool);
       }
 
-      // Local flag so App.tsx knows onboarding is complete
+      // Also set the local flag so App.tsx can gate properly
       localStorage.setItem(LS_DONE, "1");
 
       if (onDone) onDone();
@@ -149,7 +160,7 @@ export default function OnboardingScreen({ onDone }: Props) {
   return (
     <div style={{ maxWidth: 600, margin: "0 auto", padding: 16 }}>
       <h1>Welcome to BYB</h1>
-      <p>Let's set up how you'd like to be greeted.</p>
+      <p>Tell us your name and (optional) nicknames for your greeting.</p>
 
       <div className="card" style={{ display: "grid", gap: 12, marginTop: 16 }}>
         <label style={{ display: "grid", gap: 6 }}>
@@ -164,7 +175,14 @@ export default function OnboardingScreen({ onDone }: Props) {
 
         <div>
           <div className="section-title">Nicknames (optional)</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 6,
+              flexWrap: "wrap",
+              marginBottom: 8,
+            }}
+          >
             {DEFAULT_NICKNAMES.map((n) => {
               const on = pool.includes(n);
               return (
@@ -176,7 +194,9 @@ export default function OnboardingScreen({ onDone }: Props) {
                   style={{
                     borderRadius: 999,
                     background: on ? "#e0f2fe" : "",
-                    border: on ? "1px solid #38bdf8" : "1px solid var(--border)",
+                    border: on
+                      ? "1px solid #38bdf8"
+                      : "1px solid var(--border)",
                   }}
                 >
                   {n}
