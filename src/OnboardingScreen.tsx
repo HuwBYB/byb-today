@@ -1,514 +1,296 @@
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "./lib/supabaseClient";
+import { supabase } from "../lib/supabaseClient";
+import { useNavigate } from "react-router-dom";
 
-/* -------------------------------------------------------
-   Local flag so the app can proceed immediately after save
-------------------------------------------------------- */
-const ONBOARD_KEY = "byb:onboarded:v1";
-
-/* -------------------------------------------------------
-   Titles (multi-pick supported for fun titles)
-------------------------------------------------------- */
-const FUN_TITLES = [
-  { key: "king", label: "King" },
-  { key: "queen", label: "Queen" },
-  { key: "prince", label: "Prince" },
-  { key: "princess", label: "Princess" },
-  { key: "bossman", label: "Bossman" },
-  { key: "bosslady", label: "Bosslady" },
-  { key: "boss", label: "Boss" },
-  { key: "sir", label: "Sir" },
-  { key: "madam", label: "Madam" },
-  { key: "dude", label: "Dude" },
-  { key: "bro", label: "Bro" },
-  { key: "sis", label: "Sis" },
-  { key: "champ", label: "Champ" },
-  { key: "mlady", label: "M'Lady" },
-  { key: "highness", label: "Your Highness" },
-  { key: "winner", label: "Winner" },
-] as const;
-
-type FunKey = typeof FUN_TITLES[number]["key"];
-
-type DateRow = {
-  title: string;
-  kind: "birthday" | "anniversary" | "custom";
-  date: string;         // YYYY-MM-DD
-  recur: "annually";
-  person?: string | null;
-};
-
-async function sha256Hex(input: string): Promise<string> {
-  const enc = new TextEncoder();
-  const buf = await crypto.subtle.digest("SHA-256", enc.encode(input));
-  const bytes = Array.from(new Uint8Array(buf));
-  return bytes.map(b => b.toString(16).padStart(2, "0")).join("");
-}
-
-/* Month/day/year segmented picker helpers */
-const MONTHS = [
-  "January","February","March","April","May","June",
-  "July","August","September","October","November","December",
+/** ---- Local helpers (kept here so you don't need extra files) ---- */
+const PRESET_NICKS = [
+  "King",
+  "Champ",
+  "Boss",
+  "Legend",
+  "Hero",
+  "Superstar",
+  "Chief",
+  "Captain",
+  "Ace",
+  "Champion",
 ];
-function daysInMonth(year: number, monthIndex: number) {
-  return new Date(year, monthIndex + 1, 0).getDate();
+
+const LS_ONBOARDED = "byb:onboarded:v1";
+const LS_NICKS = "byb:nicknames:v1";
+
+function saveLocalNicknames(nicks: string[]) {
+  const clean = Array.from(new Set(nicks.map((s) => s.trim()).filter(Boolean)));
+  localStorage.setItem(LS_NICKS, JSON.stringify(clean));
 }
 
-export default function OnboardingScreen({ onDone }: { onDone?: () => void }) {
-  const [authLoaded, setAuthLoaded] = useState(false);
+/** ---- Nickname picker component ---- */
+function NicknamesPicker({
+  nicknames,
+  setNicknames,
+}: {
+  nicknames: string[];
+  setNicknames: (arr: string[]) => void;
+}) {
+  const [input, setInput] = useState("");
 
-  // Basic
-  const [firstName, setFirstName] = useState("");
-  const [addressMode, setAddressMode] = useState<"first" | "fun">("first");
-  const [pickedFun, setPickedFun] = useState<FunKey[]>([]);
+  function toggleNick(n: string) {
+    const v = n.trim();
+    if (!v) return;
+    const exists = nicknames.includes(v);
+    setNicknames(exists ? nicknames.filter((x) => x !== v) : [...nicknames, v]);
+  }
 
-  // DOB (segmented)
-  const now = new Date();
-  const [dobMonth, setDobMonth] = useState<number | "">("");
-  const [dobDay, setDobDay] = useState<number | "">("");
-  const [dobYear, setDobYear] = useState<number | "">(now.getFullYear());
+  function addFromInput() {
+    const parts = input
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (parts.length === 0) return;
+    const merged = Array.from(new Set([...nicknames, ...parts]));
+    setNicknames(merged);
+    setInput("");
+  }
 
-  // Optional
-  const [openMore, setOpenMore] = useState(false);
-  const [tz, setTz] = useState("");
-  const [startOfWeek, setStartOfWeek] = useState<"monday" | "sunday">("monday");
-  const [pronouns, setPronouns] = useState("");
-  const [reminderTime, setReminderTime] = useState("09:00");
-  const [theme, setTheme] = useState<"system" | "light" | "dark">("system");
-  const [reduceMotion, setReduceMotion] = useState(false);
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <div className="muted">Pick any you like, then add your own:</div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {PRESET_NICKS.map((n) => {
+          const on = nicknames.includes(n);
+          return (
+            <button
+              key={n}
+              type="button"
+              onClick={() => toggleNick(n)}
+              className="btn-soft"
+              style={{
+                borderRadius: 999,
+                background: on ? "#e0f2fe" : "",
+                border: on ? "1px solid #38bdf8" : "1px solid var(--border)",
+              }}
+              aria-pressed={on}
+            >
+              {n}
+            </button>
+          );
+        })}
+      </div>
 
-  // Important dates
-  const [dates, setDates] = useState<DateRow[]>([
-    { title: "", kind: "birthday", date: "", recur: "annually", person: "" },
-  ]);
+      <div
+        style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}
+      >
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Add more (comma-separated or one at a time)…"
+          style={{ flex: "1 1 220px", minWidth: 0 }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") addFromInput();
+          }}
+        />
+        <button type="button" className="btn-soft" onClick={addFromInput}>
+          Add
+        </button>
+      </div>
 
-  // PIN (optional)
-  const [pinEnabled, setPinEnabled] = useState(false);
-  const [pin1, setPin1] = useState("");
-  const [pin2, setPin2] = useState("");
+      {nicknames.length > 0 && (
+        <div className="muted">Selected: {nicknames.join(" · ")}</div>
+      )}
+    </div>
+  );
+}
 
+/** ---- MAIN PAGE ---- */
+export default function OnboardingScreen() {
+  const nav = useNavigate();
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const [userId, setUserId] = useState<string | null>(null);
+
+  // Basic identity (optional)
+  const [displayName, setDisplayName] = useState("");
+
+  // Nicknames + greeting mode
+  const [nicknames, setNicknames] = useState<string[]>([]);
+  const [greetMode, setGreetMode] = useState<"mixed" | "name_only" | "nickname_only">(
+    "mixed"
+  );
+
+  // Load session + any existing profile prefs (optional)
   useEffect(() => {
-    supabase.auth.getUser().then(() => {
-      setAuthLoaded(true);
-    });
-    try {
-      const guess = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      if (guess) setTz(guess);
-    } catch {
-      // ignore
-    }
+    let mounted = true;
+    (async () => {
+      try {
+        const { data: auth } = await supabase.auth.getUser();
+        const uid = auth.user?.id ?? null;
+        if (!mounted) return;
+        setUserId(uid);
+
+        if (uid) {
+          // Try to read existing profile (to prefill)
+          const { data: prof } = await supabase
+            .from("profiles")
+            .select("display_name, full_name, prefs")
+            .eq("id", uid)
+            .single();
+
+          const name =
+            (prof as any)?.display_name ||
+            (prof as any)?.full_name ||
+            auth.user?.user_metadata?.full_name ||
+            auth.user?.user_metadata?.name ||
+            (auth.user?.email ? auth.user.email.split("@")[0] : "") ||
+            "";
+          setDisplayName(name);
+
+          const existingNicks =
+            ((prof as any)?.prefs?.nicknames as string[] | undefined) || [];
+          const existingMode =
+            ((prof as any)?.prefs?.greet_mode as
+              | "mixed"
+              | "name_only"
+              | "nickname_only"
+              | undefined) || "mixed";
+          setNicknames(existingNicks);
+          setGreetMode(existingMode);
+        }
+      } catch (e: any) {
+        setErr(e.message || String(e));
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  const dobISO = useMemo(() => {
-    if (dobYear && dobMonth !== "" && dobDay !== "") {
-      const mm = String((dobMonth as number) + 1).padStart(2, "0");
-      const dd = String(dobDay as number).padStart(2, "0");
-      return `${dobYear}-${mm}-${dd}`;
-    }
-    return "";
-  }, [dobYear, dobMonth, dobDay]);
-
-  const displayNamePreview = addressMode === "first"
-    ? (firstName || "…")
-    : (pickedFun.length
-        ? FUN_TITLES.find(t => t.key === pickedFun[0])?.label || "…"
-        : "…");
-
-  function toggleFun(key: FunKey) {
-    setPickedFun(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
-  }
-
-  function addDateRow() {
-    setDates((d) => [...d, { title: "", kind: "custom", date: "", recur: "annually", person: "" }]);
-  }
-  function updateDateRow(i: number, patch: Partial<DateRow>) {
-    setDates((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
-  }
-  function removeDateRow(i: number) {
-    setDates((rows) => rows.filter((_, idx) => idx !== i));
-  }
-
-  function pinLooksValid(pin: string) {
-    return /^\d{4}$/.test(pin);
-  }
-
-  async function saveAll(skip: boolean = false) {
+  async function finishOnboarding() {
+    if (!userId) return;
     setSaving(true);
     setErr(null);
     try {
-      // Ensure we have a fresh user in case auth state changed
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth.user?.id ?? null;
-      if (!uid) throw new Error("You’re not signed in yet. Please wait a moment and try again.");
+      // Save locally as a fallback (so greeting works even if DB update is blocked)
+      saveLocalNicknames(nicknames);
 
-      // Compute display preference
-      const display_name = addressMode === "first" ? (firstName.trim() || null) : null;
+      // Merge into profiles.prefs JSON if present, keep other prefs keys intact
+      const { data: profRead } = await supabase
+        .from("profiles")
+        .select("prefs")
+        .eq("id", userId)
+        .single();
 
-      // Profile payload — includes onboarded_at timestamp used by App.tsx
-      const profilePayload: any = {
-        id: uid,
-        first_name: firstName.trim() || null,
-        display_name,                   // shown name if using first name
-        title_choice: addressMode,      // "first" or "fun"
-        greeting_titles: addressMode === "fun" ? pickedFun : [], // JSONB array
-        dob: dobISO || null,
-        pronouns: pronouns.trim() || null,
-        tz,
-        start_of_week: startOfWeek,
-        reminder_time: reminderTime,
-        theme,
-        reduce_motion: reduceMotion,
-        onboarded_at: new Date().toISOString(), // <-- what the gate reads
+      const nextPrefs: any = {
+        ...(profRead?.prefs || {}),
+        nicknames,
+        greet_mode: greetMode,
       };
 
-      // Add PIN fields
-      if (pinEnabled) {
-        if (!pinLooksValid(pin1) || pin1 !== pin2) {
-          throw new Error("Please enter and confirm a 4-digit PIN.");
-        }
-        const hash = await sha256Hex(`${uid}:${pin1}`);
-        profilePayload.pin_enabled = true;
-        profilePayload.pin_hash = hash;
-        profilePayload.pin_updated_at = new Date().toISOString();
-      } else {
-        profilePayload.pin_enabled = false;
-        profilePayload.pin_hash = null;
-        profilePayload.pin_updated_at = new Date().toISOString();
-      }
+      // Upsert profile with onboarded flag + optional display_name
+      const payload: any = {
+        id: userId,
+        onboarded_at: new Date().toISOString(),
+        prefs: nextPrefs,
+      };
+      if (displayName.trim()) payload.display_name = displayName.trim();
 
-      // Upsert profile
-      const { error: pe } = await supabase.from("profiles").upsert(profilePayload);
-      if (pe) throw pe;
+      const { error: upErr } = await supabase
+        .from("profiles")
+        .upsert(payload, { onConflict: "id" });
+      if (upErr) throw upErr;
 
-      if (!skip) {
-        // insert important dates (ignore blank rows)
-        const rows = dates
-          .filter((r) => r.title.trim() && r.date)
-          .map((r) => ({
-            user_id: uid,
-            title: r.title.trim(),
-            kind: r.kind,
-            date: r.date,
-            recur: r.recur,
-            person: (r.person || "") || null,
-          }));
-        if (rows.length) {
-          const { error: de } = await supabase.from("important_dates").insert(rows as any);
-          if (de) throw de;
-        }
-      }
+      // Local flag so the app gate lets you straight in even if cache is stale
+      localStorage.setItem(LS_ONBOARDED, "1");
 
-      // mark onboarding complete locally (so App can proceed immediately)
-      localStorage.setItem(ONBOARD_KEY, "1");
-
-      if (onDone) onDone();
-      else setTimeout(() => window.location.replace("/"), 0);
+      // Go to Today
+      nav("/today", { replace: true });
     } catch (e: any) {
-      setErr(e.message || String(e));
+      console.error(e);
+      setErr(e.message || "Failed to save onboarding");
     } finally {
       setSaving(false);
     }
   }
 
-  // Years list: 120 back from current year
-  const years = useMemo(() => {
-    const y = now.getFullYear();
-    return Array.from({ length: 120 }, (_, i) => y - i);
-  }, [now]);
+  const canSave = useMemo(() => {
+    // You can decide to require at least a name or at least 1 nickname; for now, allow save anytime
+    return true;
+  }, [displayName, nicknames, greetMode]);
 
-  const dim = (dobMonth === "" || dobYear === "") ? 31 : daysInMonth(Number(dobYear), Number(dobMonth));
+  if (loading) {
+    return (
+      <div className="card" style={{ padding: 16 }}>
+        <div className="muted">Loading…</div>
+      </div>
+    );
+  }
 
   return (
-    <div className="container" style={{ maxWidth: 740, margin: "0 auto" }}>
+    <div className="page-onboarding" style={{ display: "grid", gap: 12 }}>
       <div className="card" style={{ display: "grid", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center" }}>
-          <h1 style={{ margin: 0 }}>Welcome 👋</h1>
-          <a href="/api/auth/signout" style={{ marginLeft: "auto" }}>Sign out</a>
-        </div>
-        <div className="muted">A few details and you’re in. You can change these anytime in Settings.</div>
+        <h1 style={{ margin: 0 }}>Welcome to BYB</h1>
 
-        {/* Basic card */}
-        <div className="card" style={{ display: "grid", gap: 12 }}>
-          <label style={{ display: "grid", gap: 6 }}>
-            <div className="section-title">First name</div>
-            <input
-              value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-              placeholder="e.g., Harriet"
-            />
-          </label>
-
-          <div style={{ display: "grid", gap: 8 }}>
-            <div className="section-title">How should we address you?</div>
-            <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-              <label style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-                <input
-                  type="radio"
-                  checked={addressMode === "first"}
-                  onChange={() => setAddressMode("first")}
-                />
-                First name
-              </label>
-              <label style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-                <input
-                  type="radio"
-                  checked={addressMode === "fun"}
-                  onChange={() => setAddressMode("fun")}
-                />
-                Pick from fun titles
-              </label>
-            </div>
-
-            {addressMode === "fun" && (
-              <div className="card" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {FUN_TITLES.map(t => {
-                  const active = pickedFun.includes(t.key);
-                  return (
-                    <button
-                      key={t.key}
-                      type="button"
-                      onClick={() => toggleFun(t.key)}
-                      aria-pressed={active}
-                      className="btn-soft"
-                      style={{
-                        borderRadius: 999,
-                        border: "1px solid",
-                        borderColor: active ? "hsl(var(--pastel-hsl))" : "#e5e7eb",
-                        background: active ? "hsl(var(--pastel-hsl) / .45)" : "#fff",
-                      }}
-                    >
-                      {t.label}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            <div className="muted">
-              We’ll greet you as: <b>{displayNamePreview}</b>
-              {addressMode === "fun" && pickedFun.length > 1 ? " (we’ll pick one at random)" : ""}
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gap: 6 }}>
-            <div className="section-title">Date of birth</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <select
-                value={dobMonth === "" ? "" : String(dobMonth)}
-                onChange={(e) => setDobMonth(e.target.value === "" ? "" : Number(e.target.value))}
-                style={{ minWidth: 140 }}
-              >
-                <option value="">Month</option>
-                {MONTHS.map((m, i) => (
-                  <option key={m} value={i}>{m}</option>
-                ))}
-              </select>
-              <select
-                value={dobDay === "" ? "" : String(dobDay)}
-                onChange={(e) => setDobDay(e.target.value === "" ? "" : Number(e.target.value))}
-                style={{ minWidth: 100 }}
-              >
-                <option value="">Day</option>
-                {Array.from({ length: dim }, (_, i) => i + 1).map(d => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
-              <select
-                value={String(dobYear)}
-                onChange={(e) => setDobYear(Number(e.target.value))}
-                style={{ minWidth: 120 }}
-              >
-                {years.map(y => <option key={y} value={y}>{y}</option>)}
-              </select>
-            </div>
-            {dobISO && <div className="muted">Saved as: {dobISO}</div>}
+        {/* Identity */}
+        <div className="card card--wash" style={{ display: "grid", gap: 10 }}>
+          <div className="section-title">Your name (optional)</div>
+          <input
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="What should we call you?"
+          />
+          <div className="muted">
+            We’ll mix this with your chosen nicknames (you can change it later).
           </div>
         </div>
 
-        {/* More options */}
-        <button
-          className="btn-soft"
-          onClick={() => setOpenMore(o => !o)}
-          aria-expanded={openMore}
-          style={{ borderRadius: 8, alignSelf: "start" }}
-        >
-          {openMore ? "Hide options" : "More options"}
-        </button>
-
-        {openMore && (
-          <div className="card" style={{ display: "grid", gap: 14 }}>
-            {/* PIN */}
-            <div className="card" style={{ display: "grid", gap: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <h3 style={{ margin: 0, fontSize: 16 }}>4-digit PIN (optional)</h3>
-                <label style={{ marginLeft: "auto", display: "inline-flex", gap: 6, alignItems: "center" }}>
-                  <input type="checkbox" checked={pinEnabled} onChange={(e) => setPinEnabled(e.target.checked)} />
-                  Enable PIN on app open
-                </label>
-              </div>
-              {pinEnabled && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <input
-                    inputMode="numeric"
-                    maxLength={4}
-                    pattern="\\d{4}"
-                    placeholder="Enter PIN"
-                    value={pin1}
-                    onChange={(e) => setPin1(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                    style={{ width: 140 }}
-                  />
-                  <input
-                    inputMode="numeric"
-                    maxLength={4}
-                    pattern="\\d{4}"
-                    placeholder="Confirm PIN"
-                    value={pin2}
-                    onChange={(e) => setPin2(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                    style={{ width: 160 }}
-                  />
-                </div>
-              )}
-              <div className="muted">
-                If you forget your PIN, tap “Forgot PIN?” on the lock screen to sign out and sign back in—then set a new PIN.
-              </div>
-            </div>
-
-            {/* Important dates */}
-            <div style={{ display: "grid", gap: 8 }}>
-              <div className="section-title">Important dates (auto-add to Calendar)</div>
-              <div className="muted">Birthdays, anniversaries, or anything to remember annually.</div>
-
-              <div style={{ display: "grid", gap: 10 }}>
-                {dates.map((r, i) => (
-                  <div key={i} className="card" style={{ display: "grid", gap: 8, padding: 12, border: "1px dashed var(--border)" }}>
-                    <label style={{ display: "grid", gap: 6 }}>
-                      <div className="section-title">Title</div>
-                      <input
-                        value={r.title}
-                        onChange={(e) => updateDateRow(i, { title: e.target.value })}
-                        placeholder="e.g., Mum’s birthday"
-                      />
-                    </label>
-                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        Type
-                        <select
-                          value={r.kind}
-                          onChange={(e) => updateDateRow(i, { kind: e.target.value as DateRow["kind"] })}
-                        >
-                          <option value="birthday">Birthday</option>
-                          <option value="anniversary">Anniversary</option>
-                          <option value="custom">Custom</option>
-                        </select>
-                      </label>
-                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        Date
-                        <input
-                          type="date"
-                          value={r.date}
-                          onChange={(e) => updateDateRow(i, { date: e.target.value })}
-                        />
-                      </label>
-                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        Person (optional)
-                        <input
-                          value={r.person || ""}
-                          onChange={(e) => updateDateRow(i, { person: e.target.value })}
-                          placeholder="e.g., Mum"
-                          style={{ width: 160 }}
-                        />
-                      </label>
-                      <span className="badge" title="Recur">Annually</span>
-                      <button className="btn-ghost" onClick={() => removeDateRow(i)} title="Remove">Remove</button>
-                    </div>
-                  </div>
-                ))}
-                <button onClick={addDateRow}>+ Add another date</button>
-              </div>
-            </div>
-
-            {/* Preferences */}
-            <div style={{ display: "grid", gap: 10 }}>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  Time zone
-                  <input value={tz} onChange={(e) => setTz(e.target.value)} style={{ width: 220 }} />
-                </label>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  Start of week
-                  <select
-                    value={startOfWeek}
-                    onChange={(e) => setStartOfWeek(e.target.value as "monday" | "sunday")}
-                  >
-                    <option value="monday">Monday</option>
-                    <option value="sunday">Sunday</option>
-                  </select>
-                </label>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  Daily reminder
-                  <input
-                    type="time"
-                    value={reminderTime}
-                    onChange={(e) => setReminderTime(e.target.value)}
-                  />
-                </label>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  Theme
-                  <select value={theme} onChange={(e) => setTheme(e.target.value as any)}>
-                    <option value="system">System</option>
-                    <option value="light">Light</option>
-                    <option value="dark">Dark</option>
-                  </select>
-                </label>
-              </div>
-
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  Pronouns (optional)
-                  <input
-                    value={pronouns}
-                    onChange={(e) => setPronouns(e.target.value)}
-                    placeholder="she/her · he/him · they/them"
-                    style={{ width: 220 }}
-                  />
-                </label>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <input
-                    type="checkbox"
-                    checked={reduceMotion}
-                    onChange={(e) => setReduceMotion(e.target.checked)}
-                  />
-                  Reduce motion
-                </label>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Actions */}
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-          <button onClick={() => saveAll(true)} disabled={saving || !authLoaded}>Skip for now</button>
-          <button
-            className="btn-primary"
-            onClick={() => saveAll(false)}
-            disabled={saving || !authLoaded}
-            style={{ borderRadius: 10 }}
-            title="Save profile and optional dates"
+        {/* Nicknames */}
+        <div className="card card--wash" style={{ display: "grid", gap: 10 }}>
+          <div className="section-title">Nicknames</div>
+          <NicknamesPicker nicknames={nicknames} setNicknames={setNicknames} />
+          <div
+            style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}
           >
-            {saving ? "Saving…" : "Finish"}
-          </button>
+            <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+              <input
+                type="radio"
+                checked={greetMode === "mixed"}
+                onChange={() => setGreetMode("mixed")}
+              />
+              Mixed (your name or a nickname)
+            </label>
+            <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+              <input
+                type="radio"
+                checked={greetMode === "name_only"}
+                onChange={() => setGreetMode("name_only")}
+              />
+              Your name only
+            </label>
+            <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+              <input
+                type="radio"
+                checked={greetMode === "nickname_only"}
+                onChange={() => setGreetMode("nickname_only")}
+              />
+              Nicknames only
+            </label>
+          </div>
         </div>
 
-        {!authLoaded && (
-          <div className="muted">Connecting… please wait a moment before finishing.</div>
-        )}
         {err && <div style={{ color: "red" }}>{err}</div>}
 
-        <div className="muted" style={{ textAlign: "center" }}>
-          You can change your greeting titles or PIN anytime in Settings → Profile.
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button
+            className="btn-primary"
+            onClick={finishOnboarding}
+            disabled={!canSave || saving || !userId}
+            style={{ borderRadius: 8 }}
+          >
+            {saving ? "Saving…" : "Finish onboarding"}
+          </button>
         </div>
       </div>
     </div>
