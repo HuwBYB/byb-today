@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from "react";
+I used it yesterday and have a few things that I think would improve it: 1. When doing a weights exercise the add exercise button should be on every new one you have opened so you can add it simply without scrolling up. 2. When you click complete exercise you should have an option to exercise before it saves. This will make it easier to scroll through previous workouts. 3. When you open a template you aren't able to cancel that exercise and you should be able to: Here is the page's current code, can you give me a full version that includes these add ons: import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* ---------- Types ---------- */
@@ -1311,4 +1311,4 @@ function QuickAddCard({
       </div>
     </div>
   );
-}
+} 
