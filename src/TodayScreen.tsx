@@ -2,51 +2,6 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-/** ========= Added greeting helpers (inline so you don't need extra files) ========= */
-const SS_GREETING_PICK = "byb:greet:pick"; // keep same pick for a whole app session
-const LS_NICKS = "byb:nicknames:v1";
-
-function getLocalNicknames(): string[] {
-  try {
-    const raw = localStorage.getItem(LS_NICKS);
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    if (Array.isArray(arr)) {
-      return arr.map((s) => String(s)).filter((s) => s.trim().length > 0);
-    }
-  } catch {}
-  return [];
-}
-
-function pickGreetingName(options: {
-  userName?: string | null;
-  nicknames: string[];
-  mode?: "mixed" | "name_only" | "nickname_only";
-}): string {
-  const { userName, nicknames, mode = "mixed" } = options;
-
-  const existing = sessionStorage.getItem(SS_GREETING_PICK);
-  if (existing) return existing;
-
-  const validNicks = (nicknames || []).filter((s) => s && s.trim().length > 0);
-  let choice = userName || "Friend";
-
-  if (mode === "name_only") {
-    // use name only
-  } else if (mode === "nickname_only" && validNicks.length > 0) {
-    choice = validNicks[Math.floor(Math.random() * validNicks.length)];
-  } else if (mode === "mixed") {
-    const useNick = validNicks.length > 0 && Math.random() < 0.5;
-    choice = useNick
-      ? validNicks[Math.floor(Math.random() * validNicks.length)]
-      : (userName || validNicks[Math.floor(Math.random() * validNicks.length)]);
-  }
-
-  sessionStorage.setItem(SS_GREETING_PICK, choice);
-  return choice;
-}
-/** ============================================================================= */
-
 type Task = {
   id: number;
   user_id: string;
@@ -134,6 +89,24 @@ function makeSeriesKey(repeat: Repeat) {
   return repeat ? `${REPEAT_PREFIX}${repeat}` : "manual";
 }
 
+/* ===== display-name helper (pulls from onboarding localStorage) ===== */
+const LS_NAME = "byb:display_name";
+const LS_POOL = "byb:display_pool";
+function chooseGreetingName(): string {
+  try {
+    const rawName = (localStorage.getItem(LS_NAME) || "").trim();
+    const pool = JSON.parse(localStorage.getItem(LS_POOL) || "[]") as string[];
+    const cleanPool = Array.isArray(pool) ? pool.filter(Boolean) : [];
+    // If there are nicknames, pick one randomly; otherwise fall back to your name.
+    if (cleanPool.length > 0) {
+      return cleanPool[Math.floor(Math.random() * cleanPool.length)];
+    }
+    return rawName || "";
+  } catch {
+    return "";
+  }
+}
+
 /* ===== summary types ===== */
 type Summary = {
   doneToday: number;
@@ -166,7 +139,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [quickTop, setQuickTop] = useState(false);
   const [savingQuick, setSavingQuick] = useState(false);
 
-  // Greeting
+  // Greeting (stable per page load)
   const [greetName, setGreetName] = useState<string>("");
 
   // Lightweight daily summary
@@ -201,53 +174,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
         return;
       }
       setUserId(data.user?.id ?? null);
-
-      // Load greeting once we know who the user is
-      (async () => {
-        const uid = data.user?.id ?? null;
-        if (!uid) {
-          setGreetName("");
-          return;
-        }
-        // Try to read profile prefs for nicknames + mode
-        let dbNicks: string[] = [];
-        let mode: "mixed" | "name_only" | "nickname_only" = "mixed";
-        let name: string | null =
-          data.user?.user_metadata?.full_name ||
-          data.user?.user_metadata?.name ||
-          (data.user?.email ? data.user.email.split("@")[0] : null);
-
-        try {
-          const { data: prof } = await supabase
-            .from("profiles")
-            .select("prefs, display_name, full_name")
-            .eq("id", uid)
-            .single();
-
-          if (prof) {
-            const dn = (prof as any).display_name || (prof as any).full_name || null;
-            if (dn) name = dn;
-            const prefs = (prof as any).prefs || {};
-            if (Array.isArray(prefs.nicknames)) dbNicks = prefs.nicknames;
-            if (prefs.greet_mode === "name_only" || prefs.greet_mode === "nickname_only") {
-              mode = prefs.greet_mode;
-            }
-          }
-        } catch {
-          // ignore, fall back to local
-        }
-
-        const localNicks = getLocalNicknames();
-        const nickMerged = Array.from(new Set([...(dbNicks || []), ...localNicks]));
-
-        const chosen = pickGreetingName({
-          userName: name,
-          nicknames: nickMerged,
-          mode
-        });
-        setGreetName(chosen);
-      })();
     });
+  }, []);
+
+  useEffect(() => {
+    // pick a greeting name once on mount
+    setGreetName(chooseGreetingName());
   }, []);
 
   // keep clock fresh
@@ -664,25 +596,22 @@ export default function TodayScreen({ externalDateISO }: Props) {
           background: "#fff"
         }}
       >
-        {/* Row 1: Clock + summary badges */}
+        {/* Row 1: Clock + date */}
         <div
           style={{
             display: "flex",
             gap: 10,
-            alignItems: "center",
+            alignItems: "baseline",
             justifyContent: "space-between",
             flexWrap: "wrap"
           }}
         >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
             <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: 1 }}>{timeStr}</div>
             <div className="muted">{dateISO}</div>
-            {greetName && (
-              <div className="muted" style={{ marginLeft: 10 }}>
-                Welcome back, <b>{greetName}</b> 👋
-              </div>
-            )}
           </div>
+
+          {/* Summary badges (stay right on wide screens, wrap on small) */}
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             <span
               className="badge"
@@ -707,6 +636,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
             </span>
           </div>
         </div>
+
+        {/* Row 1.5: Greeting on its own line (mobile-friendly) */}
+        {greetName && (
+          <div style={{ fontWeight: 600 }}>
+            Welcome back, {greetName}
+          </div>
+        )}
 
         {/* Row 2: Quick capture */}
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
