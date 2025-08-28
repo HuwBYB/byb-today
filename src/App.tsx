@@ -25,9 +25,8 @@ type ProfileRow = {
   onboarding_done: boolean | null;
 };
 
-/* LocalStorage fallback keys (keep in sync with OnboardingScreen) */
+/* LocalStorage fallback */
 const LS_DONE = "byb:onboarding_done";
-
 
 /* Tabs */
 type Tab =
@@ -84,7 +83,6 @@ export default function App() {
         .limit(1)
         .single();
       if (error) {
-        // No profiles table/row? Fall back to local
         setProfile(null);
       } else {
         setProfile(data as ProfileRow);
@@ -97,28 +95,15 @@ export default function App() {
   }
 
   function onboardingLocalDone(): boolean {
-    try {
-      return localStorage.getItem(LS_DONE) === "1";
-    } catch {
-      return false;
-    }
+    try { return localStorage.getItem(LS_DONE) === "1"; } catch { return false; }
   }
-
-  function profileSaysDone(p: ProfileRow | null): boolean {
-    return !!p?.onboarding_done;
-  }
-
+  function profileSaysDone(p: ProfileRow | null): boolean { return !!p?.onboarding_done; }
   function showOnboarding(): boolean {
-    // gate: if profile says done, fine
     if (profileSaysDone(profile)) return false;
-    // if profile missing or not done, but local says done, proceed (avoid getting stuck)
     if (onboardingLocalDone()) return false;
-    // otherwise, still need onboarding
     return true;
   }
-
   async function handleOnboardingDone() {
-    // If user is signed in, refresh their profile (so onboarding_done = true shows up)
     if (userId) await loadProfile(userId);
   }
 
@@ -144,37 +129,25 @@ export default function App() {
   /* ----- render one tab ----- */
   function renderTab() {
     switch (tab) {
-      case "today":
-        return <TodayScreen externalDateISO={externalDateISO} />;
-      case "calendar":
-        return <CalendarScreen />;
-      case "goals":
-        return <GoalsScreen />;
-      case "vision":
-        return <VisionBoardScreen />;
-      case "gratitude":
-        return <GratitudeScreen />;
-      case "exercise":
-        return <ExerciseDiaryScreen />;
-      case "wins":
-        return <WinsScreen />;
-      case "alfred":
-        return <AlfredScreen />;
-      case "confidence":
-        return <ConfidenceScreen />;
-      case "notes":
-        return <NotesScreen />;
-      case "focus":
-        return <FocusAlfredScreen />;
-      default:
-        return <TodayScreen externalDateISO={externalDateISO} />;
+      case "today":       return <TodayScreen externalDateISO={externalDateISO} />;
+      case "calendar":    return <CalendarScreen />;
+      case "goals":       return <GoalsScreen />;
+      case "vision":      return <VisionBoardScreen />;
+      case "gratitude":   return <GratitudeScreen />;
+      case "exercise":    return <ExerciseDiaryScreen />;
+      case "wins":        return <WinsScreen />;
+      case "alfred":      return <AlfredScreen />;
+      case "confidence":  return <ConfidenceScreen />;
+      case "notes":       return <NotesScreen />;
+      case "focus":       return <FocusAlfredScreen />;
+      default:            return <TodayScreen externalDateISO={externalDateISO} />;
     }
   }
 
   /* ----- app shell ----- */
   return (
     <AuthGate>
-      <div className="app" style={{ display: "grid", gap: 12 }}>
+      <div className="app-shell" style={{ display: "grid", gap: 12 }}>
         {/* Onboarding gate */}
         {profileLoading ? (
           <div className="card">Loading profile…</div>
@@ -182,7 +155,7 @@ export default function App() {
           <OnboardingScreen onDone={handleOnboardingDone} />
         ) : (
           <>
-            {/* Top bar */}
+            {/* Top header */}
             <div
               className="card"
               style={{
@@ -194,10 +167,12 @@ export default function App() {
               }}
             >
               <div style={{ fontWeight: 800 }}>BYB</div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "nowrap" }}>
                 <input
                   type="date"
+                  value={externalDateISO ?? ""}
                   onChange={(e) => setExternalDateISO(e.target.value || undefined)}
+                  style={{ maxWidth: 220 }}
                 />
                 <button onClick={() => setExternalDateISO(undefined)}>Today</button>
               </div>
@@ -206,52 +181,26 @@ export default function App() {
             {/* Active tab */}
             <div>{renderTab()}</div>
 
-            {/* Tabs */}
-            <div
-              className="card"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(5, 1fr)",
-                gap: 8,
-                position: "sticky",
-                bottom: 0,
-                background: "#fff",
-                zIndex: 10,
-              }}
-            >
-              {tabs.map((t) => (
-                <button
-                  key={t.key}
-                  className="tab-btn"
-                  data-active={tab === (t.key as Tab)}
-                  onClick={() => setTab(t.key as Tab)}
-                  title={t.label}
-                >
-                  <span className="icon" aria-hidden>
-                    {t.icon}
-                  </span>
-                  <span className="label">{t.label}</span>
-                </button>
-              ))}
-            </div>
+            {/* Bottom shortcuts — single scrollable row */}
+            <nav className="tabbar" aria-label="Primary">
+              <div className="tabbar-inner">
+                {tabs.map((t) => (
+                  <button
+                    key={t.key}
+                    className="tab-btn"
+                    data-active={tab === (t.key as Tab)}
+                    onClick={() => setTab(t.key as Tab)}
+                    title={t.label}
+                  >
+                    <span className="icon" aria-hidden>{t.icon}</span>
+                    <span className="label">{t.label}</span>
+                  </button>
+                ))}
+              </div>
+            </nav>
           </>
         )}
       </div>
-      <style>{`
-        .tab-btn{
-          display: flex; flex-direction: column; align-items: center; gap: 4px;
-          border: 1px solid var(--border);
-          background: #fff; color: var(--text);
-          border-radius: 12px; padding: 8px 10px; min-width: 72px;
-        }
-        .tab-btn .icon{ font-size: 18px; line-height: 1; }
-        .tab-btn .label{ font-size: 12px; }
-        .tab-btn[data-active="true"]{
-          background: hsl(var(--pastel-hsl) / .60);
-          border-color: hsl(var(--pastel-hsl) / .75);
-          color: var(--primary);
-        }
-      `}</style>
     </AuthGate>
   );
 }
