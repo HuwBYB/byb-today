@@ -54,7 +54,6 @@ button {
   padding:8px 12px; border-radius:10px;
   cursor:pointer;
   min-width: 0;
-  white-space: nowrap;            /* <== stops letter-by-letter wrapping */
 }
 button:disabled { opacity:.6; cursor:not-allowed; }
 
@@ -89,7 +88,7 @@ button:disabled { opacity:.6; cursor:not-allowed; }
   overflow-x: hidden; /* belt-and-braces */
 }
 
-/* Utility rows */
+/* Utility: flexible rows */
 .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .row-nowrap { display:flex; gap:8px; align-items:center; flex-wrap:nowrap; min-width:0; }
 
@@ -97,6 +96,36 @@ button:disabled { opacity:.6; cursor:not-allowed; }
 .only-desktop { display:none; }
 @media (min-width: 900px){
   .only-desktop { display:block; }
+}
+
+/* ===== Header layout fix (BYB left, date+Today right; stacks on very small screens) ===== */
+.header{
+  display: grid;
+  grid-template-columns: 1fr auto;   /* BYB | controls */
+  align-items: center;
+  gap: 8px;
+}
+.header .brand{ font-weight: 800; }
+.header-actions{
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+.header-actions input{
+  min-width: 0;
+  width: 220px;
+  max-width: 100%;
+  flex: 1 1 180px;
+}
+.header-actions button{
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+@media (max-width: 480px){
+  .header{ grid-template-columns: 1fr; }
+  .header-actions{ width: 100%; }
+  .header-actions input{ flex: 1 1 100%; }
 }
 
 /* ===== Sticky bottom tab bar (mobile-first) ===== */
@@ -109,7 +138,7 @@ button:disabled { opacity:.6; cursor:not-allowed; }
   z-index: 9999; /* always on top */
 }
 
-/* one horizontal, scrollable row — never wraps */
+/* Horizontal, scrollable row — never wraps */
 .tabbar-inner{
   height: var(--tabbar-height);
   display:flex; align-items:center; gap:6px;
@@ -121,7 +150,6 @@ button:disabled { opacity:.6; cursor:not-allowed; }
 }
 .tabbar-inner::-webkit-scrollbar{ display:none; }
 
-/* tab buttons sized for scroll */
 .tab-btn{
   display:grid; gap:2px; place-items:center;
   flex: 0 0 auto;
@@ -135,9 +163,8 @@ button:disabled { opacity:.6; cursor:not-allowed; }
   font-size:11px; color:#334155;
   text-overflow:ellipsis; overflow:hidden; max-width: 82px;
 }
-
 .tab-btn[data-active="true"]{
-  background:#eef2ff;                  /* soft indigo bubble */
+  background:#eef2ff;
   border-color:#c7d2fe;
 }
 .tab-btn[data-active="true"] .label{ color:#1f2937; font-weight:700; }
@@ -167,7 +194,11 @@ input[type="radio"] {
   [style*="grid-template-columns: 300px 1fr"] {
     grid-template-columns: 1fr !important;
   }
+
+  /* Make sure inputs don’t push width */
   input, select, textarea { max-width: 100%; }
+
+  /* Give cards a little extra bottom padding so the tab bar never covers actions */
   .app-shell { padding-bottom: calc(var(--tabbar-height) + var(--safe-bottom) + 16px); }
 }
 
@@ -177,7 +208,9 @@ input[type="radio"] {
     grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
     width: 100% !important;
   }
-  [style*="grid-template-columns: repeat(7, 1fr)"] > * { min-width: 0 !important; }
+  [style*="grid-template-columns: repeat(7, 1fr)"] > * {
+    min-width: 0 !important;
+  }
 }
 
 /* Reusable two-col layout that stacks on mobile */
@@ -187,6 +220,7 @@ input[type="radio"] {
 }
 .sidebar-sticky { position: sticky; top: 12px; align-self: start; }
 
+/* Make the chat/long panes comfy on tall phones */
 @media (max-width: 899px){
   .two-col main.card { min-height: 60vh; }
 }
