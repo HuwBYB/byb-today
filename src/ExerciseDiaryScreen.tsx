@@ -1,4 +1,4 @@
-I used it yesterday and have a few things that I think would improve it: 1. When doing a weights exercise the add exercise button should be on every new one you have opened so you can add it simply without scrolling up. 2. When you click complete exercise you should have an option to exercise before it saves. This will make it easier to scroll through previous workouts. 3. When you open a template you aren't able to cancel that exercise and you should be able to: Here is the page's current code, can you give me a full version that includes these add ons: import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* ---------- Types ---------- */
@@ -102,7 +102,7 @@ function Modal({
                  boxShadow: "0 10px 30px rgba(0,0,0,0.2)", padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
           <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
-          <button ref={closeRef} onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>✕</button>
+          <button ref={closeRef} onClick={onClose} aria-label="Close" title="Close" style={{ borderRadius: 8 }}>✕</button>
         </div>
         <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
       </div>
@@ -165,6 +165,9 @@ export default function ExerciseDiaryScreen() {
   // collapsed
   const [finished, setFinished] = useState(false);
 
+  // NEW: preview-collapse (don’t mark finished; helpful for scrolling)
+  const [previewCollapsed, setPreviewCollapsed] = useState(false);
+
   // backup
   const [offerBackup, setOfferBackup] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
@@ -175,6 +178,12 @@ export default function ExerciseDiaryScreen() {
 
   // NEW: when clicking from "Recent", remember the exact session to open
   const desiredSessionIdRef = useRef<number | null>(null);
+
+  // NEW: confirm-complete modal
+  const [confirmCompleteOpen, setConfirmCompleteOpen] = useState(false);
+
+  // NEW: undo last template insert
+  const [undoBanner, setUndoBanner] = useState<{ itemIds: number[] } | null>(null);
 
   /* === Debounced saver for workout_sets === */
   const DEBOUNCE_MS = 300;
@@ -249,6 +258,8 @@ export default function ExerciseDiaryScreen() {
     } else {
       setFinished(false);
     }
+    // Clear preview when session changes/date changes
+    setPreviewCollapsed(false);
   }, [session?.id, dateISO]);
 
   // scroll Quick add into view right after creating a session
@@ -361,6 +372,7 @@ export default function ExerciseDiaryScreen() {
     if (!session) return;
     localStorage.setItem(FIN_KEY(session.id, dateISO), "0");
     setFinished(false);
+    setPreviewCollapsed(false);
   }
 
   function switchSessionById(id: number) {
@@ -435,9 +447,20 @@ export default function ExerciseDiaryScreen() {
     }
   }
 
-  async function completeSession() {
+  async function completeSessionNow() {
     markLocalFinished();
     await ensureWinForSession();
+    setConfirmCompleteOpen(false);
+    setPreviewCollapsed(false);
+  }
+
+  function openConfirmComplete() {
+    setConfirmCompleteOpen(true);
+  }
+
+  function previewCollapse() {
+    setPreviewCollapsed(true);
+    setConfirmCompleteOpen(false);
   }
 
   async function saveSessionNotes(notes: string) {
@@ -477,9 +500,15 @@ export default function ExerciseDiaryScreen() {
   }
 
   async function deleteItem(itemId: number) {
-    const { error } = await supabase.from("workout_items").delete().eq("id", itemId);
-    if (error) { setErr(error.message); return; }
-    if (session) await loadItems(session.id);
+    // Delete sets first to be safe, then the item
+    try {
+      await supabase.from("workout_sets").delete().eq("item_id", itemId);
+      const { error } = await supabase.from("workout_items").delete().eq("id", itemId);
+      if (error) { setErr(error.message); return; }
+      if (session) await loadItems(session.id);
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    }
   }
 
   /* ----- Sets ----- */
@@ -645,7 +674,7 @@ export default function ExerciseDiaryScreen() {
     }
   }
 
-  /* ----- Template LOAD (new) ----- */
+  /* ----- Template LOAD (with Undo) ----- */
   const [loadTplOpen, setLoadTplOpen] = useState(false);
   const [loadTplLoading, setLoadTplLoading] = useState(false);
   const [tplList, setTplList] = useState<TemplateRow[]>([]);
@@ -684,6 +713,7 @@ export default function ExerciseDiaryScreen() {
     if (!userId || !session) return;
 
     let nextOrder = items.length ? Math.max(...items.map(i => i.order_index)) + 1 : 0;
+    const createdItemIds: number[] = [];
 
     try {
       for (const it of tpl.data.items) {
@@ -702,6 +732,7 @@ export default function ExerciseDiaryScreen() {
         if (iErr) throw iErr;
 
         const itemId = (newItem as Item).id;
+        createdItemIds.push(itemId);
 
         const count = Math.max(
           it.sets || 0,
@@ -725,6 +756,20 @@ export default function ExerciseDiaryScreen() {
 
       await loadItems(session.id);
       setLoadTplOpen(false);
+      setUndoBanner({ itemIds: createdItemIds });
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    }
+  }
+
+  async function undoLastTemplateInsert() {
+    if (!undoBanner || !userId) return;
+    try {
+      // delete sets first, then items
+      await supabase.from("workout_sets").delete().in("item_id", undoBanner.itemIds);
+      await supabase.from("workout_items").delete().in("id", undoBanner.itemIds);
+      if (session) await loadItems(session.id);
+      setUndoBanner(null);
     } catch (e: any) {
       setErr(e.message || String(e));
     }
@@ -886,6 +931,17 @@ export default function ExerciseDiaryScreen() {
         <h1 style={{ margin: 0 }}>Exercise Diary</h1>
       </div>
 
+      {/* Optional Undo banner for last template insert */}
+      {undoBanner && (
+        <div className="card card--wash" style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
+          <div><b>Template inserted.</b> You can undo if this was accidental.</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn-soft" onClick={undoLastTemplateInsert}>Undo</button>
+            <button className="btn-soft" onClick={() => setUndoBanner(null)}>Dismiss</button>
+          </div>
+        </div>
+      )}
+
       {/* Main layout */}
       <div className="container">
         <div className="exercise-layout">
@@ -915,13 +971,13 @@ export default function ExerciseDiaryScreen() {
                     )}
 
                     {/* Show Cancel when the session is empty and not finished */}
-                    {!finished && items.length === 0 && (
+                    {!finished && !previewCollapsed && items.length === 0 && (
                       <button className="btn-soft" onClick={cancelCurrentSession} title="Delete this empty session">
                         Cancel session
                       </button>
                     )}
 
-                    {finished && <button onClick={reopenSession}>Reopen</button>}
+                    {(finished || previewCollapsed) && <button onClick={reopenSession}>Reopen</button>}
                     <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius: 8 }}>
                       {busy ? "Starting…" : "New session"}
                     </button>
@@ -933,16 +989,24 @@ export default function ExerciseDiaryScreen() {
             {/* Body */}
             {!session ? (
               <div className="muted">Tap <b>New session</b> to begin.</div>
-            ) : finished ? (
+            ) : (finished || previewCollapsed) ? (
               <div className="card card--wash" style={{ display: "grid", gap: 10 }}>
-                <h2 style={{ margin: 0 }}>Session complete</h2>
+                <h2 style={{ margin: 0 }}>{finished ? "Session complete" : "Preview collapsed"}</h2>
                 <div className="muted">
                   Weights: <b>{summary.weightsCount}</b> · Sets: <b>{summary.totalSets}</b>
                   {summary.cardioCount > 0 && <> · Cardio: <b>{summary.cardioCount}</b></>}
                 </div>
                 {summary.cardioCount > 0 && <div className="muted">Cardio: {summary.cardioLabels.join(" · ")}</div>}
-                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                  <button onClick={reopenSession}>Reopen session</button>
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  {!finished && previewCollapsed && (
+                    <>
+                      <button onClick={() => setPreviewCollapsed(false)}>Back to editing</button>
+                      <button className="btn-primary" onClick={completeSessionNow} style={{ borderRadius: 8 }}>
+                        Complete now
+                      </button>
+                    </>
+                  )}
+                  {finished && <button onClick={reopenSession}>Reopen session</button>}
                   <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius: 8 }}>
                     {busy ? "Starting…" : "New session"}
                   </button>
@@ -957,7 +1021,7 @@ export default function ExerciseDiaryScreen() {
                     onAddCardio={(kind, title, km, mmss) => addCardio(kind, title, km, mmss)}
                     onOpenLoadTemplate={openLoadTemplate}
                     onOpenSaveTemplate={openTemplateModal}
-                    onCompleteSession={completeSession}
+                    onCompleteSession={openConfirmComplete}
                   />
                 </div>
 
@@ -975,9 +1039,11 @@ export default function ExerciseDiaryScreen() {
                           onBlur={() => flushTitleSaves(it.id)}
                           style={{ flex: 1, minWidth: 0 }}
                         />
-                        <div style={{ display: "flex", gap: 6 }}>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                           {it.kind === "weights" && (
                             <>
+                              {/* NEW: Add exercise button on every weights card */}
+                              <button className="btn-soft" onClick={() => addWeightsExercise("")} title="Add another exercise">+ Add exercise</button>
                               <button onClick={() => toggleHistory(it)}>
                                 {openHistoryFor[it.id] ? "Hide previous" : "Show previous"}
                               </button>
@@ -996,6 +1062,7 @@ export default function ExerciseDiaryScreen() {
                             onChange={(set, patch) => updateSet(set, patch)}
                             onDelete={(set) => deleteSet(set)}
                             flush={(id) => flushSetSaves(id)}
+                            onAddExercise={() => addWeightsExercise("")} // NEW: bottom-of-editor add
                           />
                           {openHistoryFor[it.id] && (
                             <div className="muted" style={{ border: "1px dashed #e5e7eb", borderRadius: 8, padding: 8, marginTop: 8 }}>
@@ -1198,6 +1265,18 @@ export default function ExerciseDiaryScreen() {
           )}
         </div>
       </Modal>
+
+      {/* Confirm Complete Modal */}
+      <Modal open={confirmCompleteOpen} onClose={() => setConfirmCompleteOpen(false)} title="Complete session?">
+        <div style={{ display: "grid", gap: 10 }}>
+          <div className="muted">You can finish now, or preview-collapse the workout to browse history first.</div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+            <button onClick={() => setConfirmCompleteOpen(false)}>Keep editing</button>
+            <button className="btn-soft" onClick={previewCollapse}>Preview collapse</button>
+            <button className="btn-primary" onClick={completeSessionNow}>Complete now</button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -1212,8 +1291,15 @@ function KindBadge({ kind }: { kind: Item["kind"] }) {
   return <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 999, background: bg, border: "1px solid #e5e7eb" }}>{label}</span>;
 }
 
-function WeightsEditor({ sets, onAdd, onChange, onDelete, flush }: {
-  sets: WSet[]; onAdd: () => void; onChange: (s: WSet, patch: Partial<WSet>) => void; onDelete: (s: WSet) => void; flush: (id?: number) => void;
+function WeightsEditor({
+  sets, onAdd, onChange, onDelete, flush, onAddExercise
+}: {
+  sets: WSet[];
+  onAdd: () => void;
+  onChange: (s: WSet, patch: Partial<WSet>) => void;
+  onDelete: (s: WSet) => void;
+  flush: (id?: number) => void;
+  onAddExercise: () => void; // NEW
 }) {
   return (
     <div>
@@ -1246,6 +1332,10 @@ function WeightsEditor({ sets, onAdd, onChange, onDelete, flush }: {
             <button onClick={() => onDelete(s)} title="Delete set">×</button>
           </div>
         ))}
+      </div>
+      {/* NEW: add exercise at bottom of the block */}
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+        <button className="btn-soft" onClick={onAddExercise}>+ Add exercise</button>
       </div>
     </div>
   );
@@ -1311,4 +1401,4 @@ function QuickAddCard({
       </div>
     </div>
   );
-} 
+}
