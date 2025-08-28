@@ -1,4 +1,4 @@
-/* === BYB Pastel Theme & UI — overflow-proof === */
+/* === BYB Pastel Theme & UI === */
 
 :root{
   --bg:            #f7fafc;            /* pastel page */
@@ -18,38 +18,21 @@
 }
 
 * { box-sizing: border-box; }
-
-/* --- HARD global guards against side scroll --- */
-html, body, #root {
-  height: 100%;
-  width: 100%;
-  max-width: 100%;
-  overflow-x: hidden !important;     /* page never scrolls sideways */
-}
-body > * { max-width: 100vw !important; }  /* no top-level child can exceed viewport */
-
-/* any typical wrapper must clip internal overflow, not expand page */
-.app-shell, main, header, footer, section, .container, .page, .card, .row, .toolbar, .actions {
-  max-width: 100vw !important;
-  overflow-x: clip !important;       /* hide rogue inner overflow */
-  min-width: 0;
-}
-
+html, body, #root { height: 100%; }
 body{
   margin:0; background:var(--bg); color:var(--text);
   -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
 }
 
-a { color: inherit; }
-img, video { display:block; max-width:100%; height:auto; }
+/* Prevent ANY sideways scroll globally */
+html, body { overflow-x: hidden; }
 
-/* Controls */
-input, select, textarea, button {
-  font: inherit; color: inherit;
-  max-width: 100%;                   /* controls can’t widen rows */
-  min-width: 0;                      /* allow shrinking in flex/grid */
-}
+a { color: inherit; }
+img { display:block; max-width:100%; }
+
+/* ---- Form controls ---- */
+input, select, textarea, button { font: inherit; color: inherit; }
 
 input, select, textarea {
   width:100%;
@@ -57,36 +40,42 @@ input, select, textarea {
   background:#fff; color:var(--text);
   border-radius:10px; padding:10px 12px;
   outline:none;
+  min-width: 0;       /* allow shrink inside flex rows */
+  max-width: 100%;
 }
 input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 3px var(--ring);
   border-color: #cbd5e1;
 }
 
-/* Buttons */
 button {
   border:1px solid var(--border);
   background:#fff; color:var(--text);
   padding:8px 12px; border-radius:10px;
   cursor:pointer;
+  min-width: 0;
 }
 button:disabled { opacity:.6; cursor:not-allowed; }
-.btn-primary{ background: var(--accent); border-color: transparent; }
-.btn-primary:hover { filter: brightness(0.98); }
-.btn-ghost{ background: transparent; }
 
-/* Cards */
+.btn-primary{
+  background: var(--accent);
+  border-color: transparent;
+}
+.btn-primary:hover { filter: brightness(0.98); }
+.btn-ghost{
+  background: transparent;
+}
+
+/* ---- Cards / Lists ---- */
 .card{
   background:var(--card);
   border:1px solid var(--border);
   border-radius:16px;
   padding:12px;
-  width: 100%;
-  max-width: 100%;
+  overflow-x: hidden;  /* stop internal children from bleeding */
 }
-.card > * { min-width: 0; }          /* let content shrink inside cards */
+.card > * { min-width: 0; } /* children can shrink */
 
-/* lists */
 .list{ margin:0; padding:0; list-style:none; }
 .item{ padding:6px 0; border-bottom:1px solid var(--border); }
 .item:last-child{ border-bottom:none; }
@@ -98,7 +87,12 @@ button:disabled { opacity:.6; cursor:not-allowed; }
 .app-shell{
   max-width:1100px; margin:0 auto; padding:12px;
   padding-bottom: calc(var(--tabbar-height) + var(--safe-bottom) + 12px);
+  overflow-x: hidden; /* belt-and-braces */
 }
+
+/* Utility: any inline "row" should wrap on small screens */
+.row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.row-nowrap { display:flex; gap:8px; align-items:center; flex-wrap:nowrap; min-width:0; }
 
 /* Desktop header shown >= 900px, hidden on mobile */
 .only-desktop { display:none; }
@@ -113,27 +107,37 @@ button:disabled { opacity:.6; cursor:not-allowed; }
   background: #ffffffd9; backdrop-filter: blur(10px);
   border-top:1px solid var(--border);
   padding-bottom: var(--safe-bottom);
-  z-index: 9999;                     /* keep above everything */
+  z-index: 9999; /* always on top */
 }
+
+/* >> KEY FIX: one horizontal, scrollable row — never wraps */
 .tabbar-inner{
   height: var(--tabbar-height);
-  display:flex; gap:6px; align-items:center; justify-content:space-between;
+  display:flex; align-items:center; gap:6px;
   padding:8px 10px;
-  overflow-x:auto;                   /* scroll the bar itself, not the page */
+  overflow-x:auto; overflow-y:hidden;
+  flex-wrap: nowrap;            /* do not wrap to two lines */
   -ms-overflow-style: none; scrollbar-width: none;
+  white-space: nowrap;          /* keep labels on one line */
 }
 .tabbar-inner::-webkit-scrollbar{ display:none; }
 
+/* tab buttons sized for scroll */
 .tab-btn{
   display:grid; gap:2px; place-items:center;
+  flex: 0 0 auto;              /* don’t flex-grow, keep fixed width */
   min-width:66px; padding:6px 8px;
   border-radius:12px; border:1px solid transparent;
   color:#1f2937; background: transparent;
   white-space:nowrap;
 }
 .tab-btn .icon{ font-size:18px; line-height:1; }
-.tab-btn .label{ font-size:11px; color:#334155; }
-.tab-btn[data-active="true"]{ background:#eef2ff; border-color:#c7d2fe; }
+.tab-btn .label{ font-size:11px; color:#334155; text-overflow:ellipsis; overflow:hidden; max-width: 82px; }
+
+.tab-btn[data-active="true"]{
+  background:#eef2ff;                  /* soft indigo bubble */
+  border-color:#c7d2fe;
+}
 .tab-btn[data-active="true"] .label{ color:#1f2937; font-weight:700; }
 
 /* On wide screens, hide mobile tabbar; keep your desktop header/nav */
@@ -142,29 +146,21 @@ button:disabled { opacity:.6; cursor:not-allowed; }
   .app-shell{ padding-bottom: 12px; }
 }
 
-/* --- Checkboxes/radios sane size --- */
-input[type="checkbox"], input[type="radio"] {
-  width: auto; height: auto; display: inline-block; vertical-align: middle; margin: 0;
+/* --- Fix checkbox/radio sizing on task rows (prevents stretched checkboxes) --- */
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+  height: auto;
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0;
 }
 
-/* ===== Mobile overflow + layout helpers ===== */
+/* ===== Mobile overflow + layout fixes ===== */
 
-/* Any “toolbar/filters/actions” row wraps and never widens page */
-.row, .toolbar, .actions {
-  display:flex; flex-wrap:wrap; gap:8px; align-items:center;
-  min-width:0; width:100%;
-}
-
-/* If a page intentionally needs horizontal scrolling inside (e.g., chip rows),
-   add class="scroll-x" to that element */
-.scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.scroll-x::-webkit-scrollbar { display:none; }
-
-/* Long words/titles should wrap instead of widening rows */
-.card * { word-break: break-word; }
-
-/* Collapse common inline 2-col grids to 1 col on small screens */
+/* On small screens, collapse our common 2-col grids to 1 column */
 @media (max-width: 899px){
+  /* Collapse inline-styled grids used across screens */
   [style*="grid-template-columns: 1fr 320px"],
   [style*="grid-template-columns: 320px 1fr"],
   [style*="grid-template-columns: 1fr 300px"],
@@ -172,39 +168,25 @@ input[type="checkbox"], input[type="radio"] {
     grid-template-columns: 1fr !important;
   }
 
+  /* Make sure inputs don’t push width */
+  input, select, textarea { max-width: 100%; }
+
+  /* Give cards a little extra bottom padding so the tab bar never covers actions */
   .app-shell { padding-bottom: calc(var(--tabbar-height) + var(--safe-bottom) + 16px); }
 }
 
 /* === Calendar month grid: fit 7 columns on mobile === */
 @media (max-width: 899px){
+  /* Any inline 7-col grids (our month grid & weekday header) */
   [style*="grid-template-columns: repeat(7, 1fr)"] {
     grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
     width: 100% !important;
   }
-  [style*="grid-template-columns: repeat(7, 1fr)"] > * { min-width: 0 !important; }
+  /* Make sure day cells can shrink and don't force overflow */
+  [style*="grid-template-columns: repeat(7, 1fr)"] > * {
+    min-width: 0 !important;
+  }
 }
-
-/* === Calendar pills & day cell styles === */
-.cal-day { width: 100%; }
-.cal-day .day-pill{
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: max-content 1fr;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  max-width: 100%;
-  background: #fff;
-}
-.cal-day .day-pill .dot{ width: 8px; height: 8px; border-radius: 999px; border: 1px solid #d1d5db; }
-.cal-day .day-pill .txt{
-  min-width: 0;
-  font-size: 11px; line-height: 1.2;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.cal-day .day-pill.more{ background: #f1f5f9; border-style: dashed; }
 
 /* Reusable two-col layout that stacks on mobile */
 .two-col { display: grid; gap: 12px; grid-template-columns: 1fr; }
@@ -217,14 +199,3 @@ input[type="checkbox"], input[type="radio"] {
 @media (max-width: 899px){
   .two-col main.card { min-height: 60vh; }
 }
-
-/* ===== Responsive tiles (Gratitude / Notes / etc.) ===== */
-.quick-grid, .shortcuts, .tiles {
-  display: grid !important;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 12px;
-  width: 100%;
-}
-
-/* Badges should not expand rows */
-.badge { white-space: nowrap; }
