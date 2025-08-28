@@ -165,7 +165,7 @@ export default function ExerciseDiaryScreen() {
   // collapsed
   const [finished, setFinished] = useState(false);
 
-  // NEW: preview-collapse (don’t mark finished; helpful for scrolling)
+  // preview-collapse (don’t mark finished; helpful for scrolling)
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
 
   // backup
@@ -176,13 +176,13 @@ export default function ExerciseDiaryScreen() {
   const quickAddRef = useRef<HTMLDivElement>(null);
   const [scrollToQuickAdd, setScrollToQuickAdd] = useState(false);
 
-  // NEW: when clicking from "Recent", remember the exact session to open
+  // when clicking from "Recent", remember the exact session to open
   const desiredSessionIdRef = useRef<number | null>(null);
 
-  // NEW: confirm-complete modal
+  // confirm-complete modal
   const [confirmCompleteOpen, setConfirmCompleteOpen] = useState(false);
 
-  // NEW: undo last template insert
+  // undo last template insert
   const [undoBanner, setUndoBanner] = useState<{ itemIds: number[] } | null>(null);
 
   /* === Debounced saver for workout_sets === */
@@ -258,7 +258,7 @@ export default function ExerciseDiaryScreen() {
     } else {
       setFinished(false);
     }
-    // Clear preview when session changes/date changes
+    // Clear preview when session/date changes
     setPreviewCollapsed(false);
   }, [session?.id, dateISO]);
 
@@ -383,7 +383,7 @@ export default function ExerciseDiaryScreen() {
     if (s) loadItems(s.id);
   }
 
-  // NEW: cancel/delete current session if empty
+  // cancel/delete current session if empty
   async function cancelCurrentSession() {
     if (!session) return;
     if (items.length > 0) {
@@ -500,7 +500,6 @@ export default function ExerciseDiaryScreen() {
   }
 
   async function deleteItem(itemId: number) {
-    // Delete sets first to be safe, then the item
     try {
       await supabase.from("workout_sets").delete().eq("item_id", itemId);
       const { error } = await supabase.from("workout_items").delete().eq("id", itemId);
@@ -1042,8 +1041,7 @@ export default function ExerciseDiaryScreen() {
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                           {it.kind === "weights" && (
                             <>
-                              {/* NEW: Add exercise button on every weights card */}
-                              <button className="btn-soft" onClick={() => addWeightsExercise("")} title="Add another exercise">+ Add exercise</button>
+                              {/* (Removed top-level "+ Add exercise" to avoid duplication) */}
                               <button onClick={() => toggleHistory(it)}>
                                 {openHistoryFor[it.id] ? "Hide previous" : "Show previous"}
                               </button>
@@ -1062,7 +1060,7 @@ export default function ExerciseDiaryScreen() {
                             onChange={(set, patch) => updateSet(set, patch)}
                             onDelete={(set) => deleteSet(set)}
                             flush={(id) => flushSetSaves(id)}
-                            onAddExercise={() => addWeightsExercise("")} // NEW: bottom-of-editor add
+                            onAddExercise={(name) => addWeightsExercise(name)} // bottom-only add, with name
                           />
                           {openHistoryFor[it.id] && (
                             <div className="muted" style={{ border: "1px dashed #e5e7eb", borderRadius: 8, padding: 8, marginTop: 8 }}>
@@ -1299,7 +1297,7 @@ function WeightsEditor({
   onChange: (s: WSet, patch: Partial<WSet>) => void;
   onDelete: (s: WSet) => void;
   flush: (id?: number) => void;
-  onAddExercise: () => void; // NEW
+  onAddExercise: (name: string) => void; // accepts a name for the new exercise
 }) {
   return (
     <div>
@@ -1333,9 +1331,17 @@ function WeightsEditor({
           </div>
         ))}
       </div>
-      {/* NEW: add exercise at bottom of the block */}
+      {/* Bottom-only: add exercise with name prompt */}
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-        <button className="btn-soft" onClick={onAddExercise}>+ Add exercise</button>
+        <button
+          className="btn-soft"
+          onClick={() => {
+            const name = window.prompt("Exercise name (optional)", "")?.trim() ?? "";
+            onAddExercise(name);
+          }}
+        >
+          + Add exercise
+        </button>
       </div>
     </div>
   );
@@ -1383,7 +1389,20 @@ function QuickAddCard({
 
         {kind === "weights" ? (
           <>
-            <button className="btn-soft" onClick={() => onAddWeights("")}>Add exercise</button>
+            <input
+              placeholder="Exercise name"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+            <button
+              className="btn-soft"
+              onClick={() => {
+                onAddWeights(title.trim());
+                setTitle("");
+              }}
+            >
+              Add exercise
+            </button>
             <button className="btn-soft" onClick={onOpenLoadTemplate}>Add template</button>
             <button className="btn-soft" onClick={onOpenSaveTemplate}>Save as template</button>
             <button className="btn-primary" onClick={onCompleteSession} style={{ marginLeft: "auto", borderRadius: 8 }}>
