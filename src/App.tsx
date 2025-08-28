@@ -82,11 +82,8 @@ export default function App() {
         .eq("id", uid)
         .limit(1)
         .single();
-      if (error) {
-        setProfile(null);
-      } else {
-        setProfile(data as ProfileRow);
-      }
+      if (error) setProfile(null);
+      else setProfile(data as ProfileRow);
     } catch {
       setProfile(null);
     } finally {
@@ -126,7 +123,6 @@ export default function App() {
     []
   );
 
-  /* ----- render one tab ----- */
   function renderTab() {
     switch (tab) {
       case "today":       return <TodayScreen externalDateISO={externalDateISO} />;
@@ -144,35 +140,23 @@ export default function App() {
     }
   }
 
-  /* ----- app shell ----- */
   return (
     <AuthGate>
       <div className="app-shell" style={{ display: "grid", gap: 12 }}>
-        {/* Onboarding gate */}
         {profileLoading ? (
           <div className="card">Loading profile…</div>
         ) : showOnboarding() ? (
           <OnboardingScreen onDone={handleOnboardingDone} />
         ) : (
           <>
-            {/* Top header */}
-            <div
-              className="card"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 8,
-                flexWrap: "wrap",
-              }}
-            >
-              <div style={{ fontWeight: 800 }}>BYB</div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "nowrap" }}>
+            {/* Top header: 2-column grid that stacks on small screens */}
+            <div className="card header">
+              <div className="brand">BYB</div>
+              <div className="header-actions">
                 <input
                   type="date"
                   value={externalDateISO ?? ""}
                   onChange={(e) => setExternalDateISO(e.target.value || undefined)}
-                  style={{ maxWidth: 220 }}
                 />
                 <button onClick={() => setExternalDateISO(undefined)}>Today</button>
               </div>
@@ -181,7 +165,7 @@ export default function App() {
             {/* Active tab */}
             <div>{renderTab()}</div>
 
-            {/* Bottom shortcuts — single scrollable row */}
+            {/* Bottom shortcuts — horizontal scroll bar */}
             <nav className="tabbar" aria-label="Primary">
               <div className="tabbar-inner">
                 {tabs.map((t) => (
