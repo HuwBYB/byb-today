@@ -32,6 +32,7 @@ input, select, textarea, button {
   font: inherit; color: inherit;
 }
 
+/* Inputs */
 input, select, textarea {
   width:100%;
   border:1px solid var(--border);
@@ -44,6 +45,7 @@ input:focus, select:focus, textarea:focus {
   border-color: #cbd5e1;
 }
 
+/* Buttons */
 button {
   border:1px solid var(--border);
   background:#fff; color:var(--text);
@@ -57,16 +59,18 @@ button:disabled { opacity:.6; cursor:not-allowed; }
   border-color: transparent;
 }
 .btn-primary:hover { filter: brightness(0.98); }
-.btn-ghost{
-  background: transparent;
-}
+.btn-ghost{ background: transparent; }
 
+/* Cards */
 .card{
   background:var(--card);
   border:1px solid var(--border);
   border-radius:16px;
   padding:12px;
+  max-width: 100%;
+  overflow-x: clip;                 /* guard against stubborn children */
 }
+.card > * { min-width: 0; }         /* allow content to shrink inside cards */
 
 .list{ margin:0; padding:0; list-style:none; }
 .item{ padding:6px 0; border-bottom:1px solid var(--border); }
@@ -140,12 +144,27 @@ input[type="radio"] {
 /* ===== Mobile overflow + layout fixes ===== */
 
 /* Never allow sideways scroll on the page */
-html, body { overflow-x: hidden; }
+html, body, #root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
 
-/* Prevent children from forcing cards wider than the viewport */
-.card > * { min-width: 0; }
+/* Prevent controls from forcing rows wider than the viewport */
+input, select, textarea, button { max-width: 100%; }
 
-/* On small screens, collapse our common 2-col grids to 1 column */
+/* Helpers for horizontal toolbars/rows that should wrap on phones */
+.row, .toolbar, .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Long words/titles should wrap instead of widening rows */
+.card * { word-break: break-word; }
+
+/* On small screens, collapse common 2-col grids to 1 column */
 @media (max-width: 899px){
   /* Collapse inline-styled grids used across screens */
   [style*="grid-template-columns: 1fr 320px"],
@@ -164,6 +183,7 @@ html, body { overflow-x: hidden; }
 
 /* Keep the tab bar above everything, everywhere */
 .tabbar { z-index: 9999; }
+
 /* === Calendar month grid: fit 7 columns on mobile === */
 @media (max-width: 899px){
   /* Any inline 7-col grids (our month grid & weekday header) */
@@ -171,12 +191,12 @@ html, body { overflow-x: hidden; }
     grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
     width: 100% !important;
   }
-
   /* Make sure day cells can shrink and don't force overflow */
   [style*="grid-template-columns: repeat(7, 1fr)"] > * {
     min-width: 0 !important;
   }
 }
+
 /* === Calendar pills & day cell styles === */
 .cal-day { width: 100%; }
 .cal-day .day-pill{
@@ -191,9 +211,7 @@ html, body { overflow-x: hidden; }
   max-width: 100%;
   background: #fff;
 }
-.cal-day .day-pill .dot{
-  width: 8px; height: 8px; border-radius: 999px; border: 1px solid #d1d5db;
-}
+.cal-day .day-pill .dot{ width: 8px; height: 8px; border-radius: 999px; border: 1px solid #d1d5db; }
 .cal-day .day-pill .txt{
   min-width: 0;
   font-size: 11px; line-height: 1.2;
@@ -216,4 +234,13 @@ html, body { overflow-x: hidden; }
   .two-col main.card { min-height: 60vh; }
 }
 
+/* ===== Responsive tiles (Gratitude / Notes / etc.) ===== */
+.quick-grid, .shortcuts, .tiles {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  width: 100%;
+}
 
+/* Badges should not expand rows */
+.badge { white-space: nowrap; }
