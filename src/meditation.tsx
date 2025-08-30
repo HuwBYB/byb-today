@@ -1,6 +1,5 @@
 // src/meditation.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
 
 /* =========================
    Types & constants
