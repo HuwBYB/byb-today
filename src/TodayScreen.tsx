@@ -3,18 +3,12 @@ import type { ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* =============================================
-   BYB — Today Screen (Polished Full Page)
-   Implements Phase 1 & 2 touches and mobile overflow fixes:
-   - Smart greeting (time-of-day + "missed you")
-   - Rotating name/nickname greeting with toggle
-   - Top app bar (BYB + friendly date) with streak micro-animation
-   - "Today’s Biggest Goal" card pinned on top
-   - Top Priorities vs Everything Else split
-   - Confetti on completion + Alfred encouragement toasts
-   - Pastel spacing / rounded edges
-   - Scrollable bottom tab bar (thumb-friendly)
-   - Lightweight onboarding (Name → Nicknames → Big Goal, with Skip)
-   - Global style clamp to eliminate horizontal bleed on mobile
+   BYB — Today Screen (Pastel+Polish, No-Overflow)
+   - Pixel-safe: clamps all media + containers
+   - Pastel theme tokens + gradient background
+   - Safe-area aware sticky bars
+   - Micro-animations (taps, streak pulse)
+   - Headspace-style calm visuals
    ============================================= */
 
 type Task = {
@@ -30,9 +24,7 @@ type Task = {
 };
 
 type GoalLite = { id: number; title: string };
-
 type BigGoal = { id: number; title: string } | null;
-
 type Props = { externalDateISO?: string };
 
 /* ===== date helpers ===== */
@@ -60,7 +52,6 @@ function addDays(iso: string, n: number) {
 }
 
 /* ===== repeat config ===== */
-
 type Repeat = "" | "daily" | "weekdays" | "weekly" | "monthly" | "annually";
 const REPEAT_COUNTS: Record<Exclude<Repeat, "">, number> = {
   daily: 14,
@@ -106,11 +97,10 @@ function makeSeriesKey(repeat: Repeat) {
   return repeat ? `${REPEAT_PREFIX}${repeat}` : "manual";
 }
 
-/* ===== display-name helper (rotates name + nicknames) ===== */
+/* ===== display-name helper ===== */
 const LS_NAME = "byb:display_name";
 const LS_POOL = "byb:display_pool"; // string[]
 const LS_ROTATE = "byb:rotate_nicknames"; // "1" | "0" (default on)
-
 function pickGreetingLabel(): string {
   try {
     const name = (localStorage.getItem(LS_NAME) || "").trim();
@@ -127,8 +117,7 @@ function pickGreetingLabel(): string {
   }
 }
 
-/* ===== summary types ===== */
-
+/* ===== summary / helpers ===== */
 type Summary = {
   doneToday: number;
   pendingToday: number;
@@ -138,8 +127,6 @@ type Summary = {
   streak: number;
   bestStreak: number;
 };
-
-/* ===== tiny UI helpers ===== */
 function formatNiceDate(iso: string): string {
   try {
     const d = fromISO(iso);
@@ -160,13 +147,14 @@ function timeGreeting(date = new Date()): string {
   return "Good evening";
 }
 
-/* ===== Lightweight Confetti (no deps) ===== */
+/* ===== Confetti + Toast ===== */
 function fireConfetti() {
   const container = document.createElement("div");
   container.style.position = "fixed";
   container.style.inset = "0";
   container.style.pointerEvents = "none";
   container.style.overflow = "hidden";
+  container.style.zIndex = "4000";
   document.body.appendChild(container);
   const pieces = 80;
   const colors = ["#fde68a", "#a7f3d0", "#bfdbfe", "#fbcfe8", "#ddd6fe"];
@@ -193,8 +181,6 @@ function fireConfetti() {
   }
   setTimeout(() => container.remove(), 2200);
 }
-
-/* ===== Alfred micro-encouragements ===== */
 const ALFRED_LINES = [
   "Lovely momentum. Keep it rolling.",
   "One pebble at a time becomes a mountain.",
@@ -203,8 +189,6 @@ const ALFRED_LINES = [
   "Mic drop. Onto the next."
 ];
 function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)] as T; }
-
-/* ===== Tiny toast hook ===== */
 function useToast() {
   const [msg, setMsg] = useState<string | null>(null);
   function show(m: string) {
@@ -212,9 +196,9 @@ function useToast() {
     setTimeout(() => setMsg(null), 2500);
   }
   const node = (
-    <div aria-live="polite" style={{ position: "fixed", left: 0, right: 0, bottom: 24, display: "flex", justifyContent: "center", pointerEvents: "none", zIndex: 3000 }}>
+    <div aria-live="polite" style={{ position: "fixed", left: 0, right: 0, bottom: "calc(16px + env(safe-area-inset-bottom,0))", display: "flex", justifyContent: "center", pointerEvents: "none", zIndex: 3500 }}>
       {msg && (
-        <div className="card" style={{ background: "#111827", color: "white", borderRadius: 12, padding: "10px 14px", boxShadow: "0 8px 20px rgba(0,0,0,.25)", pointerEvents: "all", transform: "translateY(0)", transition: "transform .25s ease" }}>
+        <div className="card" style={{ background: "#111827", color: "white", borderRadius: 12, padding: "10px 14px", boxShadow: "0 8px 20px rgba(0,0,0,.25)", pointerEvents: "all" }}>
           {msg}
         </div>
       )}
@@ -224,22 +208,55 @@ function useToast() {
 }
 
 export default function TodayScreen({ externalDateISO }: Props) {
-  // --- Global clamp to kill horizontal bleeding on mobile ---
+  /* ===== Global theme + no-bleed CSS ===== */
   useEffect(() => {
     const style = document.createElement("style");
     style.setAttribute("data-byb-global", "1");
     style.innerHTML = `
+      :root{
+        --bg: #fafafa;
+        --bg-gradient: radial-gradient(1200px 600px at 20% -10%, #f7f6ff 10%, transparent 60%),
+                       radial-gradient(900px 500px at 120% 10%, #f0fff7 10%, transparent 60%),
+                       #fafafa;
+        --card: #ffffff;
+        --border: #e5e7eb;
+        --text: #0f172a;
+        --muted: #6b7280;
+        --primary: #6c8cff; /* gentle indigo */
+        --primary-soft: #eef2ff;
+        --success-soft: #dcfce7;
+        --danger-soft: #fee2e2;
+        --shadow: 0 10px 30px rgba(0,0,0,.06);
+      }
       *,*::before,*::after{ box-sizing:border-box; }
-      html,body,#root{ width:100%; max-width:100%; overflow-x:hidden; }
-      .card{ width:100%; max-width:100%; }
+      html,body,#root{ width:100%; max-width:100%; overflow-x:hidden; background: var(--bg-gradient); color: var(--text); }
+      /* MEDIA CLAMP (fixes right-edge leaks) */
+      img,svg,video,canvas{ max-width:100%; height:auto; display:block; }
+      /* Common UI */
+      .card{ width:100%; max-width:100%; background:var(--card); border:1px solid var(--border); border-radius:16px; padding:12px; box-shadow: var(--shadow); }
+      .badge{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; background:var(--primary-soft); color:#273a91; font-size:12px; }
+      .muted{ color: var(--muted); }
+      .btn-primary{ background:var(--primary); color:#fff; border:0; padding:8px 12px; border-radius:10px; box-shadow: 0 6px 14px rgba(108,140,255,.25); transform: translateZ(0); }
+      .btn-primary:active{ transform: scale(.98); }
+      .btn-soft{ background:#fff; border:1px solid var(--border); padding:8px 12px; border-radius:12px; }
+      .btn-ghost{ background:transparent; border:0; color:var(--muted); }
       input,select,button{ max-width:100%; }
-      .h-scroll{ display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+      input,select{ width:100%; border:1px solid var(--border); border-radius:10px; padding:10px 12px; background:#fff; }
+      ul.list{ list-style:none; padding:0; margin:0; display:grid; gap:8px; }
+      li.item{ background:#fff; border:1px solid var(--border); border-radius:12px; padding:10px; box-shadow: var(--shadow); }
+      label, .row{ min-width:0; }
+      .h-scroll{ display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:4px; }
       .h-scroll::-webkit-scrollbar{ display:none; }
+      /* reduced motion friendliness */
+      @media (prefers-reduced-motion: reduce){
+        *{ animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; scroll-behavior:auto !important; }
+      }
     `;
     document.head.appendChild(style);
     return () => { try { document.head.removeChild(style); } catch {} };
   }, []);
 
+  /* ===== State ===== */
   const [userId, setUserId] = useState<string | null>(null);
   const [dateISO, setDateISO] = useState<string>(externalDateISO || todayISO());
 
@@ -249,23 +266,19 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Bottom "add task" form
   const [newTitle, setNewTitle] = useState("");
   const [newTop, setNewTop] = useState(false);
   const [newRepeat, setNewRepeat] = useState<Repeat>("");
   const [adding, setAdding] = useState(false);
 
-  // Sticky "Now" widget: clock + quick capture
   const [now, setNow] = useState<Date>(new Date());
   const [quickTitle, setQuickTitle] = useState("");
   const [quickTop, setQuickTop] = useState(false);
   const [savingQuick, setSavingQuick] = useState(false);
 
-  // Greeting
   const [greetName, setGreetName] = useState<string>("");
   const [missed, setMissed] = useState<boolean>(false);
 
-  // Responsive: treat small screens < 420px as compact
   const [isCompact, setIsCompact] = useState<boolean>(false);
   useEffect(() => {
     function check() { setIsCompact(window.innerWidth < 420); }
@@ -274,7 +287,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  // Lightweight daily summary
   const [summary, setSummary] = useState<Summary>({
     doneToday: 0,
     pendingToday: 0,
@@ -285,7 +297,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
     bestStreak: 0
   });
 
-  // streak animation control
   const prevStreak = useRef(0);
   const [streakPulse, setStreakPulse] = useState(false);
   useEffect(() => {
@@ -297,7 +308,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
     prevStreak.current = summary.streak;
   }, [summary.streak]);
 
-  // Edit modal state
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -307,8 +317,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [applyFuture, setApplyFuture] = useState(false);
   const [busyEdit, setBusyEdit] = useState(false);
 
-  // Onboarding modal
-  const [obStep, setObStep] = useState<0 | 1 | 2 | 3>(0); // 0=closed, 1=Name, 2=Nicknames, 3=Big Goal
+  const [obStep, setObStep] = useState<0 | 1 | 2 | 3>(0);
   const [obName, setObName] = useState("");
   const [obNicks, setObNicks] = useState("");
   const [obGoal, setObGoal] = useState("");
@@ -323,26 +332,25 @@ export default function TodayScreen({ externalDateISO }: Props) {
       const user = data.user;
       setUserId(user?.id ?? null);
 
-      // greeting label + nickname rotation
       setGreetName(pickGreetingLabel());
 
-      // “We missed you” if last sign-in was 2+ days ago
       const last = user?.last_sign_in_at ? new Date(user.last_sign_in_at) : null;
       if (last) {
         const now = new Date();
-        const days = Math.floor((new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() - new Date(last.getFullYear(), last.getMonth(), last.getDate()).getTime()) / 86400000);
+        const days = Math.floor(
+          (new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() -
+            new Date(last.getFullYear(), last.getMonth(), last.getDate()).getTime()) / 86400000
+        );
         setMissed(days >= 2);
       } else {
         setMissed(false);
       }
 
-      // onboarding trigger if no name saved
       const hasName = (localStorage.getItem(LS_NAME) || "").trim().length > 0;
       if (!hasName) setObStep(1);
     });
   }, []);
 
-  // keep clock fresh
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id); }, []);
 
   function isOverdue(t: Task) { return !!t.due_date && t.due_date < dateISO && t.status !== "done"; }
@@ -362,7 +370,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
       if (error) throw error;
 
       const raw = (data as Task[]) || [];
-      const list = raw.filter((t) => t.due_date === dateISO || (t.due_date! < dateISO && t.status !== "done"));
+      const list = raw.filter(
+        (t) => t.due_date === dateISO || (t.due_date! < dateISO && t.status !== "done")
+      );
       setTasks(list);
 
       const ids = Array.from(new Set(list.map((t) => t.goal_id).filter((v): v is number => typeof v === "number")));
@@ -376,7 +386,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
         setGoalMap({});
       }
 
-      // Big Goal fetch (defensive: supports is_big or kind="big")
       const { data: bg, error: bge } = await supabase
         .from("goals")
         .select("id,title,is_big,kind")
@@ -386,7 +395,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
         .maybeSingle();
       if (!bge && bg) setBigGoal({ id: (bg as any).id, title: (bg as any).title });
 
-      // compute daily summary
       const doneToday = list.filter((t) => t.due_date === dateISO && t.status === "done").length;
       const pendingToday = list.filter((t) => t.due_date === dateISO && t.status !== "done").length;
       const topToday = list.filter((t) => t.due_date === dateISO && (t.priority ?? 0) >= 2);
@@ -401,7 +409,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
     } finally { setLoading(false); }
   }
 
-  // compute streaks over the last 180 days
   async function loadStreaks() {
     if (!userId) return;
     try {
@@ -427,7 +434,15 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
       const sorted = Array.from(days).sort();
       let best = 0, run = 0; let prev: string | null = null;
-      for (const d of sorted) { if (!prev) run = 1; else { const nextOfPrev = addDays(prev, 1); run = d === nextOfPrev ? run + 1 : 1; } best = Math.max(best, run); prev = d; }
+      for (const d of sorted) {
+        if (!prev) run = 1;
+        else {
+          const nextOfPrev = addDays(prev, 1);
+          run = d === nextOfPrev ? run + 1 : 1;
+        }
+        best = Math.max(best, run);
+        prev = d;
+      }
       setSummary((s) => ({ ...s, streak, bestStreak: best }));
     } catch { /* ignore */ }
   }
@@ -505,10 +520,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
   function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode; }) {
     return (
-      <div className="card" style={{ marginBottom: 12, overflowX: "clip", borderRadius: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap", width: "100%" }}>
+      <div className="card" style={{ marginBottom: 12, overflowX: "clip", borderRadius: 16 }}>
+        <div className="row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap", width: "100%" }}>
           <h2 style={{ margin: 0, fontSize: 18, wordBreak: "break-word" }}>{title}</h2>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", minWidth: 0 }}>{right}<button onClick={loadAll} disabled={loading}>{loading ? "Refreshing…" : "Refresh"}</button></div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", minWidth: 0 }}>{right}<button onClick={loadAll} disabled={loading} className="btn-soft">{loading ? "Refreshing…" : "Refresh"}</button></div>
         </div>
         {children}
       </div>
@@ -518,9 +533,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   function todayString() { return todayISO(); }
   const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-  /* =========================
-     Edit modal helpers
-     ========================= */
+  /* ===== Edit modal helpers ===== */
   function openEdit(t: Task) {
     setEditing(t);
     setEditTitle(t.title || "");
@@ -587,7 +600,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     } catch (e: any) { setErr(e.message || String(e)); } finally { setBusyEdit(false); }
   }
 
-  /* =============== Onboarding =============== */
+  /* ===== Onboarding ===== */
   async function obSaveAndNext() {
     if (obStep === 1) {
       const name = obName.trim();
@@ -604,81 +617,112 @@ export default function TodayScreen({ externalDateISO }: Props) {
         try { await supabase.from("goals").insert({ user_id: userId, title, is_big: true }); } catch { /* ignore */ }
       }
       setObStep(0);
-      setGreetName(pickGreetingLabel()); // refresh greeting pool
+      setGreetName(pickGreetingLabel());
       await loadAll();
     }
   }
   function obSkip() { setObStep((s) => (s >= 3 ? 0 : (s + 1) as any)); }
 
-  /* =============== Render =============== */
+  /* ===== Render ===== */
   const niceDate = useMemo(() => formatNiceDate(dateISO), [dateISO]);
   const greeting = useMemo(() => (missed ? "We missed you" : timeGreeting(now)), [missed, now]);
 
   return (
-    <div style={{ display: "grid", gap: 12, overflowX: "hidden", width: "100%", maxWidth: "100%" }}>
+    <div
+      style={{
+        display: "grid",
+        gap: 12,
+        overflowX: "hidden",
+        width: "100%",
+        maxWidth: "100%",
+        padding: "12px 12px calc(72px + env(safe-area-inset-bottom,0))",
+      }}
+    >
       {/* Top app bar */}
-      <div className="card" style={{ position: "sticky", top: 0, zIndex: 60, display: "grid", gap: 8, border: "1px solid var(--border)", background: "#fff", borderRadius: 16, padding: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }}>
+      <div
+        className="card"
+        style={{
+          position: "sticky",
+          top: "env(safe-area-inset-top, 0)",
+          zIndex: 60,
+          display: "grid",
+          gap: 8,
+          background: "#fff",
+          borderRadius: 16,
+          padding: 12
+        }}
+      >
+        <div className="row" style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap", width: "100%" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
             <div style={{ fontWeight: 800, fontSize: 18 }}>BYB</div>
             <div className="muted">• {niceDate}</div>
           </div>
-          {/* Streak + summary chips */}
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
-            <span className="badge" title="Win if 1+ top priority or 3+ tasks" style={{ background: summary.isWin ? "#dcfce7" : "#fee2e2", border: "1px solid var(--border)" }}>{summary.isWin ? "Win" : "Keep going"}</span>
+            <span className="badge" title="Win if 1+ top priority or 3+ tasks" style={{ background: summary.isWin ? "var(--success-soft)" : "var(--danger-soft)", border: "1px solid var(--border)" }}>{summary.isWin ? "Win" : "Keep going"}</span>
             <span className="badge" title="Tasks done today">Done: {summary.doneToday}</span>
             {summary.topTotal > 0 && <span className="badge" title="Top priorities done / total">Top: {summary.topDone}/{summary.topTotal}</span>}
             <span className="badge" title="Current streak (best)" style={{ transform: streakPulse ? "scale(1.08)" : "scale(1)", transition: "transform .25s ease" }}>🔥 {summary.streak}{summary.bestStreak > 0 ? ` (best ${summary.bestStreak})` : ""}</span>
           </div>
         </div>
 
-        {/* Greeting row */}
         {greetName && (
           <div style={{ fontWeight: 700, wordBreak: "break-word" }}>
             {greeting} {missed ? "💜" : ""}, {greetName}
           </div>
         )}
 
-        {/* Quick row: time + input */}
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%" }}>
+        {/* Quick row */}
+        <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
             <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: 1 }}>{timeStr}</div>
             <div className="muted" style={{ whiteSpace: "nowrap" }}>{dateISO}</div>
           </div>
 
-          <input type="text" value={quickTitle} onChange={(e) => setQuickTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && quickTitle.trim() && !savingQuick) addQuick(); }} placeholder="Quick add a task for today…" style={{ flex: "1 1 220px", minWidth: 0, maxWidth: "100%" }} />
+          <input
+            type="text"
+            value={quickTitle}
+            onChange={(e) => setQuickTitle(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && quickTitle.trim() && !savingQuick) addQuick(); }}
+            placeholder="Quick add a task for today…"
+            style={{ flex: "1 1 220px", minWidth: 0, maxWidth: "100%" }}
+          />
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
             <input type="checkbox" checked={quickTop} onChange={(e) => setQuickTop(e.target.checked)} /> Top
           </label>
           <button className="btn-primary" onClick={addQuick} disabled={!quickTitle.trim() || savingQuick} style={{ borderRadius: 10, flex: isCompact ? "1 1 100%" : undefined }}>{savingQuick ? "Adding…" : "Add"}</button>
         </div>
 
-        {/* Overdue mover + date controls */}
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%" }}>
+        {/* Date controls */}
+        <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%" }}>
           {overdueCount > 0 && (
-            <button onClick={moveAllOverdueHere} className="btn-soft" title="Change due date for all overdue pending tasks to this day" style={{ flex: isCompact ? "1 1 100%" : undefined, minWidth: 0 }}>
+            <button
+              onClick={moveAllOverdueHere}
+              className="btn-soft"
+              title="Change due date for all overdue pending tasks to this day"
+              style={{ flex: isCompact ? "1 1 100%" : undefined, minWidth: 0 }}
+            >
               Move all overdue here ({overdueCount})
             </button>
           )}
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", flexWrap: "wrap", width: isCompact ? "100%" : "auto" }}>
             <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} style={{ flex: isCompact ? "1 1 220px" : undefined, minWidth: 0, maxWidth: "100%" }} />
-            <button onClick={() => setDateISO(todayString())} style={{ flex: isCompact ? "1 1 120px" : undefined }}>Today</button>
+            <button className="btn-soft" onClick={() => setDateISO(todayString())} style={{ flex: isCompact ? "1 1 120px" : undefined }}>Today</button>
           </div>
         </div>
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-      {/* ===== Biggest Goal card (always on top) ===== */}
-      <div className="card" style={{ borderLeft: "6px solid #a7f3d0", borderRadius: 14, padding: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      {/* Biggest Goal */}
+      <div className="card" style={{ borderLeft: "6px solid #a7f3d0", borderRadius: 16 }}>
+        <div className="row" style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <h2 style={{ margin: 0, fontSize: 18 }}>Today’s Biggest Goal</h2>
           {bigGoal ? <span className="badge" title="Your long-term focus">Pinned</span> : <span className="badge" title="Set a Big Goal in Profile or Onboarding">Not set</span>}
-          <div style={{ marginLeft: "auto" }}>{bigGoal && <span className="muted">{bigGoal.title}</span>}</div>
+          <div style={{ marginLeft: "auto", minWidth: 0 }}>{bigGoal && <span className="muted" style={{ display:"block", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{bigGoal.title}</span>}</div>
         </div>
         {!bigGoal && <div className="muted" style={{ marginTop: 6 }}>Add a Big Goal to keep today aligned. You can set it in your Profile.</div>}
       </div>
 
-      {/* ===== Lists ===== */}
+      {/* Lists */}
       <Section title="Top Priorities">
         {top.length === 0 ? (
           <div className="muted">Nothing marked top priority for this day.</div>
@@ -692,7 +736,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                     <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 600, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word" }}>
-                        <span>{displayTitle(t)}</span>
+                        <span style={{ minWidth:0, overflow:"hidden", textOverflow:"ellipsis" }}>{displayTitle(t)}</span>
                         {overdue && <span className="badge">Overdue</span>}
                         <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => openEdit(t)} title="Edit task">Edit</button>
                       </div>
@@ -723,7 +767,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                     <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word" }}>
-                        <span>{displayTitle(t)}</span>
+                        <span style={{ minWidth:0, overflow:"hidden", textOverflow:"ellipsis" }}>{displayTitle(t)}</span>
                         {overdue && <span className="badge">Overdue</span>}
                         <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => openEdit(t)} title="Edit task">Edit</button>
                       </div>
@@ -741,15 +785,21 @@ export default function TodayScreen({ externalDateISO }: Props) {
         )}
       </Section>
 
-      {/* ===== Add Task (advanced) ===== */}
-      <div className="card" style={{ display: "grid", gap: 8, overflowX: "clip", borderRadius: 14 }}>
+      {/* Add Task */}
+      <div className="card" style={{ display: "grid", gap: 8, overflowX: "clip", borderRadius: 16 }}>
         <h2 style={{ margin: 0 }}>Add Task</h2>
         <label style={{ display: "grid", gap: 6 }}>
           <div className="section-title">Task title</div>
-          <input type="text" placeholder="Enter task…" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && newTitle.trim() && !adding) addTask(); }} />
+          <input
+            type="text"
+            placeholder="Enter task…"
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && newTitle.trim() && !adding) addTask(); }}
+          />
         </label>
 
-        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div className="row" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
             <input type="checkbox" checked={newTop} onChange={(e) => setNewTop(e.target.checked)} /> Mark as Top Priority
           </label>
@@ -776,8 +826,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-      {/* ===== Scrollable Bottom Tab Bar ===== */}
-      <div style={{ position: "sticky", bottom: 0, zIndex: 50, background: "#fff", padding: "8px 4px", borderTop: "1px solid var(--border)", width: "100%", maxWidth: "100%" }}>
+      {/* Bottom Tab Bar (safe-area aware) */}
+      <div style={{ position: "sticky", bottom: 0, zIndex: 55, background: "var(--bg)", padding: "8px 4px calc(8px + env(safe-area-inset-bottom,0))", borderTop: "1px solid var(--border)", width: "100%", maxWidth: "100%" }}>
         <div className="h-scroll">
           {[
             { key: "today", label: "Today" },
@@ -786,19 +836,19 @@ export default function TodayScreen({ externalDateISO }: Props) {
             { key: "big", label: "Big Goal" },
             { key: "profile", label: "Profile" }
           ].map((t) => (
-            <button key={t.key} className="btn-soft" style={{ borderRadius: 999, padding: "8px 12px", flex: "0 0 auto" }}>{t.label}</button>
+            <button key={t.key} className="btn-soft" style={{ borderRadius: 999, padding: "10px 14px", flex: "0 0 auto" }}>{t.label}</button>
           ))}
         </div>
       </div>
 
-      {/* ===== Edit Modal ===== */}
+      {/* Edit Modal */}
       {editOpen && editing && (
         <div role="dialog" aria-modal="true" aria-label="Edit task" onClick={() => !busyEdit && setEditOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 2000 }}>
-          <div onClick={(e) => e.stopPropagation()} className="card" style={{ width: "min(720px, 96vw)", borderRadius: 12, padding: 16, background: "#fff" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div onClick={(e) => e.stopPropagation()} className="card" style={{ width: "min(720px, 96vw)", borderRadius: 16, padding: 16, background: "#fff" }}>
+            <div className="row" style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <h3 style={{ margin: 0, fontSize: 18 }}>Edit task</h3>
               <span className="muted" style={{ marginLeft: "auto" }}>{getRepeatFromSource(editing.source) ? "Recurring" : "Single"}</span>
-              <button onClick={() => setEditOpen(false)} disabled={busyEdit} title="Close">✕</button>
+              <button className="btn-ghost" onClick={() => setEditOpen(false)} disabled={busyEdit} title="Close">✕</button>
             </div>
 
             <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
@@ -807,7 +857,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="Enter task…" />
               </label>
 
-              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+              <div className="row" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                   <input type="checkbox" checked={editTop} onChange={(e) => setEditTop(e.target.checked)} /> Mark as Top Priority
                 </label>
@@ -835,12 +885,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 </label>
               )}
 
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap", marginTop: 6 }}>
-                <button onClick={() => deleteTask("one")} disabled={busyEdit} title="Delete just this task">Delete this</button>
+              <div className="row" style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap", marginTop: 6 }}>
+                <button className="btn-soft" onClick={() => deleteTask("one")} disabled={busyEdit} title="Delete just this task">Delete this</button>
                 {getRepeatFromSource(editing.source) && (
                   <>
-                    <button onClick={() => deleteTask("future")} disabled={busyEdit} title="Delete this and all future in series">Delete future in series</button>
-                    <button onClick={() => deleteTask("all")} disabled={busyEdit} title="Delete entire series">Delete entire series</button>
+                    <button className="btn-soft" onClick={() => deleteTask("future")} disabled={busyEdit} title="Delete this and all future in series">Delete future in series</button>
+                    <button className="btn-soft" onClick={() => deleteTask("all")} disabled={busyEdit} title="Delete entire series">Delete entire series</button>
                   </>
                 )}
                 <button className="btn-primary" onClick={saveEdit} disabled={busyEdit || !editTitle.trim()} style={{ borderRadius: 10 }} title={getRepeatFromSource(editing.source) !== editRepeat ? "Saves and updates series from the selected due date" : "Save"}>{busyEdit ? "Saving…" : "Save"}</button>
@@ -850,7 +900,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* ===== Onboarding Modal ===== */}
+      {/* Onboarding */}
       {obStep !== 0 && (
         <div role="dialog" aria-modal="true" aria-label="Onboarding" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 3000 }}>
           <div className="card" style={{ width: "min(520px, 96vw)", borderRadius: 16, padding: 16, background: "#fff" }}>
@@ -860,7 +910,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 <div className="muted">What should we call you?</div>
                 <input value={obName} onChange={(e) => setObName(e.target.value)} placeholder="Your name" />
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                  <button onClick={obSkip}>Skip</button>
+                  <button className="btn-ghost" onClick={obSkip}>Skip</button>
                   <button className="btn-primary" onClick={obSaveAndNext} disabled={!obName.trim()}>Next</button>
                 </div>
               </div>
@@ -875,7 +925,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                     <input type="checkbox" defaultChecked onChange={(e) => localStorage.setItem(LS_ROTATE, e.target.checked ? "1" : "0")} /> Rotate nicknames
                   </label>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={obSkip}>Skip</button>
+                    <button className="btn-ghost" onClick={obSkip}>Skip</button>
                     <button className="btn-primary" onClick={obSaveAndNext}>Next</button>
                   </div>
                 </div>
@@ -887,7 +937,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 <div className="muted">A north star to guide your daily focus.</div>
                 <input value={obGoal} onChange={(e) => setObGoal(e.target.value)} placeholder="e.g. Launch BYB MVP" />
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                  <button onClick={() => setObStep(0)}>Skip</button>
+                  <button className="btn-ghost" onClick={() => setObStep(0)}>Skip</button>
                   <button className="btn-primary" onClick={obSaveAndNext} disabled={!obGoal.trim()}>Finish</button>
                 </div>
               </div>
@@ -896,7 +946,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* Toast node */}
       {toast.node}
     </div>
   );
