@@ -1,266 +1,197 @@
-// src/meditation.tsx
-import React, { useEffect, useState } from "react";
+// src/App.tsx
+import { useEffect, useMemo, useState } from "react";
+import AuthGate from "./AuthGate";
+import { supabase } from "./lib/supabaseClient";
 
-type Video = {
+/* Screens */
+import TodayScreen from "./TodayScreen";
+import CalendarScreen from "./CalendarScreen";
+import GoalsScreen from "./GoalsScreen";
+import VisionBoardScreen from "./VisionBoardScreen";
+import GratitudeScreen from "./GratitudeScreen";
+import ExerciseDiaryScreen from "./ExerciseDiaryScreen";
+import WinsScreen from "./WinsScreen";
+import AlfredScreen from "./AlfredScreen";
+import ConfidenceScreen from "./ConfidenceScreen";
+import NotesScreen from "./NotesScreen";
+import FocusAlfredScreen from "./FocusAlfredScreen";
+import OnboardingScreen from "./OnboardingScreen";
+import MeditationScreen from "./meditation"; // <-- matches src/meditation.tsx
+
+/* Types */
+type ProfileRow = {
   id: string;
-  title: string;
-  url: string;
+  display_name: string | null;
+  display_pool: string[] | null; // nicknames
+  onboarding_done: boolean | null;
 };
 
-const STORAGE_KEY = "byb.meditationCentre.videos";
-const MAX_VIDEOS = 10;
+/* LocalStorage fallback */
+const LS_DONE = "byb:onboarding_done";
 
-/** Seed videos (your three) */
-const SEEDS: Partial<Video>[] = [
-  { title: "Starter: 10-min Calm",   url: "https://youtu.be/j734gLbQFbU?si=6AnHq5m0lLMu7zrW" },
-  { title: "Starter: Focus Reset",   url: "https://youtu.be/cyMxWXlX9sU?si=HyfDOCQuFNY9chFP" },
-  { title: "Starter: Deep Relax",    url: "https://youtu.be/P-8ALcF8AGE?si=JCtNqvsaKfxDLhdO" },
-];
+/* Tabs */
+type Tab =
+  | "today"
+  | "calendar"
+  | "goals"
+  | "vision"
+  | "gratitude"
+  | "exercise"
+  | "wins"
+  | "alfred"
+  | "confidence"
+  | "notes"
+  | "focus"
+  | "meditation";
 
-function extractYouTubeId(url: string): string | null {
-  try {
-    const u = new URL(url);
-    if (u.hostname.includes("youtube.com")) {
-      const v = u.searchParams.get("v");
-      if (v) return v;
-      const embed = u.pathname.match(/\/embed\/([a-zA-Z0-9_-]{6,})/);
-      if (embed) return embed[1];
-    }
-    if (u.hostname.includes("youtu.be")) {
-      const short = u.pathname.replace("/", "");
-      if (short) return short;
-    }
-    const loose = url.match(/([a-zA-Z0-9_-]{6,})/g)?.find((x) => x.length >= 6);
-    return loose || null;
-  } catch {
-    return null;
-  }
-}
-const thumbUrl = (id: string) => `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
-const embedUrl = (id: string) => `https://www.youtube.com/embed/${id}?autoplay=1&rel=0`;
+export default function App() {
+  // Ensure we start on Today
+  const [tab, setTab] = useState<Tab>("today");
+  const [externalDateISO, setExternalDateISO] = useState<string | undefined>(undefined);
 
-export default function MeditationScreen() {
-  const [videos, setVideos] = useState<Video[]>([]);
-  const [flippedIndex, setFlippedIndex] = useState<number | null>(null);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [profile, setProfile] = useState<ProfileRow | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
 
-  const [formTitle, setFormTitle] = useState("");
-  const [formUrl, setFormUrl] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  // Load from storage or seeds
+  /* ----- auth ----- */
   useEffect(() => {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      try {
-        setVideos(JSON.parse(raw));
-        return;
-      } catch {}
-    }
-    if (SEEDS.length) {
-      const prepared: Video[] = SEEDS.map((s, i) => {
-        const id = extractYouTubeId(s.url || "") || `seed-${i}`;
-        return { id, title: s.title || `Video ${i + 1}`, url: s.url || "" } as Video;
-      });
-      setVideos(prepared);
-    }
+    let unsub: (() => void) | null = null;
+    supabase.auth.getUser().then(({ data }) => {
+      const u = data.user;
+      setUserId(u?.id ?? null);
+      if (u?.id) loadProfile(u.id);
+      else setProfileLoading(false);
+    });
+    const sub = supabase.auth.onAuthStateChange((_evt, sess) => {
+      const u = sess?.user || null;
+      setUserId(u?.id ?? null);
+      if (u?.id) loadProfile(u.id);
+      else {
+        setProfile(null);
+        setProfileLoading(false);
+      }
+    });
+    unsub = () => sub.data.subscription.unsubscribe();
+    return () => {
+      try { unsub?.(); } catch {}
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Persist
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(videos));
-  }, [videos]);
-
-  const canAddMore = videos.length < MAX_VIDEOS;
-
-  function addVideo() {
-    setError(null);
-    if (!canAddMore) {
-      setError(`Max ${MAX_VIDEOS} videos reached.`);
-      return;
+  async function loadProfile(uid: string) {
+    setProfileLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id,display_name,display_pool,onboarding_done")
+        .eq("id", uid)
+        .limit(1)
+        .single();
+      if (error) setProfile(null);
+      else setProfile(data as ProfileRow);
+    } catch {
+      setProfile(null);
+    } finally {
+      setProfileLoading(false);
     }
-    const id = extractYouTubeId(formUrl.trim() || "");
-    if (!id) {
-      setError("Please paste a valid YouTube link.");
-      return;
-    }
-    const title = (formTitle || "Untitled").trim();
-    setVideos((v) => [...v, { id, title, url: formUrl.trim() }]);
-    setFormTitle("");
-    setFormUrl("");
   }
 
-  function removeVideo(idx: number) {
-    setVideos((v) => v.filter((_, i) => i !== idx));
-    if (flippedIndex === idx) setFlippedIndex(null);
+  function onboardingLocalDone(): boolean {
+    try { return localStorage.getItem(LS_DONE) === "1"; } catch { return false; }
+  }
+  function profileSaysDone(p: ProfileRow | null): boolean { return !!p?.onboarding_done; }
+  function showOnboarding(): boolean {
+    if (profileSaysDone(profile)) return false;
+    if (onboardingLocalDone()) return false;
+    return true;
+  }
+  async function handleOnboardingDone() {
+    if (userId) await loadProfile(userId);
   }
 
-  function resetAll() {
-    setVideos([]);
-    setFlippedIndex(null);
-    setActiveId(null);
-    localStorage.removeItem(STORAGE_KEY);
+  /* ----- tabs ----- */
+  const tabs = useMemo(
+    () =>
+      [
+        { key: "today",      label: "Today",      icon: "✅" },
+        { key: "calendar",   label: "Calendar",   icon: "🗓️" },
+        { key: "goals",      label: "Goals",      icon: "🎯" },
+        { key: "vision",     label: "Vision",     icon: "🌈" },
+        { key: "gratitude",  label: "Gratitude",  icon: "🙏" },
+        { key: "exercise",   label: "Exercise",   icon: "🏋️" },
+        { key: "wins",       label: "Wins",       icon: "🏆" },
+        { key: "alfred",     label: "Alfred",     icon: "🤖" },
+        { key: "confidence", label: "Confidence", icon: "🔥" },
+        { key: "notes",      label: "Notes",      icon: "📝" },
+        { key: "focus",      label: "Focus",      icon: "🎧" },
+        { key: "meditation", label: "Meditation", icon: "📺" }, // new
+      ] as const,
+    []
+  );
+
+  function renderTab() {
+    switch (tab) {
+      case "today":       return <TodayScreen externalDateISO={externalDateISO} />;
+      case "calendar":    return <CalendarScreen />;
+      case "goals":       return <GoalsScreen />;
+      case "vision":      return <VisionBoardScreen />;
+      case "gratitude":   return <GratitudeScreen />;
+      case "exercise":    return <ExerciseDiaryScreen />;
+      case "wins":        return <WinsScreen />;
+      case "alfred":      return <AlfredScreen />;
+      case "confidence":  return <ConfidenceScreen />;
+      case "notes":       return <NotesScreen />;
+      case "focus":       return <FocusAlfredScreen />;
+      case "meditation":  return <MeditationScreen />;
+      default:            return <TodayScreen externalDateISO={externalDateISO} />;
+    }
   }
 
   return (
-    <div className="w-full min-h-[100dvh] bg-gradient-to-b from-slate-50 to-slate-100 text-slate-900">
-      <div className="mx-auto max-w-6xl px-4 py-8">
-        {/* Header */}
-        <div className="flex items-center justify-between gap-4 mb-6">
-          <div>
-            <h1 className="text-3xl md:text-4xl font-bold tracking-tight">BYB Meditation Centre</h1>
-            <p className="text-sm md:text-base text-slate-500">Motivation Centre · Save up to {MAX_VIDEOS} favourites</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={resetAll} className="px-3 py-2 rounded-md border bg-white hover:bg-slate-50">
-              Reset
-            </button>
-          </div>
-        </div>
-
-        {/* Add form */}
-        <div className="mb-8 border rounded-xl bg-white">
-          <div className="p-4 border-b">
-            <h2 className="text-lg font-semibold">Add a YouTube video</h2>
-          </div>
-          <div className="p-4 grid grid-cols-1 md:grid-cols-5 gap-3 items-center">
-            <div className="md:col-span-2">
-              <label className="text-sm font-medium">Title</label>
-              <input
-                placeholder="e.g. 10-Min Morning Breath"
-                value={formTitle}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormTitle(e.target.value)}
-                className="mt-1 w-full border rounded-md px-3 py-2"
-              />
-            </div>
-            <div className="md:col-span-3">
-              <label className="text-sm font-medium">YouTube Link</label>
-              <div className="flex gap-2 mt-1">
+    <AuthGate>
+      <div className="app-shell" style={{ display: "grid", gap: 12 }}>
+        {profileLoading ? (
+          <div className="card">Loading profile…</div>
+        ) : showOnboarding() ? (
+          <OnboardingScreen onDone={handleOnboardingDone} />
+        ) : (
+          <>
+            {/* Top header: 2-column grid that stacks on small screens */}
+            <div className="card header">
+              <div className="brand">BYB</div>
+              <div className="header-actions">
                 <input
-                  placeholder="https://www.youtube.com/watch?v=..."
-                  value={formUrl}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormUrl(e.target.value)}
-                  className="w-full border rounded-md px-3 py-2"
+                  type="date"
+                  value={externalDateISO ?? ""}
+                  onChange={(e) => setExternalDateISO(e.target.value || undefined)}
                 />
-                <button
-                  onClick={addVideo}
-                  disabled={!canAddMore}
-                  className="px-3 py-2 rounded-md border bg-black text-white disabled:opacity-50"
-                >
-                  Add
-                </button>
+                <button onClick={() => setExternalDateISO(undefined)}>Today</button>
               </div>
-              <p className="text-xs text-slate-500 mt-1">You can save {MAX_VIDEOS - videos.length} more.</p>
-              {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
             </div>
-          </div>
-        </div>
 
-        {/* Shelf */}
-        <div className="space-y-6">
-          <div className="rounded-2xl p-4 shadow-inner bg-[url('https://images.unsplash.com/photo-1517329782449-810562a4ec2a?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-10 gap-3">
-              {videos.map((v, i) => (
-                <div key={`${v.id}-${i}`} className="relative h-48 [perspective:1000px]">
-                  <div
-                    className={`relative h-full w-full transition-transform duration-500 [transform-style:preserve-3d] ${flippedIndex === i ? "[transform:rotateY(180deg)]" : ""}`}
+            {/* Active tab */}
+            <div>{renderTab()}</div>
+
+            {/* Bottom shortcuts — horizontal scroll bar */}
+            <nav className="tabbar" aria-label="Primary">
+              <div className="tabbar-inner">
+                {tabs.map((t) => (
+                  <button
+                    key={t.key}
+                    className="tab-btn"
+                    data-active={tab === (t.key as Tab)}
+                    onClick={() => setTab(t.key as Tab)}
+                    title={t.label}
                   >
-                    {/* Spine */}
-                    <button
-                      onClick={() => setFlippedIndex(flippedIndex === i ? null : i)}
-                      className="absolute inset-0 rounded-xl bg-gradient-to-b from-slate-800 to-slate-700 border border-slate-900 shadow-md flex items-center justify-center [backface-visibility:hidden]"
-                      title={v.title}
-                    >
-                      <div className="flex flex-col items-center">
-                        <div className="h-36 w-10 bg-slate-200/10 rounded-md border border-slate-600 shadow-inner flex items-center justify-center">
-                          <span className="[writing-mode:vertical-rl] rotate-180 text-xs font-semibold tracking-wide text-white">
-                            {v.title}
-                          </span>
-                        </div>
-                        <span className="mt-2 text-[10px] uppercase tracking-wider text-slate-300">BYB Tape #{i + 1}</span>
-                      </div>
-                    </button>
-
-                    {/* Front */}
-                    <div className="absolute inset-0 rounded-xl bg-slate-900 border border-slate-700 overflow-hidden [transform:rotateY(180deg)] [backface-visibility:hidden]">
-                      <div className="relative h-full w-full">
-                        <img src={thumbUrl(v.id)} alt={v.title} className="h-full w-full object-cover opacity-90" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-black/0" />
-                        <div className="absolute bottom-0 left-0 right-0 p-2 flex items-center justify-between gap-2">
-                          <button
-                            onClick={() => setFlippedIndex(null)}
-                            className="px-2 py-1 rounded-md border bg-white text-sm"
-                          >
-                            Back
-                          </button>
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => setActiveId(v.id)}
-                              className="px-2 py-1 rounded-md border bg-black text-white text-sm"
-                            >
-                              Play
-                            </button>
-                            <button
-                              onClick={() => removeVideo(i)}
-                              className="px-2 py-1 rounded-md border bg-white text-sm"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              {/* Empty slots */}
-              {Array.from({ length: Math.max(0, MAX_VIDEOS - videos.length) }).map((_, i) => (
-                <div key={`empty-${i}`} className="relative h-48">
-                  <div className="absolute inset-0 rounded-xl border-2 border-dashed border-slate-300/60 flex items-center justify-center">
-                    <div className="flex flex-col items-center text-xs text-slate-600">
-                      <span className="mb-1">＋</span>
-                      Add video
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* TV Viewer */}
-          {activeId && (
-            <div className="mx-auto max-w-5xl">
-              <div className="relative mx-auto rounded-[2rem] border-8 border-slate-800 bg-slate-950 shadow-2xl overflow-hidden">
-                {/* Screen */}
-                <div className="bg-black aspect-video w-full">
-                  <iframe
-                    className="w-full h-[56.25vw] max-h-[70vh]"
-                    src={embedUrl(activeId)}
-                    title="BYB TV"
-                    frameBorder={0}
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                  />
-                </div>
-                {/* Bezel */}
-                <div className="absolute -bottom-0 left-0 right-0 h-14 bg-slate-900 border-t border-slate-800 flex items-center justify-between px-4">
-                  <span className="font-semibold tracking-widest text-slate-200">BYB TV</span>
-                  <div className="flex items-center gap-2">
-                    <div className="h-3 w-3 rounded-full bg-emerald-500 animate-pulse" title="Power" />
-                    <button onClick={() => setActiveId(null)} className="px-2 py-1 rounded-md border bg-white text-sm">
-                      Close
-                    </button>
-                  </div>
-                </div>
-                {/* Feet */}
-                <div className="absolute -bottom-3 left-6 h-3 w-12 bg-slate-800 rounded-b-xl" />
-                <div className="absolute -bottom-3 right-6 h-3 w-12 bg-slate-800 rounded-b-xl" />
+                    <span className="icon" aria-hidden>{t.icon}</span>
+                    <span className="label">{t.label}</span>
+                  </button>
+                ))}
               </div>
-            </div>
-          )}
-        </div>
+            </nav>
+          </>
+        )}
       </div>
-    </div>
+    </AuthGate>
   );
 }
