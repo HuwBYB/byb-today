@@ -6,6 +6,7 @@ import type { CSSProperties } from "react";
    Types & constants
 ========================= */
 type Video = { id: string; title: string; url: string };
+type View = "shelf" | "details" | "tv";
 
 const STORAGE_KEY = "byb.meditationCentre.videos";
 const MAX_VIDEOS = 10;
@@ -33,7 +34,6 @@ function extractYouTubeId(url: string): string | null {
       const short = u.pathname.replace("/", "");
       if (short) return short;
     }
-    // Fallback loose match
     const loose = url.match(/([a-zA-Z0-9_-]{6,})/g)?.find((x) => x.length >= 6);
     return loose || null;
   } catch {
@@ -51,8 +51,7 @@ function loadYouTubeAPI(): Promise<any> {
 
   ytPromise = new Promise((resolve) => {
     const w = window as any;
-    const existing = document.getElementById("youtube-iframe-api");
-    if (!existing) {
+    if (!document.getElementById("youtube-iframe-api")) {
       const tag = document.createElement("script");
       tag.id = "youtube-iframe-api";
       tag.src = "https://www.youtube.com/iframe_api";
@@ -101,7 +100,8 @@ const verticalTitle: CSSProperties = {
 ========================= */
 export default function MeditationScreen() {
   const [videos, setVideos] = useState<Video[]>([]);
-  const [selected, setSelected] = useState<number | null>(null);
+  const [view, setView] = useState<View>("shelf");
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
 
   const [formTitle, setFormTitle] = useState("");
@@ -114,14 +114,11 @@ export default function MeditationScreen() {
     if (raw) {
       try {
         const parsed = JSON.parse(raw) as Video[];
-        // If parsed is empty (e.g., first-ever run but localStorage set), fall back to seeds
         if (Array.isArray(parsed) && parsed.length > 0) {
           setVideos(parsed);
           return;
         }
-      } catch {
-        /* noop */
-      }
+      } catch {/* noop */}
     }
     const prepared: Video[] = SEEDS.map((s, i) => {
       const id = extractYouTubeId(s.url || "") || `seed-${i}`;
@@ -150,32 +147,44 @@ export default function MeditationScreen() {
 
   function removeVideo(idx: number) {
     setVideos((v) => v.filter((_, i) => i !== idx));
-    if (selected === idx) setSelected(null);
-    if (videos[idx]?.id === activeId) setActiveId(null);
+    if (selectedIndex === idx) {
+      setSelectedIndex(null);
+      setView("shelf");
+    }
+    if (videos[idx]?.id === activeId) {
+      setActiveId(null);
+      setView("shelf");
+    }
   }
 
   function resetAll() {
     setVideos([]);
-    setSelected(null);
+    setSelectedIndex(null);
     setActiveId(null);
+    setView("shelf");
     localStorage.removeItem(STORAGE_KEY);
   }
 
+  const selectedVideo = useMemo(
+    () => (selectedIndex != null ? videos[selectedIndex] : null),
+    [selectedIndex, videos]
+  );
+
   /* =========================
-     TV Overlay with YT Player
+     TV page (with YT IFrame API)
   ========================= */
   const tvRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<any>(null);
 
-  // Create/destroy player when activeId changes
   useEffect(() => {
+    // build/destroy the player only when on TV page with an activeId
+    if (view !== "tv" || !activeId) return;
+
     let disposed = false;
-    async function mount() {
-      if (!activeId || !tvRef.current) return;
+    (async () => {
       const YT = await loadYouTubeAPI();
       if (disposed || !YT || !tvRef.current) return;
 
-      // Clean old player if any
       if (playerRef.current?.destroy) {
         try { playerRef.current.destroy(); } catch {}
         playerRef.current = null;
@@ -185,19 +194,13 @@ export default function MeditationScreen() {
         height: "100%",
         width: "100%",
         videoId: activeId,
-        playerVars: {
-          rel: 0,
-          modestbranding: 1,
-          playsinline: 1,
-        },
+        playerVars: { rel: 0, modestbranding: 1, playsinline: 1 },
         events: {
-          onReady: (e: any) => {
-            try { e.target.playVideo(); } catch {}
-          },
+          onReady: (e: any) => { try { e.target.playVideo(); } catch {} },
         },
       });
-    }
-    mount();
+    })();
+
     return () => {
       disposed = true;
       if (playerRef.current?.destroy) {
@@ -205,45 +208,17 @@ export default function MeditationScreen() {
         playerRef.current = null;
       }
     };
-  }, [activeId]);
+  }, [view, activeId]);
 
-  function handlePause() {
-    try { playerRef.current?.pauseVideo?.(); } catch {}
-  }
-  function handlePlay() {
-    try { playerRef.current?.playVideo?.(); } catch {}
-  }
-  function handleCloseTV() {
-    try { playerRef.current?.stopVideo?.(); } catch {}
-    setActiveId(null);
-  }
+  function pauseVideo() { try { playerRef.current?.pauseVideo?.(); } catch {} }
+  function playVideo()  { try { playerRef.current?.playVideo?.(); }  catch {} }
 
   /* =========================
-     Render
+     Page renders
   ========================= */
-  const selectedVideo = useMemo(
-    () => (selected != null ? videos[selected] : null),
-    [selected, videos]
-  );
-
-  return (
-    <div className="w-full min-h-[100dvh] bg-gradient-to-b from-slate-50 to-slate-100 text-slate-900">
-      <div className="mx-auto max-w-6xl px-4 py-8">
-        {/* Header */}
-        <div className="flex items-center justify-between gap-4 mb-6">
-          <div>
-            <h1 className="text-3xl md:text-4xl font-bold tracking-tight">BYB Meditation Centre</h1>
-            <p className="text-sm md:text-base text-slate-500">
-              Motivation Centre · Save up to {MAX_VIDEOS} favourites
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={resetAll} className="px-3 py-2 rounded-md border bg-white hover:bg-slate-50">
-              Reset
-            </button>
-          </div>
-        </div>
-
+  function renderShelfPage() {
+    return (
+      <>
         {/* Add form */}
         <div className="mb-8 border rounded-xl bg-white">
           <div className="p-4 border-b">
@@ -284,7 +259,7 @@ export default function MeditationScreen() {
           </div>
         </div>
 
-        {/* Shelf – clean row of VHS spines */}
+        {/* Shelf */}
         <div className="border rounded-2xl bg-white p-4 shadow-sm">
           <div className="flex gap-3 overflow-x-auto pb-1" role="list">
             {videos.map((v, i) => (
@@ -294,14 +269,13 @@ export default function MeditationScreen() {
                 className="h-48 w-[64px] shrink-0 focus:outline-none focus:ring-2 focus:ring-emerald-400"
                 style={spineStyle}
                 title={v.title}
-                onClick={() => setSelected(i)}
+                onClick={() => { setSelectedIndex(i); setView("details"); }}
               >
                 <div style={goldRule}>
                   <span style={verticalTitle}>{v.title}</span>
                 </div>
               </button>
             ))}
-            {/* Empty placeholders */}
             {Array.from({ length: Math.max(0, MAX_VIDEOS - videos.length) }).map((_, i) => (
               <div
                 key={`empty-${i}`}
@@ -312,88 +286,115 @@ export default function MeditationScreen() {
             ))}
           </div>
         </div>
+      </>
+    );
+  }
 
-        {/* Details panel below shelf (shows when a spine is selected) */}
-        {selectedVideo && (
-          <div className="mt-6 border rounded-xl bg-white overflow-hidden">
-            <div className="grid grid-cols-1 md:grid-cols-3">
-              <div className="aspect-video md:col-span-2 bg-black/5">
-                <img
-                  src={thumbUrl(selectedVideo.id)}
-                  alt={selectedVideo.title}
-                  className="w-full h-full object-cover"
-                />
-              </div>
-              <div className="p-4 flex flex-col gap-3">
-                <h3 className="text-lg font-semibold">{selectedVideo.title}</h3>
-                <div className="mt-auto flex flex-wrap gap-2">
-                  <button
-                    onClick={() => setActiveId(selectedVideo.id)}
-                    className="px-3 py-2 rounded-md border bg-black text-white"
-                  >
-                    Play on BYB TV
-                  </button>
-                  <button
-                    onClick={() => setSelected(null)}
-                    className="px-3 py-2 rounded-md border bg-white"
-                  >
-                    Close
-                  </button>
-                  <button
-                    onClick={() => removeVideo(selected!)}
-                    className="px-3 py-2 rounded-md border bg-white"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TV Overlay */}
-        {activeId && (
-          <div
-            className="fixed inset-0 z-50 bg-black/70 grid place-items-center p-4"
-            onClick={handleCloseTV}
+  function renderDetailsPage() {
+    if (!selectedVideo) return null;
+    return (
+      <div className="border rounded-xl bg-white overflow-hidden">
+        <div className="p-4 flex items-center justify-between border-b">
+          <button onClick={() => setView("shelf")} className="px-3 py-2 rounded-md border bg-white">← Back</button>
+          <h3 className="text-lg font-semibold">{selectedVideo.title}</h3>
+          <div style={{ width: 80 }} />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3">
+          <button
+            className="aspect-video md:col-span-2 bg-black/5 hover:opacity-90 transition"
+            onClick={() => { setActiveId(selectedVideo.id); setView("tv"); }}
+            title="Open in BYB TV"
           >
-            <div
-              className="relative w-full max-w-5xl"
-              onClick={(e) => e.stopPropagation()} // prevent closing when clicking inside
-            >
-              {/* TV bezel */}
-              <div className="relative bg-black rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.6)]">
-                {/* Inner glossy frame */}
-                <div className="rounded-xl border border-slate-800 p-3">
-                  <div className="rounded-md overflow-hidden bg-black aspect-video">
-                    {/* YT player mounts here */}
-                    <div ref={tvRef} className="w-full h-full" />
-                  </div>
-                </div>
-
-                {/* Lower bezel badge */}
-                <div className="absolute -bottom-10 left-1/2 -translate-x-1/2">
-                  <div className="px-6 py-2 rounded-full bg-neutral-900 border border-neutral-700 text-neutral-200 tracking-[0.3em] text-xs font-semibold shadow">
-                    BYB TV
-                  </div>
-                </div>
-              </div>
-
-              {/* Controls */}
-              <div className="mt-16 flex items-center justify-center gap-3">
-                <button onClick={handlePlay} className="px-4 py-2 rounded-md border bg-white">
-                  Play
-                </button>
-                <button onClick={handlePause} className="px-4 py-2 rounded-md border bg-white">
-                  Pause
-                </button>
-                <button onClick={handleCloseTV} className="px-4 py-2 rounded-md border bg-black text-white">
-                  Close
-                </button>
-              </div>
+            <img src={thumbUrl(selectedVideo.id)} alt={selectedVideo.title} className="w-full h-full object-cover" />
+          </button>
+          <div className="p-4 flex flex-col gap-3">
+            <p className="text-sm text-slate-600">Tap the thumbnail to play on BYB TV.</p>
+            <div className="mt-auto flex flex-wrap gap-2">
+              <button
+                onClick={() => { setActiveId(selectedVideo.id); setView("tv"); }}
+                className="px-3 py-2 rounded-md border bg-black text-white"
+              >
+                Play on BYB TV
+              </button>
+              <button
+                onClick={() => removeVideo(selectedIndex!)}
+                className="px-3 py-2 rounded-md border bg-white"
+              >
+                Delete
+              </button>
             </div>
           </div>
-        )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderTVPage() {
+    if (!activeId || !selectedVideo) return null;
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <button onClick={() => { pauseVideo(); setView("details"); }} className="px-3 py-2 rounded-md border bg-white">
+            ← Back
+          </button>
+          <h3 className="text-lg font-semibold">{selectedVideo.title}</h3>
+          <div style={{ width: 80 }} />
+        </div>
+
+        {/* TV bezel */}
+        <div className="relative bg-black rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.6)]">
+          <div className="rounded-xl border border-slate-800 p-3">
+            <div className="rounded-md overflow-hidden bg-black aspect-video">
+              <div ref={tvRef} className="w-full h-full" />
+            </div>
+          </div>
+
+          {/* Lower bezel badge */}
+          <div className="absolute -bottom-10 left-1/2 -translate-x-1/2">
+            <div className="px-6 py-2 rounded-full bg-neutral-900 border border-neutral-700 text-neutral-200 tracking-[0.3em] text-xs font-semibold shadow">
+              BYB TV
+            </div>
+          </div>
+        </div>
+
+        {/* Controls */}
+        <div className="mt-12 flex items-center justify-center gap-3">
+          <button onClick={playVideo} className="px-4 py-2 rounded-md border bg-white">Play</button>
+          <button onClick={pauseVideo} className="px-4 py-2 rounded-md border bg-white">Pause</button>
+          <button
+            onClick={() => { pauseVideo(); setActiveId(null); setView("details"); }}
+            className="px-4 py-2 rounded-md border bg-black text-white"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  /* =========================
+     Wrapper layout
+  ========================= */
+  return (
+    <div className="w-full min-h-[100dvh] bg-gradient-to-b from-slate-50 to-slate-100 text-slate-900">
+      <div className="mx-auto max-w-6xl px-4 py-8">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div>
+            <h1 className="text-3xl md:text-4xl font-bold tracking-tight">BYB Meditation Centre</h1>
+            <p className="text-sm md:text-base text-slate-500">Motivation Centre · Save up to {MAX_VIDEOS} favourites</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={resetAll} className="px-3 py-2 rounded-md border bg-white hover:bg-slate-50">
+              Reset
+            </button>
+          </div>
+        </div>
+
+        {/* “Pages” */}
+        {view === "shelf"   && renderShelfPage()}
+        {view === "details" && renderDetailsPage()}
+        {view === "tv"      && renderTVPage()}
       </div>
     </div>
   );
