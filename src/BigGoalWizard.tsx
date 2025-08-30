@@ -101,9 +101,10 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
       const cat = goal.category as AllowedCategory;
       const col = goal.category_color;
 
-      // Milestones
+      // Milestones (TARGET)
       tasks.push({
         user_id:userId,
+        goal_id: goal.id,
         title:`BIG GOAL — Target: ${goal.title}`,
         due_date: targetDate,
         source:"big_goal_target",
@@ -111,15 +112,18 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         category:cat,
         category_color:col
       });
-      if (computedHalfDate && halfwayNote.trim()) {
+
+      // Explicit midpoint review (ALWAYS create; note optional)
+      if (computedHalfDate) {
         tasks.push({
-          user_id:userId,
-          title:`BIG GOAL — Halfway: ${halfwayNote.trim()}`,
+          user_id: userId,
+          goal_id: goal.id,
+          title: `BIG GOAL — Midpoint Review${halfwayNote.trim() ? `: ${halfwayNote.trim()}` : ""}`,
           due_date: computedHalfDate,
-          source:"big_goal_halfway",
-          priority:2,
-          category:cat,
-          category_color:col
+          source: "big_goal_midpoint_review",
+          priority: 2,
+          category: cat,
+          category_color: col
         });
       }
 
@@ -129,6 +133,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         while (d <= end) {
           tasks.push({
             user_id:userId,
+            goal_id: goal.id,
             title:`BIG GOAL — Monthly: ${monthlyCommit.trim()}`,
             due_date: toISO(d),
             source:"big_goal_monthly",
@@ -146,6 +151,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         while (d <= end) {
           tasks.push({
             user_id:userId,
+            goal_id: goal.id,
             title:`BIG GOAL — Weekly: ${weeklyCommit.trim()}`,
             due_date: toISO(d),
             source:"big_goal_weekly",
@@ -163,6 +169,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         while (d <= end) {
           tasks.push({
             user_id:userId,
+            goal_id: goal.id,
             title:`BIG GOAL — Daily: ${dailyCommit.trim()}`,
             due_date: toISO(d),
             source:"big_goal_daily",
