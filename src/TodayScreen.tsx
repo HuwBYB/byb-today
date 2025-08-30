@@ -1,16 +1,17 @@
+// TodayScreen.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* =============================================
-   BYB — Today Screen (Pastel+Polish, No-Overflow)
-   - Pixel-safe: clamps all media + containers
-   - Pastel theme tokens + gradient background
+   BYB — Today Screen (Pastel + No-Overflow, Full)
+   - Headspace-style visuals
+   - Hard clamps to prevent horizontal bleed
    - Safe-area aware sticky bars
-   - Micro-animations (taps, streak pulse)
-   - Headspace-style calm visuals
+   - Confetti, streaks, onboarding
    ============================================= */
 
+/* ===== Types ===== */
 type Task = {
   id: number;
   user_id: string;
@@ -18,16 +19,15 @@ type Task = {
   due_date: string | null;
   status: "pending" | "done" | string;
   priority: number | null; // 2 => Top
-  source: string | null; // e.g., today_repeat_daily
+  source: string | null;   // e.g., today_repeat_daily
   goal_id: number | null;
   completed_at: string | null;
 };
-
 type GoalLite = { id: number; title: string };
 type BigGoal = { id: number; title: string } | null;
 type Props = { externalDateISO?: string };
 
-/* ===== date helpers ===== */
+/* ===== Date helpers ===== */
 function todayISO() {
   const d = new Date();
   const yyyy = d.getFullYear();
@@ -51,7 +51,7 @@ function addDays(iso: string, n: number) {
   return toISO(d);
 }
 
-/* ===== repeat config ===== */
+/* ===== Repeat config ===== */
 type Repeat = "" | "daily" | "weekdays" | "weekly" | "monthly" | "annually";
 const REPEAT_COUNTS: Record<Exclude<Repeat, "">, number> = {
   daily: 14,
@@ -97,10 +97,11 @@ function makeSeriesKey(repeat: Repeat) {
   return repeat ? `${REPEAT_PREFIX}${repeat}` : "manual";
 }
 
-/* ===== display-name helper ===== */
+/* ===== Greeting helpers ===== */
 const LS_NAME = "byb:display_name";
 const LS_POOL = "byb:display_pool"; // string[]
 const LS_ROTATE = "byb:rotate_nicknames"; // "1" | "0" (default on)
+
 function pickGreetingLabel(): string {
   try {
     const name = (localStorage.getItem(LS_NAME) || "").trim();
@@ -117,7 +118,7 @@ function pickGreetingLabel(): string {
   }
 }
 
-/* ===== summary / helpers ===== */
+/* ===== Summary / tiny helpers ===== */
 type Summary = {
   doneToday: number;
   pendingToday: number;
@@ -127,6 +128,7 @@ type Summary = {
   streak: number;
   bestStreak: number;
 };
+
 function formatNiceDate(iso: string): string {
   try {
     const d = fromISO(iso);
@@ -147,7 +149,7 @@ function timeGreeting(date = new Date()): string {
   return "Good evening";
 }
 
-/* ===== Confetti + Toast ===== */
+/* ===== Lightweight Confetti (no deps) ===== */
 function fireConfetti() {
   const container = document.createElement("div");
   container.style.position = "fixed";
@@ -181,6 +183,8 @@ function fireConfetti() {
   }
   setTimeout(() => container.remove(), 2200);
 }
+
+/* ===== Alfred micro-encouragements ===== */
 const ALFRED_LINES = [
   "Lovely momentum. Keep it rolling.",
   "One pebble at a time becomes a mountain.",
@@ -189,6 +193,8 @@ const ALFRED_LINES = [
   "Mic drop. Onto the next."
 ];
 function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)] as T; }
+
+/* ===== Tiny toast hook ===== */
 function useToast() {
   const [msg, setMsg] = useState<string | null>(null);
   function show(m: string) {
@@ -207,8 +213,11 @@ function useToast() {
   return { node, show };
 }
 
+/* =============================================
+   Component
+   ============================================= */
 export default function TodayScreen({ externalDateISO }: Props) {
-  /* ===== Global theme + no-bleed CSS ===== */
+  /* ===== Global theme + NO-BLEED CSS ===== */
   useEffect(() => {
     const style = document.createElement("style");
     style.setAttribute("data-byb-global", "1");
@@ -218,38 +227,54 @@ export default function TodayScreen({ externalDateISO }: Props) {
         --bg-gradient: radial-gradient(1200px 600px at 20% -10%, #f7f6ff 10%, transparent 60%),
                        radial-gradient(900px 500px at 120% 10%, #f0fff7 10%, transparent 60%),
                        #fafafa;
-        --card: #ffffff;
-        --border: #e5e7eb;
-        --text: #0f172a;
-        --muted: #6b7280;
-        --primary: #6c8cff; /* gentle indigo */
-        --primary-soft: #eef2ff;
-        --success-soft: #dcfce7;
-        --danger-soft: #fee2e2;
-        --shadow: 0 10px 30px rgba(0,0,0,.06);
+        --card:#fff; --border:#e5e7eb; --text:#0f172a; --muted:#6b7280;
+        --primary:#6c8cff; --primary-soft:#eef2ff; --success-soft:#dcfce7; --danger-soft:#fee2e2;
+        --shadow:0 10px 30px rgba(0,0,0,.06);
       }
+      /* baseline */
       *,*::before,*::after{ box-sizing:border-box; }
-      html,body,#root{ width:100%; max-width:100%; overflow-x:hidden; background: var(--bg-gradient); color: var(--text); }
-      /* MEDIA CLAMP (fixes right-edge leaks) */
+      html,body,#root{ margin:0; width:100%; max-width:100%; background:var(--bg-gradient); color:var(--text); }
+      /* STOP HORIZONTAL BLEED GLOBALLY */
+      html, body { overflow-x: hidden; }
+      :root { overflow-x: clip; }           /* avoids scrollbars where supported */
+      #root, body { max-width: 100vw; }
+
+      /* MEDIA CLAMP (includes icons inside buttons) */
       img,svg,video,canvas{ max-width:100%; height:auto; display:block; }
-      /* Common UI */
-      .card{ width:100%; max-width:100%; background:var(--card); border:1px solid var(--border); border-radius:16px; padding:12px; box-shadow: var(--shadow); }
-      .badge{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; background:var(--primary-soft); color:#273a91; font-size:12px; }
-      .muted{ color: var(--muted); }
-      .btn-primary{ background:var(--primary); color:#fff; border:0; padding:8px 12px; border-radius:10px; box-shadow: 0 6px 14px rgba(108,140,255,.25); transform: translateZ(0); }
-      .btn-primary:active{ transform: scale(.98); }
+      button img, button svg { max-width:100%; height:auto; display:block; }
+
+      /* TYPO WRAP (long task lines / badges / headings) */
+      h1,h2,h3,h4,p,span,small,button{ overflow-wrap:anywhere; }
+
+      /* UI atoms */
+      .card{ width:100%; max-width:100%; background:var(--card); border:1px solid var(--border);
+             border-radius:16px; padding:12px; box-shadow:var(--shadow); }
+      .badge{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px;
+              background:var(--primary-soft); color:#273a91; font-size:12px; }
+      .muted{ color:var(--muted); }
+
+      .btn-primary{ background:var(--primary); color:#fff; border:0; padding:8px 12px; border-radius:10px;
+                    box-shadow:0 6px 14px rgba(108,140,255,.25); transform:translateZ(0); }
+      .btn-primary:active{ transform:scale(.98); }
       .btn-soft{ background:#fff; border:1px solid var(--border); padding:8px 12px; border-radius:12px; }
       .btn-ghost{ background:transparent; border:0; color:var(--muted); }
+
       input,select,button{ max-width:100%; }
       input,select{ width:100%; border:1px solid var(--border); border-radius:10px; padding:10px 12px; background:#fff; }
+
+      /* The mobile offender: date input can exceed viewport width */
+      input[type="date"]{ width:100%; max-width:180px; }
+      @media (max-width: 360px){ input[type="date"]{ max-width:140px; } }
+
       ul.list{ list-style:none; padding:0; margin:0; display:grid; gap:8px; }
-      li.item{ background:#fff; border:1px solid var(--border); border-radius:12px; padding:10px; box-shadow: var(--shadow); }
-      label, .row{ min-width:0; }
+      li.item{ background:#fff; border:1px solid var(--border); border-radius:12px; padding:10px; box-shadow:var(--shadow); }
+
+      /* horizontal lists that shouldn't cause page scroll */
       .h-scroll{ display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:4px; }
       .h-scroll::-webkit-scrollbar{ display:none; }
-      /* reduced motion friendliness */
+
       @media (prefers-reduced-motion: reduce){
-        *{ animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; scroll-behavior:auto !important; }
+        *{ animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; }
       }
     `;
     document.head.appendChild(style);
@@ -266,19 +291,23 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Add task (advanced)
   const [newTitle, setNewTitle] = useState("");
   const [newTop, setNewTop] = useState(false);
   const [newRepeat, setNewRepeat] = useState<Repeat>("");
   const [adding, setAdding] = useState(false);
 
+  // Quick capture
   const [now, setNow] = useState<Date>(new Date());
   const [quickTitle, setQuickTitle] = useState("");
   const [quickTop, setQuickTop] = useState(false);
   const [savingQuick, setSavingQuick] = useState(false);
 
+  // Greeting
   const [greetName, setGreetName] = useState<string>("");
   const [missed, setMissed] = useState<boolean>(false);
 
+  // Responsive: <420px treated as compact
   const [isCompact, setIsCompact] = useState<boolean>(false);
   useEffect(() => {
     function check() { setIsCompact(window.innerWidth < 420); }
@@ -287,6 +316,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     return () => window.removeEventListener("resize", check);
   }, []);
 
+  // Daily summary
   const [summary, setSummary] = useState<Summary>({
     doneToday: 0,
     pendingToday: 0,
@@ -297,6 +327,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     bestStreak: 0
   });
 
+  // streak micro animation
   const prevStreak = useRef(0);
   const [streakPulse, setStreakPulse] = useState(false);
   useEffect(() => {
@@ -308,6 +339,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     prevStreak.current = summary.streak;
   }, [summary.streak]);
 
+  // Edit modal
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -317,6 +349,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [applyFuture, setApplyFuture] = useState(false);
   const [busyEdit, setBusyEdit] = useState(false);
 
+  // Onboarding
   const [obStep, setObStep] = useState<0 | 1 | 2 | 3>(0);
   const [obName, setObName] = useState("");
   const [obNicks, setObNicks] = useState("");
@@ -324,8 +357,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
   const toast = useToast();
 
+  // external date change
   useEffect(() => { if (externalDateISO) setDateISO(externalDateISO); }, [externalDateISO]);
 
+  // user + greeting + onboarding
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -336,9 +371,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
       const last = user?.last_sign_in_at ? new Date(user.last_sign_in_at) : null;
       if (last) {
-        const now = new Date();
+        const n = new Date();
         const days = Math.floor(
-          (new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() -
+          (new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime() -
             new Date(last.getFullYear(), last.getMonth(), last.getDate()).getTime()) / 86400000
         );
         setMissed(days >= 2);
@@ -351,10 +386,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
     });
   }, []);
 
+  // clock
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id); }, []);
 
   function isOverdue(t: Task) { return !!t.due_date && t.due_date < dateISO && t.status !== "done"; }
 
+  /* ===== Data loading ===== */
   async function load() {
     if (!userId) return;
     setLoading(true);
@@ -370,9 +407,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
       if (error) throw error;
 
       const raw = (data as Task[]) || [];
-      const list = raw.filter(
-        (t) => t.due_date === dateISO || (t.due_date! < dateISO && t.status !== "done")
-      );
+      const list = raw.filter((t) => t.due_date === dateISO || (t.due_date! < dateISO && t.status !== "done"));
       setTasks(list);
 
       const ids = Array.from(new Set(list.map((t) => t.goal_id).filter((v): v is number => typeof v === "number")));
@@ -456,6 +491,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     return g ? `${base} (${g})` : base;
   }
 
+  /* ===== Mutations ===== */
   async function toggleDone(t: Task) {
     try {
       const markDone = t.status !== "done";
@@ -489,7 +525,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
     if (!userId || !title.trim()) return;
     const clean = title.trim();
     const occurrences = generateOccurrences(dateISO, repeat);
-    const rows = occurrences.map((iso) => ({ user_id: userId, title: clean, due_date: iso, status: "pending", priority: top ? 2 : 0, source: repeat ? makeSeriesKey(repeat) : "manual" }));
+    const rows = occurrences.map((iso) => ({
+      user_id: userId, title: clean, due_date: iso, status: "pending",
+      priority: top ? 2 : 0, source: repeat ? makeSeriesKey(repeat) : "manual"
+    }));
     const { error } = await supabase.from("tasks").insert(rows as any);
     if (error) throw error;
   }
@@ -513,25 +552,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
       await loadAll();
     } catch (e: any) { setErr(e.message || String(e)); } finally { setSavingQuick(false); }
   }
-
-  const top = tasks.filter((t) => (t.priority ?? 0) >= 2);
-  const rest = tasks.filter((t) => (t.priority ?? 0) < 2);
-  const overdueCount = tasks.filter(isOverdue).length;
-
-  function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode; }) {
-    return (
-      <div className="card" style={{ marginBottom: 12, overflowX: "clip", borderRadius: 16 }}>
-        <div className="row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap", width: "100%" }}>
-          <h2 style={{ margin: 0, fontSize: 18, wordBreak: "break-word" }}>{title}</h2>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", minWidth: 0 }}>{right}<button onClick={loadAll} disabled={loading} className="btn-soft">{loading ? "Refreshing…" : "Refresh"}</button></div>
-        </div>
-        {children}
-      </div>
-    );
-  }
-
-  function todayString() { return todayISO(); }
-  const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   /* ===== Edit modal helpers ===== */
   function openEdit(t: Task) {
@@ -559,17 +579,30 @@ export default function TodayScreen({ externalDateISO }: Props) {
       await supabase.from("tasks").update({ title, priority: top, due_date: due, source: newSeriesKey }).eq("id", editing.id);
 
       if (applyFuture && originalSeriesKey) {
-        await supabase.from("tasks").update({ title, priority: top }).eq("user_id", userId).eq("source", originalSeriesKey).gte("due_date", (editing.due_date || due) as string);
+        await supabase
+          .from("tasks")
+          .update({ title, priority: top })
+          .eq("user_id", userId)
+          .eq("source", originalSeriesKey)
+          .gte("due_date", (editing.due_date || due) as string);
       }
 
       if (originalSeriesKey && editRepeat !== originalRepeat) {
-        await supabase.from("tasks").delete().eq("user_id", userId).eq("source", originalSeriesKey).gte("due_date", (editing.due_date || due) as string).neq("id", editing.id);
+        await supabase
+          .from("tasks")
+          .delete()
+          .eq("user_id", userId)
+          .eq("source", originalSeriesKey)
+          .gte("due_date", (editing.due_date || due) as string)
+          .neq("id", editing.id);
       }
 
       if (editRepeat && editRepeat !== originalRepeat) {
         const occurrences = generateOccurrences(due as string, editRepeat).slice(1);
         if (occurrences.length) {
-          const rows = occurrences.map((iso) => ({ user_id: userId, title, due_date: iso, status: "pending", priority: top, source: makeSeriesKey(editRepeat) }));
+          const rows = occurrences.map((iso) => ({
+            user_id: userId, title, due_date: iso, status: "pending", priority: top, source: makeSeriesKey(editRepeat)
+          }));
           await supabase.from("tasks").insert(rows as any);
         }
       }
@@ -623,10 +656,32 @@ export default function TodayScreen({ externalDateISO }: Props) {
   }
   function obSkip() { setObStep((s) => (s >= 3 ? 0 : (s + 1) as any)); }
 
-  /* ===== Render ===== */
+  /* ===== Computed ===== */
   const niceDate = useMemo(() => formatNiceDate(dateISO), [dateISO]);
   const greeting = useMemo(() => (missed ? "We missed you" : timeGreeting(now)), [missed, now]);
+  const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
+  const top = tasks.filter((t) => (t.priority ?? 0) >= 2);
+  const rest = tasks.filter((t) => (t.priority ?? 0) < 2);
+  const overdueCount = tasks.filter(isOverdue).length;
+
+  /* ===== Section helper ===== */
+  function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode; }) {
+    return (
+      <div className="card" style={{ marginBottom: 12, overflowX: "clip", borderRadius: 16 }}>
+        <div className="row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap", width: "100%", minWidth: 0 }}>
+          <h2 style={{ margin: 0, fontSize: 18, wordBreak: "break-word", minWidth: 0 }}>{title}</h2>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", minWidth: 0 }}>
+            {right}
+            <button onClick={loadAll} disabled={loading} className="btn-soft">{loading ? "Refreshing…" : "Refresh"}</button>
+          </div>
+        </div>
+        {children}
+      </div>
+    );
+  }
+
+  /* ===== Render ===== */
   return (
     <div
       style={{
@@ -634,7 +689,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         gap: 12,
         overflowX: "hidden",
         width: "100%",
-        maxWidth: "100%",
+        maxWidth: "100vw",
         padding: "12px 12px calc(72px + env(safe-area-inset-bottom,0))",
       }}
     >
@@ -652,10 +707,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
           padding: 12
         }}
       >
-        <div className="row" style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap", width: "100%" }}>
+        <div className="row" style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap", width: "100%", minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
             <div style={{ fontWeight: 800, fontSize: 18 }}>BYB</div>
-            <div className="muted">• {niceDate}</div>
+            <div className="muted" style={{ minWidth: 0 }}>• {niceDate}</div>
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
             <span className="badge" title="Win if 1+ top priority or 3+ tasks" style={{ background: summary.isWin ? "var(--success-soft)" : "var(--danger-soft)", border: "1px solid var(--border)" }}>{summary.isWin ? "Win" : "Keep going"}</span>
@@ -672,7 +727,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         )}
 
         {/* Quick row */}
-        <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%" }}>
+        <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%", minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
             <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: 1 }}>{timeStr}</div>
             <div className="muted" style={{ whiteSpace: "nowrap" }}>{dateISO}</div>
@@ -693,7 +748,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
 
         {/* Date controls */}
-        <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%" }}>
+        <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%", minWidth: 0 }}>
           {overdueCount > 0 && (
             <button
               onClick={moveAllOverdueHere}
@@ -704,9 +759,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
               Move all overdue here ({overdueCount})
             </button>
           )}
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", flexWrap: "wrap", width: isCompact ? "100%" : "auto" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", flexWrap: "wrap", width: isCompact ? "100%" : "auto", minWidth: 0 }}>
             <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} style={{ flex: isCompact ? "1 1 220px" : undefined, minWidth: 0, maxWidth: "100%" }} />
-            <button className="btn-soft" onClick={() => setDateISO(todayString())} style={{ flex: isCompact ? "1 1 120px" : undefined }}>Today</button>
+            <button className="btn-soft" onClick={() => setDateISO(todayISO())} style={{ flex: isCompact ? "1 1 120px" : undefined }}>Today</button>
           </div>
         </div>
         {err && <div style={{ color: "red" }}>{err}</div>}
@@ -714,15 +769,17 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
       {/* Biggest Goal */}
       <div className="card" style={{ borderLeft: "6px solid #a7f3d0", borderRadius: 16 }}>
-        <div className="row" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>Today’s Biggest Goal</h2>
+        <div className="row" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <h2 style={{ margin: 0, fontSize: 18, minWidth: 0 }}>Today’s Biggest Goal</h2>
           {bigGoal ? <span className="badge" title="Your long-term focus">Pinned</span> : <span className="badge" title="Set a Big Goal in Profile or Onboarding">Not set</span>}
-          <div style={{ marginLeft: "auto", minWidth: 0 }}>{bigGoal && <span className="muted" style={{ display:"block", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{bigGoal.title}</span>}</div>
+          <div style={{ marginLeft: "auto", minWidth: 0 }}>
+            {bigGoal && <span className="muted" style={{ display:"block", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{bigGoal.title}</span>}
+          </div>
         </div>
         {!bigGoal && <div className="muted" style={{ marginTop: 6 }}>Add a Big Goal to keep today aligned. You can set it in your Profile.</div>}
       </div>
 
-      {/* Lists */}
+      {/* Top Priorities */}
       <Section title="Top Priorities">
         {top.length === 0 ? (
           <div className="muted">Nothing marked top priority for this day.</div>
@@ -735,13 +792,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
                     <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word" }}>
+                      <div style={{ fontWeight: 600, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
                         <span style={{ minWidth:0, overflow:"hidden", textOverflow:"ellipsis" }}>{displayTitle(t)}</span>
                         {overdue && <span className="badge">Overdue</span>}
                         <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => openEdit(t)} title="Edit task">Edit</button>
                       </div>
                       {overdue && (
-                        <div className="muted" style={{ marginTop: 4 }}>
+                        <div className="muted" style={{ marginTop: 4, minWidth: 0 }}>
                           Due {t.due_date} · <button className="btn-ghost" onClick={() => moveToSelectedDate(t.id)}>Move to {dateISO}</button>
                         </div>
                       )}
@@ -754,6 +811,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         )}
       </Section>
 
+      {/* Everything Else */}
       <Section title="Everything Else" right={overdueCount > 0 ? <span className="muted">{overdueCount} overdue</span> : null}>
         {rest.length === 0 ? (
           <div className="muted">Nothing else scheduled.</div>
@@ -766,13 +824,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
                     <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word" }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
                         <span style={{ minWidth:0, overflow:"hidden", textOverflow:"ellipsis" }}>{displayTitle(t)}</span>
                         {overdue && <span className="badge">Overdue</span>}
                         <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => openEdit(t)} title="Edit task">Edit</button>
                       </div>
                       {overdue && (
-                        <div className="muted" style={{ marginTop: 4 }}>
+                        <div className="muted" style={{ marginTop: 4, minWidth: 0 }}>
                           Due {t.due_date} · <button className="btn-ghost" onClick={() => moveToSelectedDate(t.id)}>Move to {dateISO}</button>
                         </div>
                       )}
@@ -799,7 +857,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
           />
         </label>
 
-        <div className="row" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div className="row" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
             <input type="checkbox" checked={newTop} onChange={(e) => setNewTop(e.target.checked)} /> Mark as Top Priority
           </label>
@@ -831,10 +889,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
         <div className="h-scroll">
           {[
             { key: "today", label: "Today" },
-            { key: "journal", label: "Journal" },
-            { key: "calm", label: "Calm Corner" },
-            { key: "big", label: "Big Goal" },
-            { key: "profile", label: "Profile" }
+            { key: "calendar", label: "Calendar" },
+            { key: "goals", label: "Goals" },
+            { key: "vision", label: "Vision" },
+            { key: "gratitude", label: "Gratitude" }
           ].map((t) => (
             <button key={t.key} className="btn-soft" style={{ borderRadius: 999, padding: "10px 14px", flex: "0 0 auto" }}>{t.label}</button>
           ))}
@@ -845,7 +903,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
       {editOpen && editing && (
         <div role="dialog" aria-modal="true" aria-label="Edit task" onClick={() => !busyEdit && setEditOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 2000 }}>
           <div onClick={(e) => e.stopPropagation()} className="card" style={{ width: "min(720px, 96vw)", borderRadius: 16, padding: 16, background: "#fff" }}>
-            <div className="row" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div className="row" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
               <h3 style={{ margin: 0, fontSize: 18 }}>Edit task</h3>
               <span className="muted" style={{ marginLeft: "auto" }}>{getRepeatFromSource(editing.source) ? "Recurring" : "Single"}</span>
               <button className="btn-ghost" onClick={() => setEditOpen(false)} disabled={busyEdit} title="Close">✕</button>
@@ -857,7 +915,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="Enter task…" />
               </label>
 
-              <div className="row" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+              <div className="row" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", minWidth: 0 }}>
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                   <input type="checkbox" checked={editTop} onChange={(e) => setEditTop(e.target.checked)} /> Mark as Top Priority
                 </label>
@@ -885,7 +943,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 </label>
               )}
 
-              <div className="row" style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap", marginTop: 6 }}>
+              <div className="row" style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap", marginTop: 6, minWidth: 0 }}>
                 <button className="btn-soft" onClick={() => deleteTask("one")} disabled={busyEdit} title="Delete just this task">Delete this</button>
                 {getRepeatFromSource(editing.source) && (
                   <>
@@ -900,7 +958,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* Onboarding */}
+      {/* Onboarding Modal */}
       {obStep !== 0 && (
         <div role="dialog" aria-modal="true" aria-label="Onboarding" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 3000 }}>
           <div className="card" style={{ width: "min(520px, 96vw)", borderRadius: 16, padding: 16, background: "#fff" }}>
@@ -946,6 +1004,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
+      {/* Toast node */}
       {toast.node}
     </div>
   );
