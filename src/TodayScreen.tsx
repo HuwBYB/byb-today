@@ -1,6 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
+
+/* =============================================
+   BYB — Today Screen (Polished v1)
+   Implements Phase 1 & 2 touches:
+   - Smart greeting (time-based + "missed you")
+   - Rotating name/nickname greeting
+   - Top bar (BYB + friendly date)
+   - "Biggest Goal" card fixed at the top
+   - Top Priorities vs Everything Else split (kept)
+   - Confetti on done + Alfred encouragement toasts
+   - Streak badge micro-animation
+   - Scrollable bottom tab bar (thumb-friendly)
+   - Pastel card spacing + rounded corners (via inline styles)
+   - Lightweight onboarding (Name → Nicknames → Big Goal, with Skip)
+   ============================================= */
 
 type Task = {
   id: number;
@@ -9,12 +24,15 @@ type Task = {
   due_date: string | null;
   status: "pending" | "done" | string;
   priority: number | null; // 2 => Top
-  source: string | null;   // e.g., today_repeat_daily
+  source: string | null; // e.g., today_repeat_daily
   goal_id: number | null;
   completed_at: string | null;
 };
 
 type GoalLite = { id: number; title: string };
+
+type BigGoal = { id: number; title: string } | null;
+
 type Props = { externalDateISO?: string };
 
 /* ===== date helpers ===== */
@@ -42,6 +60,10 @@ function addDays(iso: string, n: number) {
 }
 
 /* ===== repeat config ===== */
+
+// NOTE: unchanged core repeat logic; retained for stability
+// while giving UI a polish.
+
 type Repeat = "" | "daily" | "weekdays" | "weekly" | "monthly" | "annually";
 const REPEAT_COUNTS: Record<Exclude<Repeat, "">, number> = {
   daily: 14,
@@ -91,12 +113,14 @@ function makeSeriesKey(repeat: Repeat) {
 
 /* ===== display-name helper (rotates name + nicknames) ===== */
 const LS_NAME = "byb:display_name";
-const LS_POOL = "byb:display_pool";
+const LS_POOL = "byb:display_pool"; // string[]
+const LS_ROTATE = "byb:rotate_nicknames"; // "1" | "0"
 
 function pickGreetingLabel(): string {
   try {
     const name = (localStorage.getItem(LS_NAME) || "").trim();
-    const pool = JSON.parse(localStorage.getItem(LS_POOL) || "[]") as string[];
+    const rotate = localStorage.getItem(LS_ROTATE) !== "0"; // default ON
+    const pool = rotate ? (JSON.parse(localStorage.getItem(LS_POOL) || "[]") as string[]) : [];
     const list = [
       ...(name ? [name] : []),
       ...(Array.isArray(pool) ? pool.filter(Boolean) : [])
@@ -109,6 +133,7 @@ function pickGreetingLabel(): string {
 }
 
 /* ===== summary types ===== */
+
 type Summary = {
   doneToday: number;
   pendingToday: number;
@@ -119,12 +144,123 @@ type Summary = {
   bestStreak: number;
 };
 
+/* ===== tiny UI helpers ===== */
+function formatNiceDate(iso: string): string {
+  try {
+    const d = fromISO(iso);
+    return d.toLocaleDateString(undefined, {
+      weekday: "short",
+      day: "2-digit",
+      month: "short"
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function timeGreeting(date = new Date()): string {
+  const h = date.getHours();
+  if (h < 5) return "Up late";
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+/* ===== Lightweight Confetti (no deps) ===== */
+function fireConfetti() {
+  const container = document.createElement("div");
+  container.style.position = "fixed";
+  container.style.inset = "0";
+  container.style.pointerEvents = "none";
+  container.style.overflow = "hidden";
+  document.body.appendChild(container);
+
+  const pieces = 80;
+  const colors = ["#fde68a", "#a7f3d0", "#bfdbfe", "#fbcfe8", "#ddd6fe"];
+  for (let i = 0; i < pieces; i++) {
+    const el = document.createElement("div");
+    const size = Math.random() * 8 + 4;
+    el.style.position = "absolute";
+    el.style.left = Math.random() * 100 + "%";
+    el.style.top = "-10px";
+    el.style.width = `${size}px`;
+    el.style.height = `${size * 0.6}px`;
+    el.style.background = colors[Math.floor(Math.random() * colors.length)];
+    el.style.borderRadius = "2px";
+    el.style.opacity = "0.9";
+    el.style.transform = `rotate(${Math.random() * 360}deg)`;
+    el.animate(
+      [
+        { transform: `translateY(0) rotate(0deg)`, opacity: 1 },
+        { transform: `translateY(${window.innerHeight + 40}px) rotate(${360 + Math.random() * 360}deg)`, opacity: 0.6 }
+      ],
+      { duration: 1200 + Math.random() * 800, easing: "cubic-bezier(.2,.8,.2,1)" }
+    );
+    container.appendChild(el);
+  }
+  setTimeout(() => container.remove(), 2200);
+}
+
+/* ===== Alfred micro-encouragements ===== */
+const ALFRED_LINES = [
+  "Lovely momentum. Keep it rolling.",
+  "One pebble at a time becomes a mountain.",
+  "Stacked: another tiny win in the bank.",
+  "You’re doing Future You a favour.",
+  "Mic drop. Onto the next."
+];
+
+function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)] as T; }
+
+function useToast() {
+  const [msg, setMsg] = useState<string | null>(null);
+  function show(m: string) {
+    setMsg(m);
+    setTimeout(() => setMsg(null), 2500);
+  }
+  const node = (
+    <div
+      aria-live="polite"
+      style={{
+        position: "fixed",
+        left: 0,
+        right: 0,
+        bottom: 24,
+        display: "flex",
+        justifyContent: "center",
+        pointerEvents: "none",
+        zIndex: 3000
+      }}
+    >
+      {msg && (
+        <div
+          className="card"
+          style={{
+            background: "#111827",
+            color: "white",
+            borderRadius: 12,
+            padding: "10px 14px",
+            boxShadow: "0 8px 20px rgba(0,0,0,.25)",
+            pointerEvents: "all",
+            transform: "translateY(0)",
+            transition: "transform .25s ease"
+          }}
+        >
+          {msg}
+        </div>
+      )}
+    </div>
+  );
+  return { node, show };
+}
+
 export default function TodayScreen({ externalDateISO }: Props) {
   const [userId, setUserId] = useState<string | null>(null);
   const [dateISO, setDateISO] = useState<string>(externalDateISO || todayISO());
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [goalMap, setGoalMap] = useState<Record<number, string>>({});
+  const [bigGoal, setBigGoal] = useState<BigGoal>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -142,14 +278,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
   // Greeting
   const [greetName, setGreetName] = useState<string>("");
-  const [greetPrefix, setGreetPrefix] = useState<string>("Welcome back");
+  const [missed, setMissed] = useState<boolean>(false);
 
   // Responsive: treat small screens < 420px as compact
   const [isCompact, setIsCompact] = useState<boolean>(false);
   useEffect(() => {
-    function check() {
-      setIsCompact(window.innerWidth < 420);
-    }
+    function check() { setIsCompact(window.innerWidth < 420); }
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
@@ -166,6 +300,18 @@ export default function TodayScreen({ externalDateISO }: Props) {
     bestStreak: 0
   });
 
+  // streak animation control
+  const prevStreak = useRef(0);
+  const [streakPulse, setStreakPulse] = useState(false);
+  useEffect(() => {
+    if (summary.streak > prevStreak.current) {
+      setStreakPulse(true);
+      const t = setTimeout(() => setStreakPulse(false), 900);
+      return () => clearTimeout(t);
+    }
+    prevStreak.current = summary.streak;
+  }, [summary.streak]);
+
   // Edit modal state
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
@@ -176,33 +322,40 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [applyFuture, setApplyFuture] = useState(false);
   const [busyEdit, setBusyEdit] = useState(false);
 
+  // Onboarding modal
+  const [obStep, setObStep] = useState<0 | 1 | 2 | 3>(0); // 0=closed, 1=Name, 2=Nicknames, 3=Big Goal
+  const [obName, setObName] = useState("");
+  const [obNicks, setObNicks] = useState("");
+  const [obGoal, setObGoal] = useState("");
+
+  const toast = useToast();
+
   useEffect(() => {
     if (externalDateISO) setDateISO(externalDateISO);
   }, [externalDateISO]);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
-      if (error) {
-        setErr(error.message);
-        return;
-      }
+      if (error) { setErr(error.message); return; }
       const user = data.user;
       setUserId(user?.id ?? null);
 
+      // greeting label + nickname rotation
       setGreetName(pickGreetingLabel());
 
       // “We missed you” if last sign-in was 2+ days ago
       const last = user?.last_sign_in_at ? new Date(user.last_sign_in_at) : null;
       if (last) {
         const now = new Date();
-        const days = Math.floor(
-          (new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() -
-            new Date(last.getFullYear(), last.getMonth(), last.getDate()).getTime()) / 86400000
-        );
-        setGreetPrefix(days >= 2 ? "We missed you" : "Welcome back");
+        const days = Math.floor((new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() - new Date(last.getFullYear(), last.getMonth(), last.getDate()).getTime()) / 86400000);
+        setMissed(days >= 2);
       } else {
-        setGreetPrefix("Welcome back");
+        setMissed(false);
       }
+
+      // onboarding trigger if no name saved
+      const hasName = (localStorage.getItem(LS_NAME) || "").trim().length > 0;
+      if (!hasName) setObStep(1);
     });
   }, []);
 
@@ -228,23 +381,15 @@ export default function TodayScreen({ externalDateISO }: Props) {
         .lte("due_date", dateISO)
         .order("priority", { ascending: false })
         .order("id", { ascending: true });
-
       if (error) throw error;
 
       const raw = (data as Task[]) || [];
-      const list = raw.filter(
-        (t) => t.due_date === dateISO || (t.due_date! < dateISO && t.status !== "done")
-      );
+      const list = raw.filter((t) => t.due_date === dateISO || (t.due_date! < dateISO && t.status !== "done"));
       setTasks(list);
 
-      const ids = Array.from(
-        new Set(list.map((t) => t.goal_id).filter((v): v is number => typeof v === "number"))
-      );
+      const ids = Array.from(new Set(list.map((t) => t.goal_id).filter((v): v is number => typeof v === "number")));
       if (ids.length) {
-        const { data: gs, error: ge } = await supabase
-          .from("goals")
-          .select("id,title")
-          .in("id", ids);
+        const { data: gs, error: ge } = await supabase.from("goals").select("id,title").in("id", ids);
         if (ge) throw ge;
         const map: Record<number, string> = {};
         (gs as GoalLite[]).forEach((g) => (map[g.id] = g.title));
@@ -253,28 +398,29 @@ export default function TodayScreen({ externalDateISO }: Props) {
         setGoalMap({});
       }
 
+      // Big Goal fetch (defensive: supports is_big or kind="big")
+      const { data: bg, error: bge } = await supabase
+        .from("goals")
+        .select("id,title,is_big,kind")
+        .eq("user_id", userId)
+        .or("is_big.eq.true,kind.eq.big")
+        .limit(1)
+        .maybeSingle();
+      if (!bge && bg) setBigGoal({ id: (bg as any).id, title: (bg as any).title });
+
       // compute daily summary
-      const doneToday = list.filter(
-        (t) => t.due_date === dateISO && t.status === "done"
-      ).length;
-      const pendingToday = list.filter(
-        (t) => t.due_date === dateISO && t.status !== "done"
-      ).length;
-      const topToday = list.filter(
-        (t) => t.due_date === dateISO && (t.priority ?? 0) >= 2
-      );
+      const doneToday = list.filter((t) => t.due_date === dateISO && t.status === "done").length;
+      const pendingToday = list.filter((t) => t.due_date === dateISO && t.status !== "done").length;
+      const topToday = list.filter((t) => t.due_date === dateISO && (t.priority ?? 0) >= 2);
       const topDone = topToday.filter((t) => t.status === "done").length;
       const topTotal = topToday.length;
       const isWin = topDone >= 1 || doneToday >= 3;
-
       setSummary((s) => ({ ...s, doneToday, pendingToday, topDone, topTotal, isWin }));
     } catch (e: any) {
       setErr(e.message || String(e));
       setTasks([]);
       setGoalMap({});
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }
 
   // compute streaks over the last 180 days
@@ -290,7 +436,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
         .eq("status", "done")
         .not("completed_at", "is", null)
         .gte("completed_at", since.toISOString());
-
       if (error) throw error;
 
       const days = new Set<string>();
@@ -301,39 +446,20 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
       let streak = 0;
       let cursor = todayISO();
-      while (days.has(cursor)) {
-        streak += 1;
-        cursor = addDays(cursor, -1);
-      }
+      while (days.has(cursor)) { streak += 1; cursor = addDays(cursor, -1); }
 
       const sorted = Array.from(days).sort();
-      let best = 0;
-      let run = 0;
-      let prev: string | null = null;
+      let best = 0, run = 0; let prev: string | null = null;
       for (const d of sorted) {
-        if (!prev) run = 1;
-        else {
-          const nextOfPrev = addDays(prev, 1);
-          run = d === nextOfPrev ? run + 1 : 1;
-        }
-        best = Math.max(best, run);
-        prev = d;
+        if (!prev) run = 1; else { const nextOfPrev = addDays(prev, 1); run = d === nextOfPrev ? run + 1 : 1; }
+        best = Math.max(best, run); prev = d;
       }
-
       setSummary((s) => ({ ...s, streak, bestStreak: best }));
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
   }
 
-  async function loadAll() {
-    await load();
-    await loadStreaks();
-  }
-
-  useEffect(() => {
-    if (userId && dateISO) loadAll();
-  }, [userId, dateISO]);
+  async function loadAll() { await load(); await loadStreaks(); }
+  useEffect(() => { if (userId && dateISO) loadAll(); }, [userId, dateISO]);
 
   function displayTitle(t: Task) {
     const base = (t.title || "").trim();
@@ -346,77 +472,47 @@ export default function TodayScreen({ externalDateISO }: Props) {
       const markDone = t.status !== "done";
       const { error } = await supabase
         .from("tasks")
-        .update({
-          status: markDone ? "done" : "pending",
-          completed_at: markDone ? new Date().toISOString() : null
-        })
+        .update({ status: markDone ? "done" : "pending", completed_at: markDone ? new Date().toISOString() : null })
         .eq("id", t.id);
       if (error) throw error;
       await loadAll();
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    }
+      if (markDone) { fireConfetti(); toast.show(`Alfred: ${pick(ALFRED_LINES)}`); }
+    } catch (e: any) { setErr(e.message || String(e)); }
   }
 
   async function moveToSelectedDate(taskId: number) {
     try {
-      const { error } = await supabase
-        .from("tasks")
-        .update({ due_date: dateISO })
-        .eq("id", taskId);
-      if (error) throw error;
-      await loadAll();
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    }
+      const { error } = await supabase.from("tasks").update({ due_date: dateISO }).eq("id", taskId);
+      if (error) throw error; await loadAll();
+    } catch (e: any) { setErr(e.message || String(e)); }
   }
 
   async function moveAllOverdueHere() {
     try {
       const overdueIds = tasks.filter(isOverdue).map((t) => t.id);
       if (overdueIds.length === 0) return;
-      const { error } = await supabase
-        .from("tasks")
-        .update({ due_date: dateISO })
-        .in("id", overdueIds);
-      if (error) throw error;
-      await loadAll();
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    }
+      const { error } = await supabase.from("tasks").update({ due_date: dateISO }).in("id", overdueIds);
+      if (error) throw error; await loadAll();
+    } catch (e: any) { setErr(e.message || String(e)); }
   }
 
   async function addTaskWithArgs(title: string, top: boolean, repeat: Repeat) {
     if (!userId || !title.trim()) return;
     const clean = title.trim();
     const occurrences = generateOccurrences(dateISO, repeat);
-    const rows = occurrences.map((iso) => ({
-      user_id: userId,
-      title: clean,
-      due_date: iso,
-      status: "pending",
-      priority: top ? 2 : 0,
-      source: repeat ? makeSeriesKey(repeat) : "manual"
-    }));
+    const rows = occurrences.map((iso) => ({ user_id: userId, title: clean, due_date: iso, status: "pending", priority: top ? 2 : 0, source: repeat ? makeSeriesKey(repeat) : "manual" }));
     const { error } = await supabase.from("tasks").insert(rows as any);
     if (error) throw error;
   }
 
   async function addTask() {
     if (!userId || !newTitle.trim()) return;
-    setAdding(true);
-    setErr(null);
+    setAdding(true); setErr(null);
     try {
       await addTaskWithArgs(newTitle, newTop, newRepeat);
-      setNewTitle("");
-      setNewTop(false);
-      setNewRepeat("");
+      setNewTitle(""); setNewTop(false); setNewRepeat("");
       await loadAll();
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
-      setAdding(false);
-    }
+    } catch (e: any) { setErr(e.message || String(e)); } finally { setAdding(false); }
   }
 
   async function addQuick() {
@@ -424,59 +520,28 @@ export default function TodayScreen({ externalDateISO }: Props) {
     setSavingQuick(true);
     try {
       await addTaskWithArgs(quickTitle, quickTop, "");
-      setQuickTitle("");
-      setQuickTop(false);
+      setQuickTitle(""); setQuickTop(false);
       await loadAll();
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
-      setSavingQuick(false);
-    }
+    } catch (e: any) { setErr(e.message || String(e)); } finally { setSavingQuick(false); }
   }
 
   const top = tasks.filter((t) => (t.priority ?? 0) >= 2);
   const rest = tasks.filter((t) => (t.priority ?? 0) < 2);
   const overdueCount = tasks.filter(isOverdue).length;
 
-  function Section({
-    title,
-    children,
-    right
-  }: {
-    title: string;
-    children: ReactNode;
-    right?: ReactNode;
-  }) {
+  function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode; }) {
     return (
-      <div className="card" style={{ marginBottom: 12, overflowX: "clip" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 8,
-            gap: 8,
-            flexWrap: "wrap",
-            width: "100%"
-          }}
-        >
+      <div className="card" style={{ marginBottom: 12, overflowX: "clip", borderRadius: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap", width: "100%" }}>
           <h2 style={{ margin: 0, fontSize: 18, wordBreak: "break-word" }}>{title}</h2>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", minWidth: 0 }}>
-            {right}
-            <button onClick={loadAll} disabled={loading}>
-              {loading ? "Refreshing…" : "Refresh"}
-            </button>
-          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", minWidth: 0 }}>{right}<button onClick={loadAll} disabled={loading}>{loading ? "Refreshing…" : "Refresh"}</button></div>
         </div>
         {children}
       </div>
     );
   }
 
-  function todayString() {
-    return todayISO();
-  }
-
+  function todayString() { return todayISO(); }
   const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   /* =========================
@@ -494,8 +559,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
   async function saveEdit() {
     if (!editing || !userId) return;
-    setBusyEdit(true);
-    setErr(null);
+    setBusyEdit(true); setErr(null);
 
     const originalRepeat = getRepeatFromSource(editing.source);
     const originalSeriesKey = editing.source?.startsWith(REPEAT_PREFIX) ? editing.source : null;
@@ -508,203 +572,162 @@ export default function TodayScreen({ externalDateISO }: Props) {
       await supabase.from("tasks").update({ title, priority: top, due_date: due, source: newSeriesKey }).eq("id", editing.id);
 
       if (applyFuture && originalSeriesKey) {
-        await supabase
-          .from("tasks")
-          .update({ title, priority: top })
-          .eq("user_id", userId)
-          .eq("source", originalSeriesKey)
-          .gte("due_date", (editing.due_date || due) as string);
+        await supabase.from("tasks").update({ title, priority: top }).eq("user_id", userId).eq("source", originalSeriesKey).gte("due_date", (editing.due_date || due) as string);
       }
 
       if (originalSeriesKey && editRepeat !== originalRepeat) {
-        await supabase
-          .from("tasks")
-          .delete()
-          .eq("user_id", userId)
-          .eq("source", originalSeriesKey)
-          .gte("due_date", (editing.due_date || due) as string)
-          .neq("id", editing.id);
+        await supabase.from("tasks").delete().eq("user_id", userId).eq("source", originalSeriesKey).gte("due_date", (editing.due_date || due) as string).neq("id", editing.id);
       }
 
       if (editRepeat && editRepeat !== originalRepeat) {
         const occurrences = generateOccurrences(due as string, editRepeat).slice(1);
         if (occurrences.length) {
-          const rows = occurrences.map((iso) => ({
-            user_id: userId,
-            title,
-            due_date: iso,
-            status: "pending",
-            priority: top,
-            source: makeSeriesKey(editRepeat)
-          }));
+          const rows = occurrences.map((iso) => ({ user_id: userId, title, due_date: iso, status: "pending", priority: top, source: makeSeriesKey(editRepeat) }));
           await supabase.from("tasks").insert(rows as any);
         }
       }
 
-      setEditOpen(false);
-      setEditing(null);
+      setEditOpen(false); setEditing(null);
       await loadAll();
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
-      setBusyEdit(false);
-    }
+    } catch (e: any) { setErr(e.message || String(e)); } finally { setBusyEdit(false); }
   }
 
   async function deleteTask(scope: "one" | "future" | "all") {
     if (!editing || !userId) return;
-    setBusyEdit(true);
-    setErr(null);
+    setBusyEdit(true); setErr(null);
     try {
       const originalSeriesKey = editing.source?.startsWith(REPEAT_PREFIX) ? editing.source : null;
 
       if (scope === "one") {
         await supabase.from("tasks").delete().eq("id", editing.id);
       } else if (scope === "future" && originalSeriesKey) {
-        await supabase
-          .from("tasks")
-          .delete()
-          .eq("user_id", userId)
-          .eq("source", originalSeriesKey)
-          .gte("due_date", editing.due_date || dateISO);
+        await supabase.from("tasks").delete().eq("user_id", userId).eq("source", originalSeriesKey).gte("due_date", editing.due_date || dateISO);
       } else if (scope === "all" && originalSeriesKey) {
         await supabase.from("tasks").delete().eq("user_id", userId).eq("source", originalSeriesKey);
       } else {
         await supabase.from("tasks").delete().eq("id", editing.id);
       }
 
-      setEditOpen(false);
-      setEditing(null);
+      setEditOpen(false); setEditing(null);
       await loadAll();
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
-      setBusyEdit(false);
+    } catch (e: any) { setErr(e.message || String(e)); } finally { setBusyEdit(false); }
+  }
+
+  /* =============== Onboarding =============== */
+  async function obSaveAndNext() {
+    if (obStep === 1) {
+      const name = obName.trim();
+      if (name) localStorage.setItem(LS_NAME, name);
+      setObStep(2);
+    } else if (obStep === 2) {
+      const arr = obNicks.split(",").map((s) => s.trim()).filter(Boolean);
+      localStorage.setItem(LS_POOL, JSON.stringify(arr));
+      localStorage.setItem(LS_ROTATE, "1");
+      setObStep(3);
+    } else if (obStep === 3) {
+      const title = obGoal.trim();
+      if (title && userId) {
+        try {
+          await supabase.from("goals").insert({ user_id: userId, title, is_big: true });
+        } catch { /* ignore */ }
+      }
+      setObStep(0);
+      setGreetName(pickGreetingLabel()); // refresh greeting pool
+      await loadAll();
     }
   }
+  function obSkip() { setObStep((s) => (s >= 3 ? 0 : (s + 1) as any)); }
+
+  /* =============== Render =============== */
+  const niceDate = useMemo(() => formatNiceDate(dateISO), [dateISO]);
+  const greeting = useMemo(() => (missed ? "We missed you" : timeGreeting(now)), [missed, now]);
 
   return (
     <div style={{ display: "grid", gap: 12, overflowX: "hidden" }}>
-      {/* ===== Sticky NOW widget ===== */}
+      {/* Top app bar */}
       <div
         className="card"
         style={{
           position: "sticky",
           top: 0,
-          zIndex: 50,
+          zIndex: 60,
           display: "grid",
           gap: 8,
           border: "1px solid var(--border)",
           background: "#fff",
-          overflowX: "clip"
+          borderRadius: 16,
+          padding: 12
         }}
       >
-        {/* Row 1: Clock + summary badges */}
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            width: "100%"
-          }}
-        >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 18 }}>BYB</div>
+            <div className="muted">• {niceDate}</div>
+          </div>
+          {/* Streak + summary chips */}
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
+            <span className="badge" title="Win if 1+ top priority or 3+ tasks" style={{ background: summary.isWin ? "#dcfce7" : "#fee2e2", border: "1px solid var(--border)" }}>{summary.isWin ? "Win" : "Keep going"}</span>
+            <span className="badge" title="Tasks done today">Done: {summary.doneToday}</span>
+            {summary.topTotal > 0 && <span className="badge" title="Top priorities done / total">Top: {summary.topDone}/{summary.topTotal}</span>}
+            <span className="badge" title="Current streak (best)" style={{ transform: streakPulse ? "scale(1.08)" : "scale(1)", transition: "transform .25s ease" }}>🔥 {summary.streak}{summary.bestStreak > 0 ? ` (best ${summary.bestStreak})` : ""}</span>
+          </div>
+        </div>
+
+        {/* Greeting row */}
+        {greetName && (
+          <div style={{ fontWeight: 700, wordBreak: "break-word" }}>
+            {greeting} {missed ? "💜" : ""}, {greetName}
+          </div>
+        )}
+
+        {/* Quick row: time + input */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
             <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: 1 }}>{timeStr}</div>
             <div className="muted" style={{ whiteSpace: "nowrap" }}>{dateISO}</div>
           </div>
 
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
-            <span
-              className="badge"
-              title="Win if 1+ top priority done or 3+ tasks done"
-              style={{
-                background: summary.isWin ? "#dcfce7" : "#fee2e2",
-                border: "1px solid var(--border)"
-              }}
-            >
-              {summary.isWin ? "Win" : "Keep going"}
-            </span>
-            <span className="badge" title="Tasks done today">Done: {summary.doneToday}</span>
-            {summary.topTotal > 0 && (
-              <span className="badge" title="Top priorities done / total">
-                Top: {summary.topDone}/{summary.topTotal}
-              </span>
-            )}
-            <span className="badge" title="Current streak (best)">
-              🔥 {summary.streak} {summary.bestStreak > 0 ? `(best ${summary.bestStreak})` : ""}
-            </span>
-          </div>
-        </div>
-
-        {/* Greeting on its own line */}
-        {greetName && (
-          <div style={{ fontWeight: 700, wordBreak: "break-word" }}>
-            {greetPrefix}, {greetName}
-          </div>
-        )}
-
-        {/* Row 2: Quick capture */}
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%" }}>
           <input
             type="text"
             value={quickTitle}
             onChange={(e) => setQuickTitle(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && quickTitle.trim() && !savingQuick) addQuick();
-            }}
+            onKeyDown={(e) => { if (e.key === "Enter" && quickTitle.trim() && !savingQuick) addQuick(); }}
             placeholder="Quick add a task for today…"
             style={{ flex: "1 1 220px", minWidth: 0, maxWidth: "100%" }}
           />
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
-            <input type="checkbox" checked={quickTop} onChange={(e) => setQuickTop(e.target.checked)} />
-            Top
+            <input type="checkbox" checked={quickTop} onChange={(e) => setQuickTop(e.target.checked)} /> Top
           </label>
-          <button
-            className="btn-primary"
-            onClick={addQuick}
-            disabled={!quickTitle.trim() || savingQuick}
-            style={{ borderRadius: 8, flex: isCompact ? "1 1 100%" : undefined }}
-          >
-            {savingQuick ? "Adding…" : "Add"}
-          </button>
+          <button className="btn-primary" onClick={addQuick} disabled={!quickTitle.trim() || savingQuick} style={{ borderRadius: 10, flex: isCompact ? "1 1 100%" : undefined }}>{savingQuick ? "Adding…" : "Add"}</button>
         </div>
 
-        {/* Row 3: overdue mover + date controls (stack on compact) */}
+        {/* Overdue mover + date controls */}
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%" }}>
           {overdueCount > 0 && (
-            <button
-              onClick={moveAllOverdueHere}
-              className="btn-soft"
-              title="Change due date for all overdue pending tasks to this day"
-              style={{ flex: isCompact ? "1 1 100%" : undefined, minWidth: 0 }}
-            >
+            <button onClick={moveAllOverdueHere} className="btn-soft" title="Change due date for all overdue pending tasks to this day" style={{ flex: isCompact ? "1 1 100%" : undefined, minWidth: 0 }}>
               Move all overdue here ({overdueCount})
             </button>
           )}
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              alignItems: "center",
-              marginLeft: "auto",
-              flexWrap: "wrap",
-              width: isCompact ? "100%" : "auto"
-            }}
-          >
-            <input
-              type="date"
-              value={dateISO}
-              onChange={(e) => setDateISO(e.target.value)}
-              style={{ flex: isCompact ? "1 1 220px" : undefined, minWidth: 0, maxWidth: "100%" }}
-            />
-            <button onClick={() => setDateISO(todayString())} style={{ flex: isCompact ? "1 1 120px" : undefined }}>
-              Today
-            </button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", flexWrap: "wrap", width: isCompact ? "100%" : "auto" }}>
+            <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} style={{ flex: isCompact ? "1 1 220px" : undefined, minWidth: 0, maxWidth: "100%" }} />
+            <button onClick={() => setDateISO(todayString())} style={{ flex: isCompact ? "1 1 120px" : undefined }}>Today</button>
           </div>
         </div>
         {err && <div style={{ color: "red" }}>{err}</div>}
+      </div>
+
+      {/* ===== Biggest Goal card (always on top) ===== */}
+      <div className="card" style={{ borderLeft: "6px solid #a7f3d0", borderRadius: 14, padding: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>Today’s Biggest Goal</h2>
+          {bigGoal ? <span className="badge" title="Your long-term focus">Pinned</span> : <span className="badge" title="Set a Big Goal in Profile or Onboarding">Not set</span>}
+          <div style={{ marginLeft: "auto" }}>
+            {bigGoal && <span className="muted">{bigGoal.title}</span>}
+          </div>
+        </div>
+        {!bigGoal && (
+          <div className="muted" style={{ marginTop: 6 }}>Add a Big Goal to keep today aligned. You can set it in your Profile.</div>
+        )}
       </div>
 
       {/* ===== Lists ===== */}
@@ -720,28 +743,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
                     <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontWeight: 600,
-                          display: "flex",
-                          gap: 8,
-                          alignItems: "center",
-                          flexWrap: "wrap",
-                          wordBreak: "break-word"
-                        }}
-                      >
+                      <div style={{ fontWeight: 600, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word" }}>
                         <span>{displayTitle(t)}</span>
                         {overdue && <span className="badge">Overdue</span>}
-                        <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => openEdit(t)} title="Edit task">
-                          Edit
-                        </button>
+                        <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => openEdit(t)} title="Edit task">Edit</button>
                       </div>
                       {overdue && (
                         <div className="muted" style={{ marginTop: 4 }}>
-                          Due {t.due_date} ·{" "}
-                          <button className="btn-ghost" onClick={() => moveToSelectedDate(t.id)}>
-                            Move to {dateISO}
-                          </button>
+                          Due {t.due_date} · <button className="btn-ghost" onClick={() => moveToSelectedDate(t.id)}>Move to {dateISO}</button>
                         </div>
                       )}
                     </div>
@@ -768,16 +777,11 @@ export default function TodayScreen({ externalDateISO }: Props) {
                       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word" }}>
                         <span>{displayTitle(t)}</span>
                         {overdue && <span className="badge">Overdue</span>}
-                        <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => openEdit(t)} title="Edit task">
-                          Edit
-                        </button>
+                        <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => openEdit(t)} title="Edit task">Edit</button>
                       </div>
                       {overdue && (
                         <div className="muted" style={{ marginTop: 4 }}>
-                          Due {t.due_date} ·{" "}
-                          <button className="btn-ghost" onClick={() => moveToSelectedDate(t.id)}>
-                            Move to {dateISO}
-                          </button>
+                          Due {t.due_date} · <button className="btn-ghost" onClick={() => moveToSelectedDate(t.id)}>Move to {dateISO}</button>
                         </div>
                       )}
                     </div>
@@ -790,25 +794,16 @@ export default function TodayScreen({ externalDateISO }: Props) {
       </Section>
 
       {/* ===== Add Task (advanced) ===== */}
-      <div className="card" style={{ display: "grid", gap: 8, overflowX: "clip" }}>
+      <div className="card" style={{ display: "grid", gap: 8, overflowX: "clip", borderRadius: 14 }}>
         <h2 style={{ margin: 0 }}>Add Task</h2>
         <label style={{ display: "grid", gap: 6 }}>
           <div className="section-title">Task title</div>
-          <input
-            type="text"
-            placeholder="Enter task…"
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && newTitle.trim() && !adding) addTask();
-            }}
-          />
+          <input type="text" placeholder="Enter task…" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && newTitle.trim() && !adding) addTask(); }} />
         </label>
 
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
-            <input type="checkbox" checked={newTop} onChange={(e) => setNewTop(e.target.checked)} />
-            Mark as Top Priority
+            <input type="checkbox" checked={newTop} onChange={(e) => setNewTop(e.target.checked)} /> Mark as Top Priority
           </label>
 
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
@@ -824,46 +819,37 @@ export default function TodayScreen({ externalDateISO }: Props) {
           </label>
 
           <div className="muted" style={{ minWidth: 0, wordBreak: "break-word" }}>
-            Will be created for {dateISO}
-            {newRepeat ? " + future repeats" : ""}
+            Will be created for {dateISO}{newRepeat ? " + future repeats" : ""}
           </div>
 
-          <button onClick={addTask} disabled={!newTitle.trim() || adding} className="btn-primary" style={{ marginLeft: "auto", borderRadius: 8 }}>
-            {adding ? "Adding…" : "Add"}
-          </button>
+          <button onClick={addTask} disabled={!newTitle.trim() || adding} className="btn-primary" style={{ marginLeft: "auto", borderRadius: 10 }}>{adding ? "Adding…" : "Add"}</button>
         </div>
 
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
+      {/* ===== Scrollable Bottom Tab Bar ===== */}
+      <div style={{ position: "sticky", bottom: 0, zIndex: 50, background: "#fff", padding: "8px 4px", borderTop: "1px solid var(--border)" }}>
+        <div style={{ display: "flex", gap: 8, overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none" as any }}>
+          {[
+            { key: "today", label: "Today" },
+            { key: "journal", label: "Journal" },
+            { key: "calm", label: "Calm Corner" },
+            { key: "big", label: "Big Goal" },
+            { key: "profile", label: "Profile" }
+          ].map((t) => (
+            <button key={t.key} className="btn-soft" style={{ borderRadius: 999, padding: "8px 12px", flex: "0 0 auto" }}>{t.label}</button>
+          ))}
+        </div>
+      </div>
+
       {/* ===== Edit Modal ===== */}
       {editOpen && editing && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Edit task"
-          onClick={() => !busyEdit && setEditOpen(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,.35)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 16,
-            zIndex: 2000
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="card"
-            style={{ width: "min(720px, 96vw)", borderRadius: 12, padding: 16, background: "#fff" }}
-          >
+        <div role="dialog" aria-modal="true" aria-label="Edit task" onClick={() => !busyEdit && setEditOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 2000 }}>
+          <div onClick={(e) => e.stopPropagation()} className="card" style={{ width: "min(720px, 96vw)", borderRadius: 12, padding: 16, background: "#fff" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <h3 style={{ margin: 0, fontSize: 18 }}>Edit task</h3>
-              <span className="muted" style={{ marginLeft: "auto" }}>
-                {getRepeatFromSource(editing.source) ? "Recurring" : "Single"}
-              </span>
+              <span className="muted" style={{ marginLeft: "auto" }}>{getRepeatFromSource(editing.source) ? "Recurring" : "Single"}</span>
               <button onClick={() => setEditOpen(false)} disabled={busyEdit} title="Close">✕</button>
             </div>
 
@@ -875,22 +861,16 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <input type="checkbox" checked={editTop} onChange={(e) => setEditTop(e.target.checked)} />
-                  Mark as Top Priority
+                  <input type="checkbox" checked={editTop} onChange={(e) => setEditTop(e.target.checked)} /> Mark as Top Priority
                 </label>
 
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  Due
-                  <input type="date" value={editDue || ""} onChange={(e) => setEditDue(e.target.value || null)} />
+                  Due <input type="date" value={editDue || ""} onChange={(e) => setEditDue(e.target.value || null)} />
                 </label>
 
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                   Repeat
-                  <select
-                    value={editRepeat}
-                    onChange={(e) => setEditRepeat(e.target.value as Repeat)}
-                    title={getRepeatFromSource(editing.source) ? "Change frequency" : "Make this a repeating task"}
-                  >
+                  <select value={editRepeat} onChange={(e) => setEditRepeat(e.target.value as Repeat)} title={getRepeatFromSource(editing.source) ? "Change frequency" : "Make this a repeating task"}>
                     <option value="">No repeat</option>
                     <option value="daily">Daily</option>
                     <option value="weekdays">Daily (Mon–Fri)</option>
@@ -903,41 +883,73 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
               {getRepeatFromSource(editing.source) && (
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                  <input type="checkbox" checked={applyFuture} onChange={(e) => setApplyFuture(e.target.checked)} />
-                  Apply title/priority changes to all <b>future</b> items in this series
+                  <input type="checkbox" checked={applyFuture} onChange={(e) => setApplyFuture(e.target.checked)} /> Apply title/priority changes to all <b>future</b> items in this series
                 </label>
               )}
 
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap", marginTop: 6 }}>
-                <button onClick={() => deleteTask("one")} disabled={busyEdit} title="Delete just this task">
-                  Delete this
-                </button>
-
+                <button onClick={() => deleteTask("one")} disabled={busyEdit} title="Delete just this task">Delete this</button>
                 {getRepeatFromSource(editing.source) && (
                   <>
-                    <button onClick={() => deleteTask("future")} disabled={busyEdit} title="Delete this and all future in series">
-                      Delete future in series
-                    </button>
-                    <button onClick={() => deleteTask("all")} disabled={busyEdit} title="Delete entire series">
-                      Delete entire series
-                    </button>
+                    <button onClick={() => deleteTask("future")} disabled={busyEdit} title="Delete this and all future in series">Delete future in series</button>
+                    <button onClick={() => deleteTask("all")} disabled={busyEdit} title="Delete entire series">Delete entire series</button>
                   </>
                 )}
-
-                <button
-                  className="btn-primary"
-                  onClick={saveEdit}
-                  disabled={busyEdit || !editTitle.trim()}
-                  style={{ borderRadius: 8 }}
-                  title={getRepeatFromSource(editing.source) !== editRepeat ? "Saves and updates series from the selected due date" : "Save"}
-                >
-                  {busyEdit ? "Saving…" : "Save"}
-                </button>
+                <button className="btn-primary" onClick={saveEdit} disabled={busyEdit || !editTitle.trim()} style={{ borderRadius: 10 }} title={getRepeatFromSource(editing.source) !== editRepeat ? "Saves and updates series from the selected due date" : "Save"}>{busyEdit ? "Saving…" : "Save"}</button>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {/* ===== Onboarding Modal ===== */}
+      {obStep !== 0 && (
+        <div role="dialog" aria-modal="true" aria-label="Onboarding" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 3000 }}>
+          <div className="card" style={{ width: "min(520px, 96vw)", borderRadius: 16, padding: 16, background: "#fff" }}>
+            {obStep === 1 && (
+              <div style={{ display: "grid", gap: 10 }}>
+                <h3 style={{ margin: 0 }}>Welcome to BYB 🌈</h3>
+                <div className="muted">What should we call you?</div>
+                <input value={obName} onChange={(e) => setObName(e.target.value)} placeholder="Your name" />
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                  <button onClick={obSkip}>Skip</button>
+                  <button className="btn-primary" onClick={obSaveAndNext} disabled={!obName.trim()}>Next</button>
+                </div>
+              </div>
+            )}
+            {obStep === 2 && (
+              <div style={{ display: "grid", gap: 10 }}>
+                <h3 style={{ margin: 0 }}>Nicknames (optional)</h3>
+                <div className="muted">Comma-separated. We’ll rotate them in greetings.</div>
+                <input value={obNicks} onChange={(e) => setObNicks(e.target.value)} placeholder="e.g. Champ, Boss, Legend" />
+                <div style={{ display: "flex", gap: 8, justifyContent: "space-between", alignItems: "center" }}>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <input type="checkbox" defaultChecked onChange={(e) => localStorage.setItem(LS_ROTATE, e.target.checked ? "1" : "0")} /> Rotate nicknames
+                  </label>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={obSkip}>Skip</button>
+                    <button className="btn-primary" onClick={obSaveAndNext}>Next</button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {obStep === 3 && (
+              <div style={{ display: "grid", gap: 10 }}>
+                <h3 style={{ margin: 0 }}>Set your Big Goal</h3>
+                <div className="muted">A north star to guide your daily focus.</div>
+                <input value={obGoal} onChange={(e) => setObGoal(e.target.value)} placeholder="e.g. Launch BYB MVP" />
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                  <button onClick={() => setObStep(0)}>Skip</button>
+                  <button className="btn-primary" onClick={obSaveAndNext} disabled={!obGoal.trim()}>Finish</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Toast node */}
+      {toast.node}
     </div>
   );
 }
