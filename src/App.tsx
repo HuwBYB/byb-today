@@ -16,6 +16,7 @@ import ConfidenceScreen from "./ConfidenceScreen";
 import NotesScreen from "./NotesScreen";
 import FocusAlfredScreen from "./FocusAlfredScreen";
 import OnboardingScreen from "./OnboardingScreen";
+import MeditationScreen from "./Meditation"; // <-- NEW
 
 /* Types */
 type ProfileRow = {
@@ -40,7 +41,8 @@ type Tab =
   | "alfred"
   | "confidence"
   | "notes"
-  | "focus";
+  | "focus"
+  | "meditation"; // <-- NEW
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("today");
@@ -69,7 +71,11 @@ export default function App() {
       }
     });
     unsub = () => sub.data.subscription.unsubscribe();
-    return () => { try { unsub?.(); } catch {} };
+    return () => {
+      try {
+        unsub?.();
+      } catch {}
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -92,9 +98,15 @@ export default function App() {
   }
 
   function onboardingLocalDone(): boolean {
-    try { return localStorage.getItem(LS_DONE) === "1"; } catch { return false; }
+    try {
+      return localStorage.getItem(LS_DONE) === "1";
+    } catch {
+      return false;
+    }
   }
-  function profileSaysDone(p: ProfileRow | null): boolean { return !!p?.onboarding_done; }
+  function profileSaysDone(p: ProfileRow | null): boolean {
+    return !!p?.onboarding_done;
+  }
   function showOnboarding(): boolean {
     if (profileSaysDone(profile)) return false;
     if (onboardingLocalDone()) return false;
@@ -119,6 +131,7 @@ export default function App() {
         { key: "confidence", label: "Confidence", icon: "🔥" },
         { key: "notes",      label: "Notes",      icon: "📝" },
         { key: "focus",      label: "Focus",      icon: "🎧" },
+        { key: "meditation", label: "Meditation", icon: "📺" }, // <-- NEW
       ] as const,
     []
   );
@@ -136,6 +149,7 @@ export default function App() {
       case "confidence":  return <ConfidenceScreen />;
       case "notes":       return <NotesScreen />;
       case "focus":       return <FocusAlfredScreen />;
+      case "meditation":  return <MeditationScreen />; // <-- NEW
       default:            return <TodayScreen externalDateISO={externalDateISO} />;
     }
   }
@@ -176,7 +190,9 @@ export default function App() {
                     onClick={() => setTab(t.key as Tab)}
                     title={t.label}
                   >
-                    <span className="icon" aria-hidden>{t.icon}</span>
+                    <span className="icon" aria-hidden>
+                      {t.icon}
+                    </span>
                     <span className="label">{t.label}</span>
                   </button>
                 ))}
