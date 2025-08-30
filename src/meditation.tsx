@@ -1,5 +1,5 @@
 // src/meditation.tsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, CSSProperties } from "react";
 
 type Video = {
   id: string;
@@ -12,9 +12,9 @@ const MAX_VIDEOS = 10;
 
 /** Seed videos (your three) */
 const SEEDS: Partial<Video>[] = [
-  { title: "Starter: 10-min Calm",   url: "https://youtu.be/j734gLbQFbU?si=6AnHq5m0lLMu7zrW" },
-  { title: "Starter: Focus Reset",   url: "https://youtu.be/cyMxWXlX9sU?si=HyfDOCQuFNY9chFP" },
-  { title: "Starter: Deep Relax",    url: "https://youtu.be/P-8ALcF8AGE?si=JCtNqvsaKfxDLhdO" },
+  { title: "Starter: 10-min Calm", url: "https://youtu.be/j734gLbQFbU?si=6AnHq5m0lLMu7zrW" },
+  { title: "Starter: Focus Reset", url: "https://youtu.be/cyMxWXlX9sU?si=HyfDOCQuFNY9chFP" },
+  { title: "Starter: Deep Relax",  url: "https://youtu.be/P-8ALcF8AGE?si=JCtNqvsaKfxDLhdO" },
 ];
 
 function extractYouTubeId(url: string): string | null {
@@ -23,8 +23,8 @@ function extractYouTubeId(url: string): string | null {
     if (u.hostname.includes("youtube.com")) {
       const v = u.searchParams.get("v");
       if (v) return v;
-      const embed = u.pathname.match(/\/embed\/([a-zA-Z0-9_-]{6,})/);
-      if (embed) return embed[1];
+      const m = u.pathname.match(/\/embed\/([a-zA-Z0-9_-]{6,})/);
+      if (m) return m[1];
     }
     if (u.hostname.includes("youtu.be")) {
       const short = u.pathname.replace("/", "");
@@ -36,8 +36,16 @@ function extractYouTubeId(url: string): string | null {
     return null;
   }
 }
+
 const thumbUrl = (id: string) => `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
 const embedUrl = (id: string) => `https://www.youtube.com/embed/${id}?autoplay=1&rel=0`;
+
+/** Inline styles to avoid Tailwind arbitrary properties being purged */
+const perspectiveStyle: CSSProperties = { perspective: "1000px" };
+const preserve3D: CSSProperties = { transformStyle: "preserve-3d" };
+const backfaceHidden: CSSProperties = { backfaceVisibility: "hidden" };
+const rotateY180: CSSProperties = { transform: "rotateY(180deg)" };
+const writingVertical: CSSProperties = { writingMode: "vertical-rl", transform: "rotate(180deg)" };
 
 export default function MeditationScreen() {
   const [videos, setVideos] = useState<Video[]>([]);
@@ -75,15 +83,9 @@ export default function MeditationScreen() {
 
   function addVideo() {
     setError(null);
-    if (!canAddMore) {
-      setError(`Max ${MAX_VIDEOS} videos reached.`);
-      return;
-    }
+    if (!canAddMore) return setError(`Max ${MAX_VIDEOS} videos reached.`);
     const id = extractYouTubeId(formUrl.trim() || "");
-    if (!id) {
-      setError("Please paste a valid YouTube link.");
-      return;
-    }
+    if (!id) return setError("Please paste a valid YouTube link.");
     const title = (formTitle || "Untitled").trim();
     setVideos((v) => [...v, { id, title, url: formUrl.trim() }]);
     setFormTitle("");
@@ -156,63 +158,73 @@ export default function MeditationScreen() {
           </div>
         </div>
 
-        {/* Shelf */}
+        {/* Shelf (spines only until flipped) */}
         <div className="space-y-6">
           <div className="rounded-2xl p-4 shadow-inner bg-[url('https://images.unsplash.com/photo-1517329782449-810562a4ec2a?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center">
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-10 gap-3">
-              {videos.map((v, i) => (
-                <div key={`${v.id}-${i}`} className="relative h-48 [perspective:1000px]">
-                  <div
-                    className={`relative h-full w-full transition-transform duration-500 [transform-style:preserve-3d] ${flippedIndex === i ? "[transform:rotateY(180deg)]" : ""}`}
-                  >
-                    {/* Spine */}
-                    <button
-                      onClick={() => setFlippedIndex(flippedIndex === i ? null : i)}
-                      className="absolute inset-0 rounded-xl bg-gradient-to-b from-slate-800 to-slate-700 border border-slate-900 shadow-md flex items-center justify-center [backface-visibility:hidden]"
-                      title={v.title}
+              {videos.map((v, i) => {
+                const flipped = flippedIndex === i;
+                return (
+                  <div key={`${v.id}-${i}`} className="relative h-48" style={perspectiveStyle}>
+                    <div
+                      className="relative h-full w-full transition-transform duration-500"
+                      style={{ ...preserve3D, transform: flipped ? "rotateY(180deg)" : "rotateY(0deg)" }}
                     >
-                      <div className="flex flex-col items-center">
-                        <div className="h-36 w-10 bg-slate-200/10 rounded-md border border-slate-600 shadow-inner flex items-center justify-center">
-                          <span className="[writing-mode:vertical-rl] rotate-180 text-xs font-semibold tracking-wide text-white">
-                            {v.title}
+                      {/* Spine */}
+                      <button
+                        onClick={() => setFlippedIndex(flipped ? null : i)}
+                        className="absolute inset-0 rounded-xl bg-gradient-to-b from-slate-800 to-slate-700 border border-slate-900 shadow-md flex items-center justify-center"
+                        style={backfaceHidden}
+                        title={v.title}
+                      >
+                        <div className="flex flex-col items-center">
+                          <div className="h-36 w-10 bg-slate-200/10 rounded-md border border-slate-600 shadow-inner flex items-center justify-center">
+                            <span className="text-xs font-semibold tracking-wide text-white" style={writingVertical}>
+                              {v.title}
+                            </span>
+                          </div>
+                          <span className="mt-2 text-[10px] uppercase tracking-wider text-slate-300">
+                            BYB Tape #{i + 1}
                           </span>
                         </div>
-                        <span className="mt-2 text-[10px] uppercase tracking-wider text-slate-300">BYB Tape #{i + 1}</span>
-                      </div>
-                    </button>
+                      </button>
 
-                    {/* Front */}
-                    <div className="absolute inset-0 rounded-xl bg-slate-900 border border-slate-700 overflow-hidden [transform:rotateY(180deg)] [backface-visibility:hidden]">
-                      <div className="relative h-full w-full">
-                        <img src={thumbUrl(v.id)} alt={v.title} className="h-full w-full object-cover opacity-90" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-black/0" />
-                        <div className="absolute bottom-0 left-0 right-0 p-2 flex items-center justify-between gap-2">
-                          <button
-                            onClick={() => setFlippedIndex(null)}
-                            className="px-2 py-1 rounded-md border bg-white text-sm"
-                          >
-                            Back
-                          </button>
-                          <div className="flex items-center gap-2">
+                      {/* Front */}
+                      <div
+                        className="absolute inset-0 rounded-xl bg-slate-900 border border-slate-700 overflow-hidden"
+                        style={{ ...rotateY180, ...backfaceHidden }}
+                      >
+                        <div className="relative h-full w-full">
+                          <img src={thumbUrl(v.id)} alt={v.title} className="h-full w-full object-cover opacity-90" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-black/0" />
+                          <div className="absolute bottom-0 left-0 right-0 p-2 flex items-center justify-between gap-2">
                             <button
-                              onClick={() => setActiveId(v.id)}
-                              className="px-2 py-1 rounded-md border bg-black text-white text-sm"
-                            >
-                              Play
-                            </button>
-                            <button
-                              onClick={() => removeVideo(i)}
+                              onClick={() => setFlippedIndex(null)}
                               className="px-2 py-1 rounded-md border bg-white text-sm"
                             >
-                              Delete
+                              Back
                             </button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => setActiveId(v.id)}
+                                className="px-2 py-1 rounded-md border bg-black text-white text-sm"
+                              >
+                                Play
+                              </button>
+                              <button
+                                onClick={() => removeVideo(i)}
+                                className="px-2 py-1 rounded-md border bg-white text-sm"
+                              >
+                                Delete
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
               {/* Empty slots */}
               {Array.from({ length: Math.max(0, MAX_VIDEOS - videos.length) }).map((_, i) => (
