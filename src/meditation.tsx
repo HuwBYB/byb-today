@@ -1,80 +1,136 @@
 // src/meditation.tsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
-type Video = {
-  id: string;
-  title: string;
-  url: string;
-};
+/* =========================
+   Types & constants
+========================= */
+type Video = { id: string; title: string; url: string };
 
 const STORAGE_KEY = "byb.meditationCentre.videos";
 const MAX_VIDEOS = 10;
 
-/** Seed videos (your three) */
+/** Seed videos (yours) */
 const SEEDS: Partial<Video>[] = [
-  { title: "Starter: 10-min Calm",   url: "https://youtu.be/j734gLbQFbU?si=6AnHq5m0lLMu7zrW" },
-  { title: "Starter: Focus Reset",   url: "https://youtu.be/cyMxWXlX9sU?si=HyfDOCQuFNY9chFP" },
-  { title: "Starter: Deep Relax",    url: "https://youtu.be/P-8ALcF8AGE?si=JCtNqvsaKfxDLhdO" },
+  { title: "Starter: 10-min Calm", url: "https://youtu.be/j734gLbQFbU?si=6AnHq5m0lLMu7zrW" },
+  { title: "Starter: Focus Reset", url: "https://youtu.be/cyMxWXlX9sU?si=HyfDOCQuFNY9chFP" },
+  { title: "Starter: Deep Relax",  url: "https://youtu.be/P-8ALcF8AGE?si=JCtNqvsaKfxDLhdO" },
 ];
 
+/* =========================
+   Utilities
+========================= */
 function extractYouTubeId(url: string): string | null {
   try {
     const u = new URL(url);
     if (u.hostname.includes("youtube.com")) {
       const v = u.searchParams.get("v");
       if (v) return v;
-      const embed = u.pathname.match(/\/embed\/([a-zA-Z0-9_-]{6,})/);
-      if (embed) return embed[1];
+      const m = u.pathname.match(/\/embed\/([a-zA-Z0-9_-]{6,})/);
+      if (m) return m[1];
     }
     if (u.hostname.includes("youtu.be")) {
       const short = u.pathname.replace("/", "");
       if (short) return short;
     }
+    // Fallback loose match
     const loose = url.match(/([a-zA-Z0-9_-]{6,})/g)?.find((x) => x.length >= 6);
     return loose || null;
   } catch {
     return null;
   }
 }
-
 const thumbUrl = (id: string) => `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
-const embedUrl  = (id: string) => `https://www.youtube.com/embed/${id}?autoplay=1&rel=0`;
 
-/** Inline styles (type-only import above keeps TS happy with verbatimModuleSyntax) */
-const perspectiveStyle: CSSProperties = { perspective: "1000px" };
-const preserve3D: CSSProperties     = { transformStyle: "preserve-3d" };
-const backfaceHidden: CSSProperties = { backfaceVisibility: "hidden" };
-const rotateY180: CSSProperties     = { transform: "rotateY(180deg)" };
+/** Load YT iframe API once and share the promise */
+let ytPromise: Promise<any> | null = null;
+function loadYouTubeAPI(): Promise<any> {
+  if (typeof window === "undefined") return Promise.resolve(null);
+  if ((window as any).YT?.Player) return Promise.resolve((window as any).YT);
+  if (ytPromise) return ytPromise;
 
+  ytPromise = new Promise((resolve) => {
+    const w = window as any;
+    const existing = document.getElementById("youtube-iframe-api");
+    if (!existing) {
+      const tag = document.createElement("script");
+      tag.id = "youtube-iframe-api";
+      tag.src = "https://www.youtube.com/iframe_api";
+      document.body.appendChild(tag);
+    }
+    w.onYouTubeIframeAPIReady = () => resolve(w.YT);
+  });
+  return ytPromise;
+}
+
+/* =========================
+   Styles for the VHS spines
+========================= */
+const vhsGreen = "linear-gradient(180deg, #0f2b20 0%, #0b2218 100%)"; // deep green
+const gold = "#d6b66b";
+const spineStyle: CSSProperties = {
+  backgroundImage: vhsGreen,
+  border: `1px solid ${gold}`,
+  borderRadius: 10,
+  boxShadow: "inset 0 0 0 2px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.25)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+const goldRule: CSSProperties = {
+  height: "100%",
+  width: 40,
+  borderLeft: `2px solid ${gold}`,
+  borderRight: `2px solid ${gold}`,
+  borderRadius: 6,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+const verticalTitle: CSSProperties = {
+  writingMode: "vertical-rl",
+  transform: "rotate(180deg)",
+  color: gold,
+  fontWeight: 700,
+  fontSize: 12,
+  letterSpacing: "0.04em",
+};
+
+/* =========================
+   Main component
+========================= */
 export default function MeditationScreen() {
   const [videos, setVideos] = useState<Video[]>([]);
-  const [flippedIndex, setFlippedIndex] = useState<number | null>(null);
+  const [selected, setSelected] = useState<number | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
 
   const [formTitle, setFormTitle] = useState("");
   const [formUrl, setFormUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  // Load from storage or seeds
+  // ----- Load from storage or seeds on first run
   useEffect(() => {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       try {
-        setVideos(JSON.parse(raw));
-        return;
-      } catch {}
+        const parsed = JSON.parse(raw) as Video[];
+        // If parsed is empty (e.g., first-ever run but localStorage set), fall back to seeds
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setVideos(parsed);
+          return;
+        }
+      } catch {
+        /* noop */
+      }
     }
-    if (SEEDS.length) {
-      const prepared: Video[] = SEEDS.map((s, i) => {
-        const id = extractYouTubeId(s.url || "") || `seed-${i}`;
-        return { id, title: s.title || `Video ${i + 1}`, url: s.url || "" } as Video;
-      });
-      setVideos(prepared);
-    }
+    const prepared: Video[] = SEEDS.map((s, i) => {
+      const id = extractYouTubeId(s.url || "") || `seed-${i}`;
+      return { id, title: s.title || `Video ${i + 1}`, url: s.url || "" } as Video;
+    });
+    setVideos(prepared);
   }, []);
 
-  // Persist
+  // ----- Persist on change
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(videos));
   }, [videos]);
@@ -94,15 +150,81 @@ export default function MeditationScreen() {
 
   function removeVideo(idx: number) {
     setVideos((v) => v.filter((_, i) => i !== idx));
-    if (flippedIndex === idx) setFlippedIndex(null);
+    if (selected === idx) setSelected(null);
+    if (videos[idx]?.id === activeId) setActiveId(null);
   }
 
   function resetAll() {
     setVideos([]);
-    setFlippedIndex(null);
+    setSelected(null);
     setActiveId(null);
     localStorage.removeItem(STORAGE_KEY);
   }
+
+  /* =========================
+     TV Overlay with YT Player
+  ========================= */
+  const tvRef = useRef<HTMLDivElement | null>(null);
+  const playerRef = useRef<any>(null);
+
+  // Create/destroy player when activeId changes
+  useEffect(() => {
+    let disposed = false;
+    async function mount() {
+      if (!activeId || !tvRef.current) return;
+      const YT = await loadYouTubeAPI();
+      if (disposed || !YT || !tvRef.current) return;
+
+      // Clean old player if any
+      if (playerRef.current?.destroy) {
+        try { playerRef.current.destroy(); } catch {}
+        playerRef.current = null;
+      }
+
+      playerRef.current = new YT.Player(tvRef.current, {
+        height: "100%",
+        width: "100%",
+        videoId: activeId,
+        playerVars: {
+          rel: 0,
+          modestbranding: 1,
+          playsinline: 1,
+        },
+        events: {
+          onReady: (e: any) => {
+            try { e.target.playVideo(); } catch {}
+          },
+        },
+      });
+    }
+    mount();
+    return () => {
+      disposed = true;
+      if (playerRef.current?.destroy) {
+        try { playerRef.current.destroy(); } catch {}
+        playerRef.current = null;
+      }
+    };
+  }, [activeId]);
+
+  function handlePause() {
+    try { playerRef.current?.pauseVideo?.(); } catch {}
+  }
+  function handlePlay() {
+    try { playerRef.current?.playVideo?.(); } catch {}
+  }
+  function handleCloseTV() {
+    try { playerRef.current?.stopVideo?.(); } catch {}
+    setActiveId(null);
+  }
+
+  /* =========================
+     Render
+  ========================= */
+  const selectedVideo = useMemo(
+    () => (selected != null ? videos[selected] : null),
+    [selected, videos]
+  );
 
   return (
     <div className="w-full min-h-[100dvh] bg-gradient-to-b from-slate-50 to-slate-100 text-slate-900">
@@ -111,7 +233,9 @@ export default function MeditationScreen() {
         <div className="flex items-center justify-between gap-4 mb-6">
           <div>
             <h1 className="text-3xl md:text-4xl font-bold tracking-tight">BYB Meditation Centre</h1>
-            <p className="text-sm md:text-base text-slate-500">Motivation Centre · Save up to {MAX_VIDEOS} favourites</p>
+            <p className="text-sm md:text-base text-slate-500">
+              Motivation Centre · Save up to {MAX_VIDEOS} favourites
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={resetAll} className="px-3 py-2 rounded-md border bg-white hover:bg-slate-50">
@@ -152,127 +276,124 @@ export default function MeditationScreen() {
                   Add
                 </button>
               </div>
-              <p className="text-xs text-slate-500 mt-1">You can save {MAX_VIDEOS - videos.length} more.</p>
+              <p className="text-xs text-slate-500 mt-1">
+                You can save {Math.max(0, MAX_VIDEOS - videos.length)} more.
+              </p>
               {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
             </div>
           </div>
         </div>
 
-        {/* Shelf */}
-        <div className="space-y-6">
-          <div className="rounded-2xl p-4 shadow-inner bg-[url('https://images.unsplash.com/photo-1517329782449-810562a4ec2a?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-10 gap-3">
-              {videos.map((v, i) => {
-                const flipped = flippedIndex === i;
-                return (
-                  <div key={`${v.id}-${i}`} className="relative h-48" style={perspectiveStyle}>
-                    <div
-                      className="relative h-full w-full transition-transform duration-500"
-                      style={{ ...preserve3D, transform: flipped ? "rotateY(180deg)" : "rotateY(0deg)" }}
-                    >
-                      {/* Spine */}
-                      <button
-                        onClick={() => setFlippedIndex(flipped ? null : i)}
-                        className="absolute inset-0 rounded-xl bg-gradient-to-b from-slate-800 to-slate-700 border border-slate-900 shadow-md flex items-center justify-center"
-                        style={backfaceHidden}
-                        title={v.title}
-                      >
-                        <div className="flex flex-col items-center">
-                          <div className="h-36 w-10 bg-slate-200/10 rounded-md border border-slate-600 shadow-inner flex items-center justify-center">
-                            <span
-                              className="text-xs font-semibold tracking-wide text-white"
-                              style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
-                            >
-                              {v.title}
-                            </span>
-                          </div>
-                          <span className="mt-2 text-[10px] uppercase tracking-wider text-slate-300">BYB Tape #{i + 1}</span>
-                        </div>
-                      </button>
-
-                      {/* Front */}
-                      <div
-                        className="absolute inset-0 rounded-xl bg-slate-900 border border-slate-700 overflow-hidden"
-                        style={{ ...rotateY180, ...backfaceHidden }}
-                      >
-                        <div className="relative h-full w-full">
-                          <img src={thumbUrl(v.id)} alt={v.title} className="h-full w-full object-cover opacity-90" />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-black/0" />
-                          <div className="absolute bottom-0 left-0 right-0 p-2 flex items-center justify-between gap-2">
-                            <button
-                              onClick={() => setFlippedIndex(null)}
-                              className="px-2 py-1 rounded-md border bg-white text-sm"
-                            >
-                              Back
-                            </button>
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => setActiveId(v.id)}
-                                className="px-2 py-1 rounded-md border bg-black text-white text-sm"
-                              >
-                                Play
-                              </button>
-                              <button
-                                onClick={() => removeVideo(i)}
-                                className="px-2 py-1 rounded-md border bg-white text-sm"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-
-              {/* Empty slots */}
-              {Array.from({ length: Math.max(0, MAX_VIDEOS - videos.length) }).map((_, i) => (
-                <div key={`empty-${i}`} className="relative h-48">
-                  <div className="absolute inset-0 rounded-xl border-2 border-dashed border-slate-300/60 flex items-center justify-center">
-                    <div className="flex flex-col items-center text-xs text-slate-600">
-                      <span className="mb-1">＋</span>
-                      Add video
-                    </div>
-                  </div>
+        {/* Shelf – clean row of VHS spines */}
+        <div className="border rounded-2xl bg-white p-4 shadow-sm">
+          <div className="flex gap-3 overflow-x-auto pb-1" role="list">
+            {videos.map((v, i) => (
+              <button
+                key={`${v.id}-${i}`}
+                role="listitem"
+                className="h-48 w-[64px] shrink-0 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                style={spineStyle}
+                title={v.title}
+                onClick={() => setSelected(i)}
+              >
+                <div style={goldRule}>
+                  <span style={verticalTitle}>{v.title}</span>
                 </div>
-              ))}
-            </div>
+              </button>
+            ))}
+            {/* Empty placeholders */}
+            {Array.from({ length: Math.max(0, MAX_VIDEOS - videos.length) }).map((_, i) => (
+              <div
+                key={`empty-${i}`}
+                className="h-48 w-[64px] shrink-0 rounded-lg border-2 border-dashed border-slate-300 grid place-items-center text-xs text-slate-500"
+              >
+                Empty
+              </div>
+            ))}
           </div>
+        </div>
 
-          {/* TV Viewer */}
-          {activeId && (
-            <div className="mx-auto max-w-5xl">
-              <div className="relative mx-auto rounded-[2rem] border-8 border-slate-800 bg-slate-950 shadow-2xl overflow-hidden">
-                {/* Screen */}
-                <div className="bg-black aspect-video w-full">
-                  <iframe
-                    className="w-full h-[56.25vw] max-h-[70vh]"
-                    src={embedUrl(activeId)}
-                    title="BYB TV"
-                    frameBorder={0}
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                  />
+        {/* Details panel below shelf (shows when a spine is selected) */}
+        {selectedVideo && (
+          <div className="mt-6 border rounded-xl bg-white overflow-hidden">
+            <div className="grid grid-cols-1 md:grid-cols-3">
+              <div className="aspect-video md:col-span-2 bg-black/5">
+                <img
+                  src={thumbUrl(selectedVideo.id)}
+                  alt={selectedVideo.title}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <div className="p-4 flex flex-col gap-3">
+                <h3 className="text-lg font-semibold">{selectedVideo.title}</h3>
+                <div className="mt-auto flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setActiveId(selectedVideo.id)}
+                    className="px-3 py-2 rounded-md border bg-black text-white"
+                  >
+                    Play on BYB TV
+                  </button>
+                  <button
+                    onClick={() => setSelected(null)}
+                    className="px-3 py-2 rounded-md border bg-white"
+                  >
+                    Close
+                  </button>
+                  <button
+                    onClick={() => removeVideo(selected!)}
+                    className="px-3 py-2 rounded-md border bg-white"
+                  >
+                    Delete
+                  </button>
                 </div>
-                {/* Bezel */}
-                <div className="absolute -bottom-0 left-0 right-0 h-14 bg-slate-900 border-t border-slate-800 flex items-center justify-between px-4">
-                  <span className="font-semibold tracking-widest text-slate-200">BYB TV</span>
-                  <div className="flex items-center gap-2">
-                    <div className="h-3 w-3 rounded-full bg-emerald-500 animate-pulse" title="Power" />
-                    <button onClick={() => setActiveId(null)} className="px-2 py-1 rounded-md border bg-white text-sm">
-                      Close
-                    </button>
-                  </div>
-                </div>
-                {/* Feet */}
-                <div className="absolute -bottom-3 left-6 h-3 w-12 bg-slate-800 rounded-b-xl" />
-                <div className="absolute -bottom-3 right-6 h-3 w-12 bg-slate-800 rounded-b-xl" />
               </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
+        {/* TV Overlay */}
+        {activeId && (
+          <div
+            className="fixed inset-0 z-50 bg-black/70 grid place-items-center p-4"
+            onClick={handleCloseTV}
+          >
+            <div
+              className="relative w-full max-w-5xl"
+              onClick={(e) => e.stopPropagation()} // prevent closing when clicking inside
+            >
+              {/* TV bezel */}
+              <div className="relative bg-black rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.6)]">
+                {/* Inner glossy frame */}
+                <div className="rounded-xl border border-slate-800 p-3">
+                  <div className="rounded-md overflow-hidden bg-black aspect-video">
+                    {/* YT player mounts here */}
+                    <div ref={tvRef} className="w-full h-full" />
+                  </div>
+                </div>
+
+                {/* Lower bezel badge */}
+                <div className="absolute -bottom-10 left-1/2 -translate-x-1/2">
+                  <div className="px-6 py-2 rounded-full bg-neutral-900 border border-neutral-700 text-neutral-200 tracking-[0.3em] text-xs font-semibold shadow">
+                    BYB TV
+                  </div>
+                </div>
+              </div>
+
+              {/* Controls */}
+              <div className="mt-16 flex items-center justify-center gap-3">
+                <button onClick={handlePlay} className="px-4 py-2 rounded-md border bg-white">
+                  Play
+                </button>
+                <button onClick={handlePause} className="px-4 py-2 rounded-md border bg-white">
+                  Pause
+                </button>
+                <button onClick={handleCloseTV} className="px-4 py-2 rounded-md border bg-black text-white">
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
