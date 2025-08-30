@@ -3,18 +3,18 @@ import type { ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* =============================================
-   BYB — Today Screen (Polished v1)
-   Implements Phase 1 & 2 touches:
-   - Smart greeting (time-based + "missed you")
-   - Rotating name/nickname greeting
-   - Top bar (BYB + friendly date)
-   - "Biggest Goal" card fixed at the top
-   - Top Priorities vs Everything Else split (kept)
-   - Confetti on done + Alfred encouragement toasts
-   - Streak badge micro-animation
+   BYB — Today Screen (Polished Full Page)
+   Implements Phase 1 & 2 touches and mobile overflow fixes:
+   - Smart greeting (time-of-day + "missed you")
+   - Rotating name/nickname greeting with toggle
+   - Top app bar (BYB + friendly date) with streak micro-animation
+   - "Today’s Biggest Goal" card pinned on top
+   - Top Priorities vs Everything Else split
+   - Confetti on completion + Alfred encouragement toasts
+   - Pastel spacing / rounded edges
    - Scrollable bottom tab bar (thumb-friendly)
-   - Pastel card spacing + rounded corners (via inline styles)
    - Lightweight onboarding (Name → Nicknames → Big Goal, with Skip)
+   - Global style clamp to eliminate horizontal bleed on mobile
    ============================================= */
 
 type Task = {
@@ -61,9 +61,6 @@ function addDays(iso: string, n: number) {
 
 /* ===== repeat config ===== */
 
-// NOTE: unchanged core repeat logic; retained for stability
-// while giving UI a polish.
-
 type Repeat = "" | "daily" | "weekdays" | "weekly" | "monthly" | "annually";
 const REPEAT_COUNTS: Record<Exclude<Repeat, "">, number> = {
   daily: 14,
@@ -76,7 +73,6 @@ const REPEAT_PREFIX = "today_repeat_";
 
 function generateOccurrences(startISO: string, repeat: Repeat): string[] {
   if (!repeat) return [startISO];
-
   if (repeat === "weekdays") {
     const count = REPEAT_COUNTS.weekdays;
     const out: string[] = [];
@@ -88,7 +84,6 @@ function generateOccurrences(startISO: string, repeat: Repeat): string[] {
     }
     return out;
   }
-
   const count = REPEAT_COUNTS[repeat];
   const out: string[] = [];
   for (let i = 0; i < count; i++) {
@@ -114,7 +109,7 @@ function makeSeriesKey(repeat: Repeat) {
 /* ===== display-name helper (rotates name + nicknames) ===== */
 const LS_NAME = "byb:display_name";
 const LS_POOL = "byb:display_pool"; // string[]
-const LS_ROTATE = "byb:rotate_nicknames"; // "1" | "0"
+const LS_ROTATE = "byb:rotate_nicknames"; // "1" | "0" (default on)
 
 function pickGreetingLabel(): string {
   try {
@@ -157,7 +152,6 @@ function formatNiceDate(iso: string): string {
     return iso;
   }
 }
-
 function timeGreeting(date = new Date()): string {
   const h = date.getHours();
   if (h < 5) return "Up late";
@@ -174,7 +168,6 @@ function fireConfetti() {
   container.style.pointerEvents = "none";
   container.style.overflow = "hidden";
   document.body.appendChild(container);
-
   const pieces = 80;
   const colors = ["#fde68a", "#a7f3d0", "#bfdbfe", "#fbcfe8", "#ddd6fe"];
   for (let i = 0; i < pieces; i++) {
@@ -209,9 +202,9 @@ const ALFRED_LINES = [
   "You’re doing Future You a favour.",
   "Mic drop. Onto the next."
 ];
-
 function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)] as T; }
 
+/* ===== Tiny toast hook ===== */
 function useToast() {
   const [msg, setMsg] = useState<string | null>(null);
   function show(m: string) {
@@ -219,33 +212,9 @@ function useToast() {
     setTimeout(() => setMsg(null), 2500);
   }
   const node = (
-    <div
-      aria-live="polite"
-      style={{
-        position: "fixed",
-        left: 0,
-        right: 0,
-        bottom: 24,
-        display: "flex",
-        justifyContent: "center",
-        pointerEvents: "none",
-        zIndex: 3000
-      }}
-    >
+    <div aria-live="polite" style={{ position: "fixed", left: 0, right: 0, bottom: 24, display: "flex", justifyContent: "center", pointerEvents: "none", zIndex: 3000 }}>
       {msg && (
-        <div
-          className="card"
-          style={{
-            background: "#111827",
-            color: "white",
-            borderRadius: 12,
-            padding: "10px 14px",
-            boxShadow: "0 8px 20px rgba(0,0,0,.25)",
-            pointerEvents: "all",
-            transform: "translateY(0)",
-            transition: "transform .25s ease"
-          }}
-        >
+        <div className="card" style={{ background: "#111827", color: "white", borderRadius: 12, padding: "10px 14px", boxShadow: "0 8px 20px rgba(0,0,0,.25)", pointerEvents: "all", transform: "translateY(0)", transition: "transform .25s ease" }}>
           {msg}
         </div>
       )}
@@ -255,6 +224,22 @@ function useToast() {
 }
 
 export default function TodayScreen({ externalDateISO }: Props) {
+  // --- Global clamp to kill horizontal bleeding on mobile ---
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.setAttribute("data-byb-global", "1");
+    style.innerHTML = `
+      *,*::before,*::after{ box-sizing:border-box; }
+      html,body,#root{ width:100%; max-width:100%; overflow-x:hidden; }
+      .card{ width:100%; max-width:100%; }
+      input,select,button{ max-width:100%; }
+      .h-scroll{ display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+      .h-scroll::-webkit-scrollbar{ display:none; }
+    `;
+    document.head.appendChild(style);
+    return () => { try { document.head.removeChild(style); } catch {} };
+  }, []);
+
   const [userId, setUserId] = useState<string | null>(null);
   const [dateISO, setDateISO] = useState<string>(externalDateISO || todayISO());
 
@@ -330,9 +315,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
   const toast = useToast();
 
-  useEffect(() => {
-    if (externalDateISO) setDateISO(externalDateISO);
-  }, [externalDateISO]);
+  useEffect(() => { if (externalDateISO) setDateISO(externalDateISO); }, [externalDateISO]);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
@@ -360,14 +343,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
   }, []);
 
   // keep clock fresh
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 30_000);
-    return () => clearInterval(id);
-  }, []);
+  useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id); }, []);
 
-  function isOverdue(t: Task) {
-    return !!t.due_date && t.due_date < dateISO && t.status !== "done";
-  }
+  function isOverdue(t: Task) { return !!t.due_date && t.due_date < dateISO && t.status !== "done"; }
 
   async function load() {
     if (!userId) return;
@@ -444,16 +422,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
         days.add(toISO(new Date(d.getFullYear(), d.getMonth(), d.getDate())));
       }
 
-      let streak = 0;
-      let cursor = todayISO();
+      let streak = 0; let cursor = todayISO();
       while (days.has(cursor)) { streak += 1; cursor = addDays(cursor, -1); }
 
       const sorted = Array.from(days).sort();
       let best = 0, run = 0; let prev: string | null = null;
-      for (const d of sorted) {
-        if (!prev) run = 1; else { const nextOfPrev = addDays(prev, 1); run = d === nextOfPrev ? run + 1 : 1; }
-        best = Math.max(best, run); prev = d;
-      }
+      for (const d of sorted) { if (!prev) run = 1; else { const nextOfPrev = addDays(prev, 1); run = d === nextOfPrev ? run + 1 : 1; } best = Math.max(best, run); prev = d; }
       setSummary((s) => ({ ...s, streak, bestStreak: best }));
     } catch { /* ignore */ }
   }
@@ -627,9 +601,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     } else if (obStep === 3) {
       const title = obGoal.trim();
       if (title && userId) {
-        try {
-          await supabase.from("goals").insert({ user_id: userId, title, is_big: true });
-        } catch { /* ignore */ }
+        try { await supabase.from("goals").insert({ user_id: userId, title, is_big: true }); } catch { /* ignore */ }
       }
       setObStep(0);
       setGreetName(pickGreetingLabel()); // refresh greeting pool
@@ -643,22 +615,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const greeting = useMemo(() => (missed ? "We missed you" : timeGreeting(now)), [missed, now]);
 
   return (
-    <div style={{ display: "grid", gap: 12, overflowX: "hidden" }}>
+    <div style={{ display: "grid", gap: 12, overflowX: "hidden", width: "100%", maxWidth: "100%" }}>
       {/* Top app bar */}
-      <div
-        className="card"
-        style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 60,
-          display: "grid",
-          gap: 8,
-          border: "1px solid var(--border)",
-          background: "#fff",
-          borderRadius: 16,
-          padding: 12
-        }}
-      >
+      <div className="card" style={{ position: "sticky", top: 0, zIndex: 60, display: "grid", gap: 8, border: "1px solid var(--border)", background: "#fff", borderRadius: 16, padding: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
             <div style={{ fontWeight: 800, fontSize: 18 }}>BYB</div>
@@ -687,14 +646,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
             <div className="muted" style={{ whiteSpace: "nowrap" }}>{dateISO}</div>
           </div>
 
-          <input
-            type="text"
-            value={quickTitle}
-            onChange={(e) => setQuickTitle(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && quickTitle.trim() && !savingQuick) addQuick(); }}
-            placeholder="Quick add a task for today…"
-            style={{ flex: "1 1 220px", minWidth: 0, maxWidth: "100%" }}
-          />
+          <input type="text" value={quickTitle} onChange={(e) => setQuickTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && quickTitle.trim() && !savingQuick) addQuick(); }} placeholder="Quick add a task for today…" style={{ flex: "1 1 220px", minWidth: 0, maxWidth: "100%" }} />
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
             <input type="checkbox" checked={quickTop} onChange={(e) => setQuickTop(e.target.checked)} /> Top
           </label>
@@ -721,13 +673,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <h2 style={{ margin: 0, fontSize: 18 }}>Today’s Biggest Goal</h2>
           {bigGoal ? <span className="badge" title="Your long-term focus">Pinned</span> : <span className="badge" title="Set a Big Goal in Profile or Onboarding">Not set</span>}
-          <div style={{ marginLeft: "auto" }}>
-            {bigGoal && <span className="muted">{bigGoal.title}</span>}
-          </div>
+          <div style={{ marginLeft: "auto" }}>{bigGoal && <span className="muted">{bigGoal.title}</span>}</div>
         </div>
-        {!bigGoal && (
-          <div className="muted" style={{ marginTop: 6 }}>Add a Big Goal to keep today aligned. You can set it in your Profile.</div>
-        )}
+        {!bigGoal && <div className="muted" style={{ marginTop: 6 }}>Add a Big Goal to keep today aligned. You can set it in your Profile.</div>}
       </div>
 
       {/* ===== Lists ===== */}
@@ -829,8 +777,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
       </div>
 
       {/* ===== Scrollable Bottom Tab Bar ===== */}
-      <div style={{ position: "sticky", bottom: 0, zIndex: 50, background: "#fff", padding: "8px 4px", borderTop: "1px solid var(--border)" }}>
-        <div style={{ display: "flex", gap: 8, overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none" as any }}>
+      <div style={{ position: "sticky", bottom: 0, zIndex: 50, background: "#fff", padding: "8px 4px", borderTop: "1px solid var(--border)", width: "100%", maxWidth: "100%" }}>
+        <div className="h-scroll">
           {[
             { key: "today", label: "Today" },
             { key: "journal", label: "Journal" },
