@@ -173,6 +173,24 @@ function computeBalance(goals: Goal[]): BalanceStats {
   return { total, counts, percents, represented, dominant };
 }
 
+/* --------- Auto-loop helpers (halfway → target) --------- */
+function isoToday() {
+  const d = new Date();
+  return toISO(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+}
+
+async function countFutureBigGoalTasks(userId: string, goalId: number, fromISO: string) {
+  const { count, error } = await supabase
+    .from("tasks")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("goal_id", goalId)
+    .in("source", ["big_goal_monthly", "big_goal_weekly", "big_goal_daily"])
+    .gte("due_date", fromISO);
+  if (error) throw error;
+  return count || 0;
+}
+
 /* ========================== MAIN SCREEN ========================== */
 
 export default function GoalsScreen() {
@@ -223,7 +241,118 @@ export default function GoalsScreen() {
     setGoals(data as Goal[]);
   }
 
-  /* ----- open selected goal (load steps) ----- */
+  /* ----- client-side reseed (with seed-from date) ----- */
+  async function clientReseedTasksForGoal(goalId: number, seedFromISO?: string) {
+    if (!userId) return;
+
+    const { data: g, error: ge } = await supabase
+      .from("goals")
+      .select("id,user_id,title,category,category_color,start_date,target_date,halfway_date,halfway_note")
+      .eq("id", goalId)
+      .single();
+    if (ge) throw ge;
+    const goal = g as Goal;
+
+    const startISO = goal.start_date || toISO(new Date());
+    const endISO   = goal.target_date || startISO;
+    const start = fromISO(startISO);
+    const end   = fromISO(endISO);
+    if (end < start) throw new Error("Target date is before start date.");
+
+    // from which date do we reseed
+    const todayISO = isoToday();
+    const fromISOValue = seedFromISO || todayISO;
+    const fromDate = fromISO(fromISOValue);
+
+    const { data: steps, error: se } = await supabase
+      .from("big_goal_steps")
+      .select("*")
+      .eq("goal_id", goalId)
+      .eq("active", true);
+    if (se) throw se;
+
+    const cat: CatKey = normalizeCat(goal.category);
+    const col = goal.category_color || colorOf(cat);
+
+    // wipe ONLY future big_goal_* tasks from fromISO forward (leave milestone + review)
+    await supabase
+      .from("tasks")
+      .delete()
+      .eq("user_id", userId)
+      .eq("goal_id", goalId)
+      .in("source", ["big_goal_monthly", "big_goal_weekly", "big_goal_daily"])
+      .gte("due_date", fromISOValue);
+
+    const queue: any[] = [];
+
+    // monthly — same DOM cadence, first >= fromDate
+    const monthSteps = (steps as Step[]).filter(s => s.cadence === "monthly");
+    if (monthSteps.length) {
+      let cursor = addMonthsClamped(start, 0, start.getDate());
+      while (cursor < fromDate) cursor = addMonthsClamped(cursor, 1, start.getDate());
+      while (cursor <= end) {
+        const due = toISO(cursor);
+        for (const s of monthSteps) {
+          queue.push({
+            user_id: userId, goal_id: goalId,
+            title: `BIG GOAL — Monthly: ${s.description}`,
+            due_date: due, source: "big_goal_monthly", priority: 2,
+            category: cat, category_color: col,
+          });
+        }
+        cursor = addMonthsClamped(cursor, 1, start.getDate());
+      }
+    }
+
+    // weekly — cadence every 7 days from (start + 7)
+    const weekSteps = (steps as Step[]).filter(s => s.cadence === "weekly");
+    if (weekSteps.length) {
+      let cursor = new Date(start);
+      cursor.setDate(cursor.getDate() + 7); // first weekly
+      while (cursor < fromDate) cursor.setDate(cursor.getDate() + 7);
+      while (cursor <= end) {
+        const due = toISO(cursor);
+        for (const s of weekSteps) {
+          queue.push({
+            user_id: userId, goal_id: goalId,
+            title: `BIG GOAL — Weekly: ${s.description}`,
+            due_date: due, source: "big_goal_weekly", priority: 2,
+            category: cat, category_color: col,
+          });
+        }
+        cursor.setDate(cursor.getDate() + 7);
+      }
+    }
+
+    // daily — from max(fromDate, start)
+    const daySteps = (steps as Step[]).filter(s => s.cadence === "daily");
+    if (daySteps.length) {
+      let cursor = new Date(Math.max(fromDate.getTime(), start.getTime()));
+      cursor = clampDay(cursor);
+      while (cursor <= end) {
+        const due = toISO(cursor);
+        for (const s of daySteps) {
+          queue.push({
+            user_id: userId, goal_id: goalId,
+            title: `BIG GOAL — Daily: ${s.description}`,
+            due_date: due, source: "big_goal_daily", priority: 2,
+            category: cat, category_color: col,
+          });
+        }
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    }
+
+    for (let i = 0; i < queue.length; i += 500) {
+      const slice = queue.slice(i, i + 500);
+      const { error: terr } = await supabase.from("tasks").insert(slice);
+      if (terr) throw terr;
+    }
+
+    return queue.length;
+  }
+
+  /* ----- open selected goal (load steps + auto-extend if needed) ----- */
   async function openGoal(g: Goal) {
     setSelected(g);
     const { data, error } = await supabase
@@ -241,108 +370,19 @@ export default function GoalsScreen() {
     setWeekly(w.length ? w : [""]);
     setDaily(d.length ? d : [""]);
     setEditCat(normalizeCat(g.category));
-  }
 
-  /* ----- client-side reseed if RPC fails ----- */
-  async function clientReseedTasksForGoal(goalId: number) {
-    if (!userId) return;
-
-    const { data: g, error: ge } = await supabase
-      .from("goals")
-      .select("id,user_id,title,category,category_color,start_date,target_date,halfway_date,halfway_note")
-      .eq("id", goalId)
-      .single();
-    if (ge) throw ge;
-    const goal = g as Goal;
-
-    const startISO = goal.start_date || toISO(new Date()); // ← FIXED stray ')'
-    const endISO   = goal.target_date || startISO;
-    const start = fromISO(startISO);
-    const end   = fromISO(endISO);
-    if (end < start) throw new Error("Target date is before start date.");
-
-    const { data: steps, error: se } = await supabase
-      .from("big_goal_steps")
-      .select("*")
-      .eq("goal_id", goalId)
-      .eq("active", true);
-    if (se) throw se;
-
-    const cat: CatKey = normalizeCat(goal.category);
-    const col = goal.category_color || colorOf(cat);
-
-    const today = toISO(new Date());
-    await supabase
-      .from("tasks")
-      .delete()
-      .eq("user_id", userId)
-      .eq("goal_id", goalId)
-      .in("source", ["big_goal_monthly","big_goal_weekly","big_goal_daily"])
-      .gte("due_date", today);
-
-    const queue: any[] = [];
-
-    // monthly
-    const monthSteps = (steps as Step[]).filter(s => s.cadence === "monthly");
-    if (monthSteps.length) {
-      let d = addMonthsClamped(start, 1, start.getDate());
-      while (d <= end) {
-        const due = toISO(d);
-        for (const s of monthSteps) {
-          queue.push({
-            user_id: userId, goal_id: goalId,
-            title: `BIG GOAL — Monthly: ${s.description}`,
-            due_date: due, source: "big_goal_monthly", priority: 2,
-            category: cat, category_color: col,
-          });
+    // —— Auto-loop after halfway: if we're past halfway and no upcoming tasks, reseed from today
+    try {
+      const today = isoToday();
+      const half = (g.halfway_date || "") as string;
+      const target = (g.target_date || "") as string;
+      if (userId && half && target && today >= half && today <= target) {
+        const futureCount = await countFutureBigGoalTasks(userId, g.id, today);
+        if (futureCount === 0) {
+          await clientReseedTasksForGoal(g.id, today);
         }
-        d = addMonthsClamped(d, 1, start.getDate());
       }
-    }
-
-    // weekly
-    const weekSteps = (steps as Step[]).filter(s => s.cadence === "weekly");
-    if (weekSteps.length) {
-      let d = new Date(start); d.setDate(d.getDate() + 7);
-      while (d <= end) {
-        const due = toISO(d);
-        for (const s of weekSteps) {
-          queue.push({
-            user_id: userId, goal_id: goalId,
-            title: `BIG GOAL — Weekly: ${s.description}`,
-            due_date: due, source: "big_goal_weekly", priority: 2,
-            category: cat, category_color: col,
-          });
-        }
-        d.setDate(d.getDate() + 7);
-      }
-    }
-
-    // daily
-    const daySteps = (steps as Step[]).filter(s => s.cadence === "daily");
-    if (daySteps.length) {
-      let d = clampDay(new Date(Math.max(Date.now(), start.getTime())));
-      while (d <= end) {
-        const due = toISO(d);
-        for (const s of daySteps) {
-          queue.push({
-            user_id: userId, goal_id: goalId,
-            title: `BIG GOAL — Daily: ${s.description}`,
-            due_date: due, source: "big_goal_daily", priority: 2,
-            category: cat, category_color: col,
-          });
-        }
-        d.setDate(d.getDate() + 1);
-      }
-    }
-
-    for (let i = 0; i < queue.length; i += 500) {
-      const slice = queue.slice(i, i + 500);
-      const { error: terr } = await supabase.from("tasks").insert(slice);
-      if (terr) throw terr;
-    }
-
-    return queue.length;
+    } catch { /* soft fail */ }
   }
 
   /* ----- save steps (and reseed tasks) ----- */
@@ -367,7 +407,7 @@ export default function GoalsScreen() {
 
       const { error: rerr } = await supabase.rpc("reseed_big_goal_steps", { p_goal_id: selected.id });
       if (rerr) {
-        const n = await clientReseedTasksForGoal(selected.id);
+        const n = await clientReseedTasksForGoal(selected.id, isoToday());
         alert(`Steps saved. ${n ?? 0} task(s) reseeded for this goal.`);
       } else {
         alert("Steps saved and future tasks updated.");
@@ -609,6 +649,38 @@ export default function GoalsScreen() {
                 </button>
               </div>
             </div>
+
+            {/* Halfway banner */}
+            {selected?.halfway_date && isoToday() >= selected.halfway_date && isoToday() <= (selected.target_date || "9999-12-31") && (
+              <div style={{ border: "1px dashed #c084fc", background: "#faf5ff", color: "#4c1d95", borderRadius: 10, padding: 12 }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>You’ve reached the halfway point 🎯</div>
+                <div className="muted" style={{ marginBottom: 8 }}>
+                  Update your steps if needed. We’ll extend your monthly/weekly/daily tasks from here to the target date.
+                </div>
+                <button
+                  className="btn-primary"
+                  style={{ borderRadius: 8 }}
+                  disabled={busy}
+                  onClick={async () => {
+                    try {
+                      setBusy(true);
+                      // Reseed from tomorrow (gives today breathing room if you’re editing now)
+                      const t = new Date();
+                      t.setDate(t.getDate() + 1);
+                      const from = toISO(t);
+                      const n = await clientReseedTasksForGoal(selected!.id, from);
+                      alert(`Extended ${n ?? 0} task(s) from halfway to target.`);
+                    } catch (e:any) {
+                      setErr(e.message || String(e));
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Extend from halfway
+                </button>
+              </div>
+            )}
 
             {/* Steps editor — ORDER: Monthly → Weekly → Daily */}
             <div>
