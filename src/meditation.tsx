@@ -46,7 +46,6 @@ const perspectiveStyle: CSSProperties = { perspective: "1000px" };
 const preserve3D: CSSProperties     = { transformStyle: "preserve-3d" };
 const backfaceHidden: CSSProperties = { backfaceVisibility: "hidden" };
 const rotateY180: CSSProperties     = { transform: "rotateY(180deg)" };
-const writingVertical: CSSProperties= { writingMode: "vertical-rl", transform: "rotate(180deg)" };
 
 export default function MeditationScreen() {
   const [videos, setVideos] = useState<Video[]>([]);
@@ -180,7 +179,10 @@ export default function MeditationScreen() {
                       >
                         <div className="flex flex-col items-center">
                           <div className="h-36 w-10 bg-slate-200/10 rounded-md border border-slate-600 shadow-inner flex items-center justify-center">
-                            <span className="text-xs font-semibold tracking-wide text-white" style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}>
+                            <span
+                              className="text-xs font-semibold tracking-wide text-white"
+                              style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+                            >
                               {v.title}
                             </span>
                           </div>
