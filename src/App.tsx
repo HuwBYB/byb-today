@@ -17,7 +17,8 @@ import NotesScreen from "./NotesScreen";
 import FocusAlfredScreen from "./FocusAlfredScreen";
 import OnboardingScreen from "./OnboardingScreen";
 import MeditationScreen from "./meditation"; // <-- matches src/meditation.tsx
-import AffirmationBuilder from "./AffirmationBuilder"; // <-- NEW
+import AffirmationBuilder from "./AffirmationBuilder";
+import MenuScreen from "./MenuScreen"; // <-- NEW
 
 /* Types */
 type ProfileRow = {
@@ -30,9 +31,10 @@ type ProfileRow = {
 /* LocalStorage fallback */
 const LS_DONE = "byb:onboarding_done";
 
-/* Tabs */
+/* Tabs (route keys) */
 type Tab =
   | "today"
+  | "menu"
   | "calendar"
   | "goals"
   | "vision"
@@ -44,10 +46,9 @@ type Tab =
   | "notes"
   | "focus"
   | "meditation"
-  | "affirmations"; // <-- NEW
+  | "affirmations";
 
 export default function App() {
-  // Ensure we start on Today
   const [tab, setTab] = useState<Tab>("today");
   const [externalDateISO, setExternalDateISO] = useState<string | undefined>(undefined);
 
@@ -111,43 +112,34 @@ export default function App() {
     if (userId) await loadProfile(userId);
   }
 
-  /* ----- tabs ----- */
-  const tabs = useMemo(
+  /* ----- bottom bar (no slider) ----- */
+  const bottomTabs = useMemo(
     () =>
       [
-        { key: "today",        label: "Today",         icon: "✅" },
-        { key: "calendar",     label: "Calendar",      icon: "🗓️" },
-        { key: "goals",        label: "Goals",         icon: "🎯" },
-        { key: "vision",       label: "Vision",        icon: "🌈" },
-        { key: "gratitude",    label: "Gratitude",     icon: "🙏" },
-        { key: "exercise",     label: "Exercise",      icon: "🏋️" },
-        { key: "wins",         label: "Wins",          icon: "🏆" },
-        { key: "alfred",       label: "Alfred",        icon: "🤖" },
-        { key: "confidence",   label: "Confidence",    icon: "🔥" },
-        { key: "notes",        label: "Notes",         icon: "📝" },
-        { key: "focus",        label: "Focus",         icon: "🎧" },
-        { key: "meditation",   label: "Meditation",    icon: "📺" },
-        { key: "affirmations", label: "Affirmations",  icon: "✨" }, // <-- NEW
+        { key: "today", label: "Today", icon: "✅" },
+        { key: "menu",  label: "Menu",  icon: "🧭" },
       ] as const,
     []
   );
 
+  /* ----- routing ----- */
   function renderTab() {
     switch (tab) {
-      case "today":         return <TodayScreen externalDateISO={externalDateISO} />;
-      case "calendar":      return <CalendarScreen />;
-      case "goals":         return <GoalsScreen />;
-      case "vision":        return <VisionBoardScreen />;
-      case "gratitude":     return <GratitudeScreen />;
-      case "exercise":      return <ExerciseDiaryScreen />;
-      case "wins":          return <WinsScreen />;
-      case "alfred":        return <AlfredScreen />;
-      case "confidence":    return <ConfidenceScreen />;
-      case "notes":         return <NotesScreen />;
-      case "focus":         return <FocusAlfredScreen />;
-      case "meditation":    return <MeditationScreen />;
-      case "affirmations":  return <AffirmationBuilder />; // <-- NEW
-      default:              return <TodayScreen externalDateISO={externalDateISO} />;
+      case "today":        return <TodayScreen externalDateISO={externalDateISO} />;
+      case "menu":         return <MenuScreen onOpenTab={(k) => setTab(k as Tab)} />;
+      case "calendar":     return <CalendarScreen />;
+      case "goals":        return <GoalsScreen />;
+      case "vision":       return <VisionBoardScreen />;
+      case "gratitude":    return <GratitudeScreen />;
+      case "exercise":     return <ExerciseDiaryScreen />;
+      case "wins":         return <WinsScreen />;
+      case "alfred":       return <AlfredScreen />;
+      case "confidence":   return <ConfidenceScreen />;
+      case "notes":        return <NotesScreen />;
+      case "focus":        return <FocusAlfredScreen />;
+      case "meditation":   return <MeditationScreen />;
+      case "affirmations": return <AffirmationBuilder />;
+      default:             return <TodayScreen externalDateISO={externalDateISO} />;
     }
   }
 
@@ -160,7 +152,7 @@ export default function App() {
           <OnboardingScreen onDone={handleOnboardingDone} />
         ) : (
           <>
-            {/* Top header: 2-column grid that stacks on small screens */}
+            {/* Top header */}
             <div className="card header">
               <div className="brand">BYB</div>
               <div className="header-actions">
@@ -173,19 +165,38 @@ export default function App() {
               </div>
             </div>
 
-            {/* Active tab */}
+            {/* Active route */}
             <div>{renderTab()}</div>
 
-            {/* Bottom shortcuts — horizontal scroll bar */}
-            <nav className="tabbar" aria-label="Primary">
-              <div className="tabbar-inner">
-                {tabs.map((t) => (
+            {/* Bottom bar (two buttons, fixed) */}
+            <nav className="tabbar" aria-label="Primary" style={{ position: "sticky", bottom: 0 }}>
+              <div
+                className="tabbar-inner"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 8,
+                  padding: "8px 4px calc(8px + env(safe-area-inset-bottom,0))",
+                  borderTop: "1px solid var(--border)",
+                  background: "var(--bg)",
+                }}
+              >
+                {bottomTabs.map((t) => (
                   <button
                     key={t.key}
-                    className="tab-btn"
+                    className="tab-btn btn-soft"
                     data-active={tab === (t.key as Tab)}
                     onClick={() => setTab(t.key as Tab)}
                     title={t.label}
+                    style={{
+                      borderRadius: 999,
+                      padding: "10px 14px",
+                      display: "flex",
+                      gap: 8,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontWeight: tab === (t.key as Tab) ? 700 : 500,
+                    }}
                   >
                     <span className="icon" aria-hidden>{t.icon}</span>
                     <span className="label">{t.label}</span>
