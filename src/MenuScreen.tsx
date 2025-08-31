@@ -19,18 +19,18 @@ type MenuItem = {
 };
 
 const ITEMS: MenuItem[] = [
-  { key: "calendar",     label: "Calendar",     icon: "🗓️", desc: "Plan your days" },
-  { key: "goals",        label: "Goals",        icon: "🎯", desc: "Track big aims" },
-  { key: "vision",       label: "Vision Board", icon: "🌈", desc: "See your why" },
-  { key: "gratitude",    label: "Gratitude",    icon: "🙏", desc: "Daily thanks" },
-  { key: "exercise",     label: "Exercise",     icon: "🏋️", desc: "Move & log" },
-  { key: "wins",         label: "Your Successes", icon: "🏆", desc: "Celebrate progress" },
-  { key: "alfred",       label: "Alfred",       icon: "🤖", desc: "Your AI helper" },
-  { key: "confidence",   label: "Confidence",   icon: "🔥", desc: "Confidence moves" },
-  { key: "notes",        label: "Notes",        icon: "📝", desc: "Capture thoughts" },
-  { key: "focus",        label: "Focus",        icon: "🎧", desc: "Deep work mode" },
-  { key: "meditation",   label: "Meditation",   icon: "📺", desc: "Guided & saved" },
-  { key: "affirmations", label: "Affirmations", icon: "✨", desc: "Builder & archive" },
+  { key: "calendar",     label: "Calendar",        icon: "🗓️" },
+  { key: "goals",        label: "Goals",           icon: "🎯" },
+  { key: "vision",       label: "Vision Board",    icon: "🌈" },
+  { key: "gratitude",    label: "Gratitude",       icon: "🙏" },
+  { key: "exercise",     label: "Exercise",        icon: "🏋️" },
+  { key: "wins",         label: "Your Successes",  icon: "🏆" },
+  { key: "alfred",       label: "Alfred",          icon: "🤖" },
+  { key: "confidence",   label: "Confidence",      icon: "🔥" },
+  { key: "notes",        label: "Notes",           icon: "📝" },
+  { key: "focus",        label: "Focus",           icon: "🎧" },
+  { key: "meditation",   label: "Meditation",      icon: "📺" },
+  { key: "affirmations", label: "Affirmations",    icon: "✨" },
 ];
 
 export default function MenuScreen({
@@ -45,18 +45,12 @@ export default function MenuScreen({
         <div className="muted">Everything in one place.</div>
       </div>
 
-      {/* Grid menu */}
-      <div
-        className="card"
-        style={{
-          padding: 12,
-        }}
-      >
+      <div className="card" style={{ padding: 12 }}>
         <div
           style={{
             display: "grid",
             gap: 12,
-            gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+            gridTemplateColumns: "repeat(2, minmax(0, 1fr))", // <-- fixed two columns
           }}
         >
           {ITEMS.map((it) => (
@@ -65,19 +59,20 @@ export default function MenuScreen({
               onClick={() => onOpenTab(it.key)}
               className="btn-soft"
               style={{
-                textAlign: "left",
-                borderRadius: 14,
-                padding: 12,
+                borderRadius: 16,
+                padding: 14,
                 display: "grid",
                 gap: 6,
-                alignContent: "start",
+                alignContent: "center",
+                justifyItems: "center",
+                textAlign: "center",
+                minHeight: 110,
               }}
             >
-              <div style={{ fontSize: 22 }} aria-hidden>
+              <div style={{ fontSize: 28 }} aria-hidden>
                 {it.icon}
               </div>
               <div style={{ fontWeight: 700 }}>{it.label}</div>
-              {it.desc && <div className="muted" style={{ fontSize: 12 }}>{it.desc}</div>}
             </button>
           ))}
         </div>
