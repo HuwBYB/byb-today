@@ -1,14 +1,14 @@
 // TodayScreen.tsx
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* =============================================
-   BYB — Today Screen (Pastel + No-Overflow, Full)
-   - Headspace-style visuals
-   - Hard clamps to prevent horizontal bleed
-   - Safe-area aware sticky bars
-   - Confetti, streaks, onboarding
+   BYB — Today Screen (Big-Goal First, No Frog)
+   - Big-Goal steps due today (and overdue) are pinned at top
+   - Non–Big-Goal Top Priorities next
+   - Everything Else after that
+   - Headspace-style visuals, mobile overflow hard clamps
+   - Confetti, streak chips, onboarding
    ============================================= */
 
 /* ===== Types ===== */
@@ -19,7 +19,7 @@ type Task = {
   due_date: string | null;
   status: "pending" | "done" | string;
   priority: number | null; // 2 => Top
-  source: string | null;   // e.g., today_repeat_daily
+  source: string | null;   // e.g., big_goal_daily, today_repeat_daily
   goal_id: number | null;
   completed_at: string | null;
 };
@@ -61,7 +61,6 @@ const REPEAT_COUNTS: Record<Exclude<Repeat, "">, number> = {
   annually: 5
 };
 const REPEAT_PREFIX = "today_repeat_";
-
 function generateOccurrences(startISO: string, repeat: Repeat): string[] {
   if (!repeat) return [startISO];
   if (repeat === "weekdays") {
@@ -69,7 +68,7 @@ function generateOccurrences(startISO: string, repeat: Repeat): string[] {
     const out: string[] = [];
     const d = fromISO(startISO);
     while (out.length < count) {
-      const dow = d.getDay(); // Sun=0 .. Sat=6
+      const dow = d.getDay();
       if (dow >= 1 && dow <= 5) out.push(toISO(d));
       d.setDate(d.getDate() + 1);
     }
@@ -97,21 +96,22 @@ function makeSeriesKey(repeat: Repeat) {
   return repeat ? `${REPEAT_PREFIX}${repeat}` : "manual";
 }
 
+/* ===== Big-Goal detection ===== */
+function isBigGoalSource(src: string | null | undefined) {
+  return !!src && src.startsWith("big_goal_");
+}
+
 /* ===== Greeting helpers ===== */
 const LS_NAME = "byb:display_name";
 const LS_POOL = "byb:display_pool"; // string[]
 const LS_ROTATE = "byb:rotate_nicknames"; // "1" | "0" (default on)
-
 function pickGreetingLabel(): string {
   try {
     const name = (localStorage.getItem(LS_NAME) || "").trim();
     const rotate = localStorage.getItem(LS_ROTATE) !== "0"; // default ON
     const pool = rotate ? (JSON.parse(localStorage.getItem(LS_POOL) || "[]") as string[]) : [];
-    const list = [
-      ...(name ? [name] : []),
-      ...(Array.isArray(pool) ? pool.filter(Boolean) : [])
-    ];
-    if (list.length === 0) return "";
+    const list = [...(name ? [name] : []), ...(Array.isArray(pool) ? pool.filter(Boolean) : [])];
+    if (!list.length) return "";
     return list[Math.floor(Math.random() * list.length)];
   } catch {
     return "";
@@ -128,18 +128,11 @@ type Summary = {
   streak: number;
   bestStreak: number;
 };
-
 function formatNiceDate(iso: string): string {
   try {
     const d = fromISO(iso);
-    return d.toLocaleDateString(undefined, {
-      weekday: "short",
-      day: "2-digit",
-      month: "short"
-    });
-  } catch {
-    return iso;
-  }
+    return d.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" });
+  } catch { return iso; }
 }
 function timeGreeting(date = new Date()): string {
   const h = date.getHours();
@@ -231,22 +224,17 @@ export default function TodayScreen({ externalDateISO }: Props) {
         --primary:#6c8cff; --primary-soft:#eef2ff; --success-soft:#dcfce7; --danger-soft:#fee2e2;
         --shadow:0 10px 30px rgba(0,0,0,.06);
       }
-      /* baseline */
       *,*::before,*::after{ box-sizing:border-box; }
       html,body,#root{ margin:0; width:100%; max-width:100%; background:var(--bg-gradient); color:var(--text); }
-      /* STOP HORIZONTAL BLEED GLOBALLY */
       html, body { overflow-x: hidden; }
-      :root { overflow-x: clip; }           /* avoids scrollbars where supported */
+      :root { overflow-x: clip; }
       #root, body { max-width: 100vw; }
 
-      /* MEDIA CLAMP (includes icons inside buttons) */
       img,svg,video,canvas{ max-width:100%; height:auto; display:block; }
       button img, button svg { max-width:100%; height:auto; display:block; }
 
-      /* TYPO WRAP (long task lines / badges / headings) */
       h1,h2,h3,h4,p,span,small,button{ overflow-wrap:anywhere; }
 
-      /* UI atoms */
       .card{ width:100%; max-width:100%; background:var(--card); border:1px solid var(--border);
              border-radius:16px; padding:12px; box-shadow:var(--shadow); }
       .badge{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px;
@@ -262,14 +250,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
       input,select,button{ max-width:100%; }
       input,select{ width:100%; border:1px solid var(--border); border-radius:10px; padding:10px 12px; background:#fff; }
 
-      /* The mobile offender: date input can exceed viewport width */
       input[type="date"]{ width:100%; max-width:180px; }
       @media (max-width: 360px){ input[type="date"]{ max-width:140px; } }
 
       ul.list{ list-style:none; padding:0; margin:0; display:grid; gap:8px; }
       li.item{ background:#fff; border:1px solid var(--border); border-radius:12px; padding:10px; box-shadow:var(--shadow); }
 
-      /* horizontal lists that shouldn't cause page scroll */
       .h-scroll{ display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:4px; }
       .h-scroll::-webkit-scrollbar{ display:none; }
 
@@ -300,6 +286,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   // Quick capture
   const [now, setNow] = useState<Date>(new Date());
   const [quickTitle, setQuickTitle] = useState("");
+  thead:
   const [quickTop, setQuickTop] = useState(false);
   const [savingQuick, setSavingQuick] = useState(false);
 
@@ -471,10 +458,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
       let best = 0, run = 0; let prev: string | null = null;
       for (const d of sorted) {
         if (!prev) run = 1;
-        else {
-          const nextOfPrev = addDays(prev, 1);
-          run = d === nextOfPrev ? run + 1 : 1;
-        }
+        else { const nextOfPrev = addDays(prev, 1); run = d === nextOfPrev ? run + 1 : 1; }
         best = Math.max(best, run);
         prev = d;
       }
@@ -514,8 +498,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
   async function moveAllOverdueHere() {
     try {
-      const overdueIds = tasks.filter(isOverdue).map((t) => t.id);
-      if (overdueIds.length === 0) return;
+      const overdueIds = tasks.filter((t) => !!t.due_date && t.due_date < dateISO && t.status !== "done").map((t) => t.id);
+      if (!overdueIds.length) return;
       const { error } = await supabase.from("tasks").update({ due_date: dateISO }).in("id", overdueIds);
       if (error) throw error; await loadAll();
     } catch (e: any) { setErr(e.message || String(e)); }
@@ -661,9 +645,25 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const greeting = useMemo(() => (missed ? "We missed you" : timeGreeting(now)), [missed, now]);
   const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-  const top = tasks.filter((t) => (t.priority ?? 0) >= 2);
-  const rest = tasks.filter((t) => (t.priority ?? 0) < 2);
-  const overdueCount = tasks.filter(isOverdue).length;
+  // Pinned Big-Goal steps: due today or overdue & not done
+  const pinnedBigGoal = useMemo(
+    () => tasks.filter(t => isBigGoalSource(t.source) && t.status !== "done" && t.due_date && t.due_date <= dateISO),
+    [tasks, dateISO]
+  );
+
+  // Other Top Priorities (exclude pinned Big-Goal to avoid duplicates)
+  const top = useMemo(
+    () => tasks.filter(t => (t.priority ?? 0) >= 2 && !pinnedBigGoal.some(p => p.id === t.id)),
+    [tasks, pinnedBigGoal]
+  );
+
+  // Everything Else (exclude pinned Big-Goal)
+  const rest = useMemo(
+    () => tasks.filter(t => (t.priority ?? 0) < 2 && !pinnedBigGoal.some(p => p.id === t.id)),
+    [tasks, pinnedBigGoal]
+  );
+
+  const overdueCount = tasks.filter((t) => !!t.due_date && t.due_date < dateISO && t.status !== "done").length;
 
   /* ===== Section helper ===== */
   function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode; }) {
@@ -767,7 +767,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-      {/* Biggest Goal */}
+      {/* Biggest Goal headline */}
       <div className="card" style={{ borderLeft: "6px solid #a7f3d0", borderRadius: 16 }}>
         <div className="row" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           <h2 style={{ margin: 0, fontSize: 18, minWidth: 0 }}>Today’s Biggest Goal</h2>
@@ -779,14 +779,50 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {!bigGoal && <div className="muted" style={{ marginTop: 6 }}>Add a Big Goal to keep today aligned. You can set it in your Profile.</div>}
       </div>
 
-      {/* Top Priorities */}
+      {/* Pinned Big-Goal Steps (always on top) */}
+      <Section
+        title="Big-Goal Steps for Today"
+        right={pinnedBigGoal.length ? <span className="muted">{pinnedBigGoal.length}</span> : null}
+      >
+        {pinnedBigGoal.length === 0 ? (
+          <div className="muted">No Big-Goal steps due today. Add steps in Goals → Steps.</div>
+        ) : (
+          <ul className="list">
+            {pinnedBigGoal.map((t) => {
+              const overdue = t.due_date! < dateISO;
+              return (
+                <li key={t.id} className="item" style={{ borderLeft: "4px solid #a7f3d0" }}>
+                  <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                    <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
+                        <span style={{ minWidth:0, overflow:"hidden", textOverflow:"ellipsis" }}>{displayTitle(t)}</span>
+                        <span className="badge" title="Big-Goal step">Big Goal</span>
+                        {overdue && <span className="badge" title="Overdue">Overdue</span>}
+                        <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => openEdit(t)} title="Edit task">Edit</button>
+                      </div>
+                      {overdue && (
+                        <div className="muted" style={{ marginTop: 4, minWidth: 0 }}>
+                          Due {t.due_date} · <button className="btn-ghost" onClick={() => moveToSelectedDate(t.id)}>Move to {dateISO}</button>
+                        </div>
+                      )}
+                    </div>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Section>
+
+      {/* Other Top Priorities (non–Big-Goal) */}
       <Section title="Top Priorities">
         {top.length === 0 ? (
           <div className="muted">Nothing marked top priority for this day.</div>
         ) : (
           <ul className="list">
             {top.map((t) => {
-              const overdue = isOverdue(t);
+              const overdue = !!t.due_date && t.due_date < dateISO;
               return (
                 <li key={t.id} className="item">
                   <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
@@ -818,7 +854,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         ) : (
           <ul className="list">
             {rest.map((t) => {
-              const overdue = isOverdue(t);
+              const overdue = !!t.due_date && t.due_date < dateISO;
               return (
                 <li key={t.id} className="item">
                   <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
