@@ -145,7 +145,15 @@ export default function App() {
 
   return (
     <AuthGate>
-      <div className="app-shell" style={{ display: "grid", gap: 12 }}>
+      <div
+        className="app-shell"
+        style={{
+          display: "grid",
+          gap: 12,
+          // keep content above the fixed bottom nav
+          paddingBottom: "calc(80px + env(safe-area-inset-bottom, 0))",
+        }}
+      >
         {profileLoading ? (
           <div className="card">Loading profile…</div>
         ) : showOnboarding() ? (
@@ -168,17 +176,28 @@ export default function App() {
             {/* Active route */}
             <div>{renderTab()}</div>
 
-            {/* Bottom bar (two buttons, fixed) */}
-            <nav className="tabbar" aria-label="Primary" style={{ position: "sticky", bottom: 0 }}>
+            {/* Bottom bar (two buttons, fixed to viewport bottom) */}
+            <nav
+              className="tabbar"
+              aria-label="Primary"
+              style={{
+                position: "fixed",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                zIndex: 1000,
+                background: "var(--bg)",
+                borderTop: "1px solid var(--border)",
+              }}
+            >
               <div
                 className="tabbar-inner"
                 style={{
                   display: "grid",
                   gridTemplateColumns: "1fr 1fr",
                   gap: 8,
-                  padding: "8px 4px calc(8px + env(safe-area-inset-bottom,0))",
-                  borderTop: "1px solid var(--border)",
-                  background: "var(--bg)",
+                  padding: "8px 8px calc(8px + env(safe-area-inset-bottom,0))",
+                  maxWidth: "100vw",
                 }}
               >
                 {bottomTabs.map((t) => (
