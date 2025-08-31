@@ -1,3 +1,4 @@
+// ExerciseDiaryScreen.tsx
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
@@ -8,6 +9,8 @@ type Session = {
   session_date: string; // YYYY-MM-DD
   start_time: string | null;
   notes: string | null;
+  // Optional (new) — some databases may have this column; we handle fallback if it doesn't exist.
+  name?: string | null;
 };
 
 type Item = {
@@ -179,11 +182,28 @@ export default function ExerciseDiaryScreen() {
   // when clicking from "Recent", remember the exact session to open
   const desiredSessionIdRef = useRef<number | null>(null);
 
-  // confirm-complete modal
+  // confirm-complete modal (+ name input)
   const [confirmCompleteOpen, setConfirmCompleteOpen] = useState(false);
+  const [sessionNameDraft, setSessionNameDraft] = useState("");
 
   // undo last template insert
   const [undoBanner, setUndoBanner] = useState<{ itemIds: number[] } | null>(null);
+
+  // scroll restore (fixes “returns to top after standby”)
+  useEffect(() => {
+    let saved = 0;
+    const onHide = () => { saved = (document.scrollingElement?.scrollTop || window.scrollY || 0); };
+    const onShow = () => { requestAnimationFrame(() => window.scrollTo(0, saved)); };
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") onHide(); else onShow();
+    });
+    window.addEventListener("pagehide", onHide);
+    window.addEventListener("pageshow", onShow);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("pageshow", onShow);
+    };
+  }, []);
 
   /* === Debounced saver for workout_sets === */
   const DEBOUNCE_MS = 300;
@@ -260,7 +280,12 @@ export default function ExerciseDiaryScreen() {
     }
     // Clear preview when session/date changes
     setPreviewCollapsed(false);
-  }, [session?.id, dateISO]);
+    // keep draft name synced to existing session name/notes
+    const draft =
+      (session?.name || "") ||
+      (session?.notes?.startsWith("Session: ") ? session?.notes?.split("\n")[0].replace(/^Session:\s*/, "") : "");
+    setSessionNameDraft(draft || "");
+  }, [session?.id, session?.name, session?.notes, dateISO]);
 
   // scroll Quick add into view right after creating a session
   useEffect(() => {
@@ -447,14 +472,44 @@ export default function ExerciseDiaryScreen() {
     }
   }
 
+  async function saveSessionName(name: string) {
+    if (!session) return;
+    const clean = name.trim();
+    if (!clean) return;
+    // Try real column first
+    let saved = false;
+    try {
+      const { error } = await supabase.from("workout_sessions").update({ name: clean } as any).eq("id", session.id);
+      if (!error) {
+        setSession({ ...session, name: clean });
+        saved = true;
+      }
+    } catch { /* ignore */ }
+    if (!saved) {
+      // Fallback: prefix into notes
+      const prefix = `Session: ${clean}`;
+      const existing = session.notes || "";
+      const nextNotes = existing.startsWith("Session: ") ? existing.replace(/^Session: .*(\n)?/, `${prefix}\n`) : (existing ? `${prefix}\n${existing}` : prefix);
+      const { error } = await supabase.from("workout_sessions").update({ notes: nextNotes }).eq("id", session.id);
+      if (!error) setSession({ ...session, notes: nextNotes });
+    }
+  }
+
   async function completeSessionNow() {
+    if (sessionNameDraft.trim()) await saveSessionName(sessionNameDraft);
     markLocalFinished();
     await ensureWinForSession();
     setConfirmCompleteOpen(false);
     setPreviewCollapsed(false);
+    await loadRecent(); // refresh recent list to show new name
   }
 
   function openConfirmComplete() {
+    // seed with existing name / inferred from notes
+    const seed =
+      (session?.name || "") ||
+      (session?.notes?.startsWith("Session: ") ? session?.notes?.split("\n")[0].replace(/^Session:\s*/, "") : "");
+    setSessionNameDraft(seed || "");
     setConfirmCompleteOpen(true);
   }
 
@@ -474,7 +529,7 @@ export default function ExerciseDiaryScreen() {
     if (!session || !userId) return;
     const order_index = items.length ? Math.max(...items.map(i => i.order_index)) + 1 : 0;
     const { error } = await supabase.from("workout_items").insert({
-      session_id: session.id, user_id: userId, kind: "weights", title, order_index, metrics: {}
+      session_id: session.id, user_id: userId, kind: "weights", title: title.trim(), order_index, metrics: {}
     });
     if (error) { setErr(error.message); return; }
     await loadItems(session.id);
@@ -684,15 +739,35 @@ export default function ExerciseDiaryScreen() {
     if (!userId) return;
     setLoadTplLoading(true);
     try {
+      // primary
+      let rows: TemplateRow[] = [];
       const { data, error } = await supabase
         .from("workout_templates")
         .select("id,name,data")
         .eq("user_id", userId)
         .order("name", { ascending: true });
-      if (error) throw error;
-      setTplList((data as TemplateRow[]) || []);
+      if (!error && data) rows = data as TemplateRow[];
+
+      // legacy fallback table (if primary empty)
+      if (rows.length === 0) {
+        try {
+          const { data: legacy, error: le } = await supabase
+            .from("exercise_templates")
+            .select("id,name,data")
+            .eq("user_id", userId)
+            .order("name", { ascending: true });
+          if (!le && legacy) rows = legacy as TemplateRow[];
+        } catch { /* ignore legacy failure */ }
+      }
+
+      // localStorage merge fallback
+      const key = `byb:workout_templates:${userId}`;
+      const ls = JSON.parse(localStorage.getItem(key) || "[]");
+      const merged = [...rows, ...(ls as TemplateRow[])];
+
+      setTplList(merged);
     } catch {
-      // Fallback to localStorage
+      // Final fallback to localStorage only
       const key = `byb:workout_templates:${userId}`;
       const ls = JSON.parse(localStorage.getItem(key) || "[]");
       setTplList(ls as TemplateRow[]);
@@ -1041,7 +1116,6 @@ export default function ExerciseDiaryScreen() {
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                           {it.kind === "weights" && (
                             <>
-                              {/* (Removed top-level "+ Add exercise" to avoid duplication) */}
                               <button onClick={() => toggleHistory(it)}>
                                 {openHistoryFor[it.id] ? "Hide previous" : "Show previous"}
                               </button>
@@ -1060,7 +1134,7 @@ export default function ExerciseDiaryScreen() {
                             onChange={(set, patch) => updateSet(set, patch)}
                             onDelete={(set) => deleteSet(set)}
                             flush={(id) => flushSetSaves(id)}
-                            onAddExercise={(name) => addWeightsExercise(name)} // bottom-only add, with name
+                            onAddExercise={(name) => addWeightsExercise(name)} // bottom-only add, NO prompt
                           />
                           {openHistoryFor[it.id] && (
                             <div className="muted" style={{ border: "1px dashed #e5e7eb", borderRadius: 8, padding: 8, marginTop: 8 }}>
@@ -1112,14 +1186,28 @@ export default function ExerciseDiaryScreen() {
             <h2 style={{ margin: 0 }}>Recent</h2>
             <ul className="list" style={{ overflow: "auto", maxHeight: "60vh" }}>
               {recent.length === 0 && <li className="muted">No recent sessions.</li>}
-              {recent.map(s => (
-                <li key={s.id} className="item">
-                  <button onClick={() => openRecentSession(s)} style={{ textAlign: "left", width: "100%" }}>
-                    <div style={{ fontWeight: 600 }}>{s.session_date}</div>
-                    {s.notes && <div className="muted" style={{ marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.notes}</div>}
-                  </button>
-                </li>
-              ))}
+              {recent.map(s => {
+                // derive title from name or notes prefix
+                const derived =
+                  (s.name || "") ||
+                  (s.notes?.startsWith("Session: ") ? s.notes.split("\n")[0].replace(/^Session:\s*/, "") : "");
+                const label = derived ? `${s.session_date} — ${derived}` : s.session_date;
+                return (
+                  <li key={s.id} className="item">
+                    <button onClick={() => openRecentSession(s)} style={{ textAlign: "left", width: "100%" }}>
+                      <div style={{ fontWeight: 600 }}>{label}</div>
+                      {s.notes && (
+                        <div
+                          className="muted"
+                          style={{ marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                        >
+                          {s.notes}
+                        </div>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
             <div>
               {offerBackup && (
@@ -1242,7 +1330,7 @@ export default function ExerciseDiaryScreen() {
           {loadTplLoading ? (
             <div className="muted">Loading templates…</div>
           ) : tplList.length === 0 ? (
-            <div className="muted">No templates yet. Create one via “Save as template”.</div>
+            <div className="muted">No templates found. Try saving one via “Save as template”.</div>
           ) : (
             <ul className="list">
               {tplList.map(t => (
@@ -1264,10 +1352,18 @@ export default function ExerciseDiaryScreen() {
         </div>
       </Modal>
 
-      {/* Confirm Complete Modal */}
+      {/* Complete Session Modal (with session name) */}
       <Modal open={confirmCompleteOpen} onClose={() => setConfirmCompleteOpen(false)} title="Complete session?">
         <div style={{ display: "grid", gap: 10 }}>
-          <div className="muted">You can finish now, or preview-collapse the workout to browse history first.</div>
+          <label style={{ display: "grid", gap: 6 }}>
+            <span>Session name (optional)</span>
+            <input
+              value={sessionNameDraft}
+              onChange={(e) => setSessionNameDraft(e.target.value)}
+              placeholder="e.g. Push Day A, 5k easy, Legs & Core"
+            />
+          </label>
+          <div className="muted">Your session will still be listed by date; a name makes it easier to find later.</div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
             <button onClick={() => setConfirmCompleteOpen(false)}>Keep editing</button>
             <button className="btn-soft" onClick={previewCollapse}>Preview collapse</button>
@@ -1331,14 +1427,11 @@ function WeightsEditor({
           </div>
         ))}
       </div>
-      {/* Bottom-only: add exercise with name prompt */}
+      {/* Bottom-only: add exercise WITHOUT any pop-up (name inline or via Quick Add) */}
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
         <button
           className="btn-soft"
-          onClick={() => {
-            const name = window.prompt("Exercise name (optional)", "")?.trim() ?? "";
-            onAddExercise(name);
-          }}
+          onClick={() => onAddExercise("")}
         >
           + Add exercise
         </button>
@@ -1390,7 +1483,7 @@ function QuickAddCard({
         {kind === "weights" ? (
           <>
             <input
-              placeholder="Exercise name"
+              placeholder="Exercise name (optional)"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
             />
