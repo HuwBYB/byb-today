@@ -17,6 +17,7 @@ import NotesScreen from "./NotesScreen";
 import FocusAlfredScreen from "./FocusAlfredScreen";
 import OnboardingScreen from "./OnboardingScreen";
 import MeditationScreen from "./meditation"; // <-- matches src/meditation.tsx
+import AffirmationBuilder from "./AffirmationBuilder"; // <-- NEW
 
 /* Types */
 type ProfileRow = {
@@ -42,7 +43,8 @@ type Tab =
   | "confidence"
   | "notes"
   | "focus"
-  | "meditation";
+  | "meditation"
+  | "affirmations"; // <-- NEW
 
 export default function App() {
   // Ensure we start on Today
@@ -113,37 +115,39 @@ export default function App() {
   const tabs = useMemo(
     () =>
       [
-        { key: "today",      label: "Today",      icon: "✅" },
-        { key: "calendar",   label: "Calendar",   icon: "🗓️" },
-        { key: "goals",      label: "Goals",      icon: "🎯" },
-        { key: "vision",     label: "Vision",     icon: "🌈" },
-        { key: "gratitude",  label: "Gratitude",  icon: "🙏" },
-        { key: "exercise",   label: "Exercise",   icon: "🏋️" },
-        { key: "wins",       label: "Wins",       icon: "🏆" },
-        { key: "alfred",     label: "Alfred",     icon: "🤖" },
-        { key: "confidence", label: "Confidence", icon: "🔥" },
-        { key: "notes",      label: "Notes",      icon: "📝" },
-        { key: "focus",      label: "Focus",      icon: "🎧" },
-        { key: "meditation", label: "Meditation", icon: "📺" }, // new
+        { key: "today",        label: "Today",         icon: "✅" },
+        { key: "calendar",     label: "Calendar",      icon: "🗓️" },
+        { key: "goals",        label: "Goals",         icon: "🎯" },
+        { key: "vision",       label: "Vision",        icon: "🌈" },
+        { key: "gratitude",    label: "Gratitude",     icon: "🙏" },
+        { key: "exercise",     label: "Exercise",      icon: "🏋️" },
+        { key: "wins",         label: "Wins",          icon: "🏆" },
+        { key: "alfred",       label: "Alfred",        icon: "🤖" },
+        { key: "confidence",   label: "Confidence",    icon: "🔥" },
+        { key: "notes",        label: "Notes",         icon: "📝" },
+        { key: "focus",        label: "Focus",         icon: "🎧" },
+        { key: "meditation",   label: "Meditation",    icon: "📺" },
+        { key: "affirmations", label: "Affirmations",  icon: "✨" }, // <-- NEW
       ] as const,
     []
   );
 
   function renderTab() {
     switch (tab) {
-      case "today":       return <TodayScreen externalDateISO={externalDateISO} />;
-      case "calendar":    return <CalendarScreen />;
-      case "goals":       return <GoalsScreen />;
-      case "vision":      return <VisionBoardScreen />;
-      case "gratitude":   return <GratitudeScreen />;
-      case "exercise":    return <ExerciseDiaryScreen />;
-      case "wins":        return <WinsScreen />;
-      case "alfred":      return <AlfredScreen />;
-      case "confidence":  return <ConfidenceScreen />;
-      case "notes":       return <NotesScreen />;
-      case "focus":       return <FocusAlfredScreen />;
-      case "meditation":  return <MeditationScreen />;
-      default:            return <TodayScreen externalDateISO={externalDateISO} />;
+      case "today":         return <TodayScreen externalDateISO={externalDateISO} />;
+      case "calendar":      return <CalendarScreen />;
+      case "goals":         return <GoalsScreen />;
+      case "vision":        return <VisionBoardScreen />;
+      case "gratitude":     return <GratitudeScreen />;
+      case "exercise":      return <ExerciseDiaryScreen />;
+      case "wins":          return <WinsScreen />;
+      case "alfred":        return <AlfredScreen />;
+      case "confidence":    return <ConfidenceScreen />;
+      case "notes":         return <NotesScreen />;
+      case "focus":         return <FocusAlfredScreen />;
+      case "meditation":    return <MeditationScreen />;
+      case "affirmations":  return <AffirmationBuilder />; // <-- NEW
+      default:              return <TodayScreen externalDateISO={externalDateISO} />;
     }
   }
 
