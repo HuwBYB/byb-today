@@ -1,6 +1,4 @@
 // src/MenuScreen.tsx
-import React from "react";
-
 type MenuItem = {
   key:
     | "calendar"
