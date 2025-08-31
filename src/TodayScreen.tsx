@@ -5,8 +5,6 @@ import { supabase } from "./lib/supabaseClient";
 
 /* =============================================
    BYB — Today Screen (Top-of-Day + Friendly Greets)
-   - Pastel theme + no horizontal bleed
-   - Sticky bars, confetti, streaks, onboarding
    ============================================= */
 
 /* ===== Types ===== */
@@ -16,8 +14,8 @@ type Task = {
   title: string;
   due_date: string | null;
   status: "pending" | "done" | string;
-  priority: number | null; // 3 => Top of Day, 2 => Top
-  source: string | null;   // e.g., today_repeat_daily
+  priority: number | null; // 3 => Top of Day, 2 => Top, 0 => Normal
+  source: string | null;
   goal_id: number | null;
   completed_at: string | null;
 };
@@ -367,6 +365,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [chooseTopOpen, setChooseTopOpen] = useState(false);
   const [chooseCandidates, setChooseCandidates] = useState<Task[]>([]);
 
+  // NEW: Prioritisation modal state
+  const [prioritiseOpen, setPrioritiseOpen] = useState(false);
+  const [prioDraft, setPrioDraft] = useState<Task[]>([]);
+
   const toast = useToast();
 
   // external date change
@@ -381,7 +383,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
       setGreetName(pickGreetingLabel());
 
-      // Local last-visit (fixes "we missed you" showing too much)
+      // Local last-visit
       try {
         const nowMs = Date.now();
         const lastMs = Number(localStorage.getItem(LS_LAST_VISIT) || "0");
@@ -398,7 +400,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   // clock
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id); }, []);
 
-  // helper (avoids shadowing/TS label weirdness)
+  // helper
   const isOverdueFn = (t: Task) => !!t.due_date && t.due_date < dateISO && t.status !== "done";
 
   /* ===== Data loading ===== */
@@ -717,6 +719,72 @@ export default function TodayScreen({ externalDateISO }: Props) {
   }
   function obSkip() { setObStep((s) => (s >= 3 ? 0 : (s + 1) as any)); }
 
+  /* ===== NEW: Prioritisation helpers ===== */
+
+  // 1) Open modal with today's pending tasks sorted by current priority
+  function openPrioritise() {
+    const todaysPending = tasks
+      .filter(t => t.due_date === dateISO && t.status !== "done");
+    const sorted = [...todaysPending].sort((a, b) => {
+      const pa = a.priority ?? 0;
+      const pb = b.priority ?? 0;
+      if (pb !== pa) return pb - pa;        // 3,2,0 descending
+      return a.id - b.id;                   // stable-ish
+    });
+    setPrioDraft(sorted);
+    setPrioritiseOpen(true);
+  }
+
+  // 2) Move helper (index + dir = -1 up, +1 down)
+  function movePrioTask(index: number, dir: -1 | 1) {
+    setPrioDraft(prev => {
+      const next = [...prev];
+      const j = index + dir;
+      if (index < 0 || index >= next.length) return next;
+      if (j < 0 || j >= next.length) return next;
+      const tmp = next[index];
+      next[index] = next[j];
+      next[j] = tmp;
+      return next;
+    });
+  }
+
+  // 3) Save: first = priority 3, rest = 2, others (today & pending but not in draft) = 0
+  async function savePrioritisation() {
+    if (!userId) return;
+    try {
+      // Ensure we are only touching today's pending tasks
+      // Step A: Demote everything pending today to 0
+      await supabase
+        .from("tasks")
+        .update({ priority: 0 })
+        .eq("user_id", userId)
+        .eq("due_date", dateISO)
+        .neq("status", "done");
+
+      // Step B: Promote draft items
+      const ids = prioDraft.map(t => t.id);
+      if (ids.length > 0) {
+        const firstId = ids[0];
+        const restIds = ids.slice(1);
+
+        // First -> 3 (Top of Day)
+        await supabase.from("tasks").update({ priority: 3 }).eq("id", firstId);
+
+        // Rest -> 2 (Top Priorities)
+        if (restIds.length > 0) {
+          await supabase.from("tasks").update({ priority: 2 }).in("id", restIds);
+        }
+      }
+
+      setPrioritiseOpen(false);
+      await loadAll();
+      toast.show(`Alfred: Priorities locked in. ${pick(ALFRED_LINES)}`);
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    }
+  }
+
   /* ===== Computed ===== */
   const niceDate = useMemo(() => formatNiceDate(dateISO), [dateISO]);
   const greeting = useMemo(() => (greetLine || timeGreeting(now)), [greetLine, now]);
@@ -725,6 +793,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const top = tasks.filter((t) => (t.priority ?? 0) >= 2);
   const rest = tasks.filter((t) => (t.priority ?? 0) < 2);
   const overdueCount = tasks.filter(isOverdueFn).length;
+
+  const pendingToday = useMemo(
+    () => tasks.filter(t => t.due_date === dateISO && t.status !== "done"),
+    [tasks, dateISO]
+  );
+  const showPrioritiseButton = !topOfDay && pendingToday.length > 0;
 
   /* ===== Section helper ===== */
   function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode; }) {
@@ -829,13 +903,18 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-      {/* Today’s Top Priority (replaces Biggest Goal) */}
+      {/* Today’s Top Priority */}
       <div className="card" style={{ borderLeft: "6px solid #a7f3d0", borderRadius: 16 }}>
         <div className="row" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           <h2 style={{ margin: 0, fontSize: 18, minWidth: 0 }}>Today’s Top Priority</h2>
           {topOfDay ? <span className="badge" title="Pinned for today">Pinned</span> : <span className="badge" title="Pick one from your Top tasks">Not set</span>}
           <div style={{ marginLeft: "auto", minWidth: 0, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {!topOfDay && (
+            {showPrioritiseButton && (
+              <button className="btn-primary" onClick={openPrioritise} style={{ borderRadius: 10 }}>
+                Prioritise Today’s Tasks
+              </button>
+            )}
+            {!topOfDay && !showPrioritiseButton && (
               <button className="btn-soft" onClick={() => openChooseTop(true)}>Choose</button>
             )}
             {topOfDay && (
@@ -852,7 +931,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
       </div>
 
       {/* Top Priorities */}
-      <Section title="Top Priorities">
+      <Section
+        title="Top Priorities"
+        right={
+          top.length > 0
+            ? <button className="btn-soft" onClick={openPrioritise} title="Reorder today’s tasks">Reorder</button>
+            : null
+        }
+      >
         {top.length === 0 ? (
           <div className="muted">Nothing marked top priority for this day.</div>
         ) : (
@@ -1066,6 +1152,55 @@ export default function TodayScreen({ externalDateISO }: Props) {
             )}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
               <button className="btn-soft" onClick={() => setChooseTopOpen(false)}>Not now</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NEW: Prioritisation Modal */}
+      {prioritiseOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Prioritise Today’s Tasks"
+          onClick={() => setPrioritiseOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 0, zIndex: 3000 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: "100%", height: "100%", maxWidth: "100vw", maxHeight: "100vh", display: "grid", gridTemplateRows: "auto 1fr auto", background: "#fff" }}
+          >
+            <div className="card" style={{ borderRadius: 0 }}>
+              <h3 style={{ margin: 0 }}>Prioritise Today’s Tasks</h3>
+              <div className="muted">Drag not required — use Up/Down to reorder on mobile.</div>
+            </div>
+
+            <div style={{ overflow: "auto", padding: 12 }}>
+              {prioDraft.length === 0 ? (
+                <div className="card muted">No pending tasks for today.</div>
+              ) : (
+                <ul className="list">
+                  {prioDraft.map((t, i) => (
+                    <li key={t.id} className="item" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <div className="badge" aria-hidden style={{ minWidth: 28, justifyContent: "center" }}>{i + 1}</div>
+                      <div style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {displayTitle(t)}
+                      </div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button className="btn-soft" onClick={() => movePrioTask(i, -1)} disabled={i === 0} title="Move up">↑</button>
+                        <button className="btn-soft" onClick={() => movePrioTask(i, +1)} disabled={i === prioDraft.length - 1} title="Move down">↓</button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="card" style={{ display: "flex", gap: 8, justifyContent: "flex-end", borderRadius: 0 }}>
+              <button className="btn-soft" onClick={() => setPrioritiseOpen(false)}>Cancel</button>
+              <button className="btn-primary" onClick={savePrioritisation} disabled={prioDraft.length === 0} style={{ borderRadius: 10 }}>
+                Confirm Priorities
+              </button>
             </div>
           </div>
         </div>
