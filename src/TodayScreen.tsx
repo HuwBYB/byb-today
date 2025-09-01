@@ -277,6 +277,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
       li.item{ background:#fff; border:1px solid var(--border); border-radius:12px; padding:10px; box-shadow:var(--shadow); }
       .h-scroll{ display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:4px; }
       .h-scroll::-webkit-scrollbar{ display:none; }
+      /* Drag styles */
+      .dragging { opacity:.85; box-shadow:0 6px 16px rgba(0,0,0,.15); }
+      .drag-placeholder { outline:2px dashed var(--border); }
       @media (prefers-reduced-motion: reduce){
         *{ animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; }
       }
@@ -368,6 +371,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
   // NEW: Prioritisation modal state
   const [prioritiseOpen, setPrioritiseOpen] = useState(false);
   const [prioDraft, setPrioDraft] = useState<Task[]>([]);
+  const [draggingId, setDraggingId] = useState<number | null>(null);
+  const dragIndexRef = useRef<number | null>(null);
 
   const toast = useToast();
 
@@ -721,10 +726,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
   /* ===== NEW: Prioritisation helpers ===== */
 
-  // 1) Open modal with today's pending tasks sorted by current priority
   function openPrioritise() {
-    const todaysPending = tasks
-      .filter(t => t.due_date === dateISO && t.status !== "done");
+    const todaysPending = tasks.filter(t => t.due_date === dateISO && t.status !== "done");
     const sorted = [...todaysPending].sort((a, b) => {
       const pa = a.priority ?? 0;
       const pb = b.priority ?? 0;
@@ -735,26 +738,47 @@ export default function TodayScreen({ externalDateISO }: Props) {
     setPrioritiseOpen(true);
   }
 
-  // 2) Move helper (index + dir = -1 up, +1 down)
   function movePrioTask(index: number, dir: -1 | 1) {
     setPrioDraft(prev => {
       const next = [...prev];
       const j = index + dir;
       if (index < 0 || index >= next.length) return next;
       if (j < 0 || j >= next.length) return next;
-      const tmp = next[index];
-      next[index] = next[j];
-      next[j] = tmp;
+      const [item] = next.splice(index, 1);
+      next.splice(j, 0, item);
       return next;
     });
   }
 
-  // 3) Save: first = priority 3, rest = 2, others (today & pending but not in draft) = 0
+  // arrayMove for DnD
+  function arrayMove<T>(arr: T[], from: number, to: number) {
+    const copy = [...arr];
+    const [it] = copy.splice(from, 1);
+    copy.splice(to, 0, it);
+    return copy;
+  }
+
+  // Drag handlers (mobile-friendly HTML5 DnD)
+  function handleDragStart(i: number) {
+    dragIndexRef.current = i;
+    setDraggingId(prioDraft[i]?.id ?? null);
+  }
+  function handleDragOver(e: React.DragEvent, overIndex: number) {
+    e.preventDefault(); // allow drop
+    const from = dragIndexRef.current;
+    if (from == null || from === overIndex) return;
+    setPrioDraft(prev => arrayMove(prev, from, overIndex));
+    dragIndexRef.current = overIndex;
+  }
+  function handleDragEnd() {
+    dragIndexRef.current = null;
+    setDraggingId(null);
+  }
+
   async function savePrioritisation() {
     if (!userId) return;
     try {
-      // Ensure we are only touching today's pending tasks
-      // Step A: Demote everything pending today to 0
+      // Demote everything pending today to 0
       await supabase
         .from("tasks")
         .update({ priority: 0 })
@@ -762,18 +786,15 @@ export default function TodayScreen({ externalDateISO }: Props) {
         .eq("due_date", dateISO)
         .neq("status", "done");
 
-      // Step B: Promote draft items
+      // Promote draft items
       const ids = prioDraft.map(t => t.id);
       if (ids.length > 0) {
         const firstId = ids[0];
         const restIds = ids.slice(1);
 
-        // First -> 3 (Top of Day)
-        await supabase.from("tasks").update({ priority: 3 }).eq("id", firstId);
-
-        // Rest -> 2 (Top Priorities)
+        await supabase.from("tasks").update({ priority: 3 }).eq("id", firstId); // Top of Day
         if (restIds.length > 0) {
-          await supabase.from("tasks").update({ priority: 2 }).in("id", restIds);
+          await supabase.from("tasks").update({ priority: 2 }).in("id", restIds); // Top Priorities
         }
       }
 
@@ -991,7 +1012,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
                     <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "word-break", minWidth: 0 }}>
                         <span style={{ minWidth:0, overflow:"hidden", textOverflow:"ellipsis" }}>{displayTitle(t)}</span>
                         {overdue && <span className="badge">Overdue</span>}
                         <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => openEdit(t)} title="Edit task">Edit</button>
@@ -1051,7 +1072,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-      {/* Bottom Tab Bar (safe-area aware) */}
+      {/* Bottom Tab Bar (legacy demo bar — kept as-is) */}
       <div style={{ position: "sticky", bottom: 0, zIndex: 55, background: "var(--bg)", padding: "8px 4px calc(8px + env(safe-area-inset-bottom,0))", borderTop: "1px solid var(--border)", width: "100%", maxWidth: "100%" }}>
         <div className="h-scroll">
           {[
@@ -1157,7 +1178,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* NEW: Prioritisation Modal */}
+      {/* NEW: Prioritisation Modal with Drag & Drop */}
       {prioritiseOpen && (
         <div
           role="dialog"
@@ -1172,7 +1193,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
           >
             <div className="card" style={{ borderRadius: 0 }}>
               <h3 style={{ margin: 0 }}>Prioritise Today’s Tasks</h3>
-              <div className="muted">Drag not required — use Up/Down to reorder on mobile.</div>
+              <div className="muted">Drag items (☰) to reorder, or use ↑/↓.</div>
             </div>
 
             <div style={{ overflow: "auto", padding: 12 }}>
@@ -1181,7 +1202,22 @@ export default function TodayScreen({ externalDateISO }: Props) {
               ) : (
                 <ul className="list">
                   {prioDraft.map((t, i) => (
-                    <li key={t.id} className="item" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <li
+                      key={t.id}
+                      className={`item ${draggingId === t.id ? "dragging" : ""}`}
+                      draggable
+                      onDragStart={() => handleDragStart(i)}
+                      onDragOver={(e) => handleDragOver(e, i)}
+                      onDragEnd={handleDragEnd}
+                      style={{ display: "flex", gap: 8, alignItems: "center", touchAction: "manipulation" }}
+                    >
+                      <div
+                        aria-hidden
+                        title="Drag to reorder"
+                        style={{ cursor: "grab", fontSize: 18, lineHeight: 1, userSelect: "none" }}
+                      >
+                        ☰
+                      </div>
                       <div className="badge" aria-hidden style={{ minWidth: 28, justifyContent: "center" }}>{i + 1}</div>
                       <div style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {displayTitle(t)}
