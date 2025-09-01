@@ -348,7 +348,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   // external date change
   useEffect(() => { if (externalDateISO) setDateISO(externalDateISO); }, [externalDateISO]);
 
-  // user + greeting + onboarding + last-visit
+  // user + greeting + last-visit
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -371,8 +371,11 @@ export default function TodayScreen({ externalDateISO }: Props) {
   // clock
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id); }, []);
 
-  // helper
-  const isOverdueFn = (t: Task) => !!t.due_date && t.due_date < dateISO && t.status !== "done";
+  // helper (DATE-SAFE overdue check)
+  const isOverdueFn = (t: Task) =>
+    !!t.due_date &&
+    t.status !== "done" &&
+    fromISO(t.due_date).getTime() < fromISO(dateISO).getTime();
 
   /* ===== Data loading ===== */
   async function load() {
@@ -390,8 +393,17 @@ export default function TodayScreen({ externalDateISO }: Props) {
       if (error) throw error;
 
       const raw = (data as Task[]) || [];
+
+      // Normalize due_date to YYYY-MM-DD to avoid timestamp mismatches
+      const normalized: Task[] = raw.map(t => ({
+        ...t,
+        due_date: t.due_date ? t.due_date.slice(0, 10) : null,
+      }));
+
       // keep today's + overdue (pending)
-      const list = raw.filter((t) => t.due_date === dateISO || (t.due_date! < dateISO && t.status !== "done"));
+      const list = normalized.filter(
+        (t) => t.due_date === dateISO || (t.due_date! < dateISO && t.status !== "done")
+      );
       setTasks(list);
 
       const ids = Array.from(new Set(list.map((t) => t.goal_id).filter((v): v is number => typeof v === "number")));
@@ -405,7 +417,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         setGoalMap({});
       }
 
-      // summary
+      // summary (using list)
       const doneToday = list.filter((t) => t.due_date === dateISO && t.status === "done").length;
       const pendingToday = list.filter((t) => t.due_date === dateISO && t.status !== "done").length;
       const topToday = list.filter((t) => t.due_date === dateISO && (t.priority ?? 0) >= 2);
