@@ -277,9 +277,38 @@ export default function TodayScreen({ externalDateISO }: Props) {
       li.item{ background:#fff; border:1px solid var(--border); border-radius:12px; padding:10px; box-shadow:var(--shadow); }
       .h-scroll{ display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:4px; }
       .h-scroll::-webkit-scrollbar{ display:none; }
-      /* Drag styles */
+
+      /* Drag styles (desktop) */
       .dragging { opacity:.85; box-shadow:0 6px 16px rgba(0,0,0,.15); }
-      .drag-placeholder { outline:2px dashed var(--border); }
+
+      /* Prioritise modal compact rows */
+      .prio-row{
+        display:grid;
+        grid-template-columns: 24px 28px 1fr auto; /* handle # index | title | buttons */
+        align-items:center;
+        gap:8px;
+      }
+      .prio-row .title{
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+      .prio-row .controls{
+        display:flex;
+        gap:6px;
+        flex: 0 0 auto;
+      }
+      @media (max-width: 420px){
+        .prio-row{
+          grid-template-columns: 24px 28px 1fr 88px; /* reserve width so buttons never overflow */
+        }
+        .prio-row .controls button{
+          padding:10px 10px;
+          font-size:16px;
+        }
+      }
+
       @media (prefers-reduced-motion: reduce){
         *{ animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; }
       }
@@ -368,7 +397,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [chooseTopOpen, setChooseTopOpen] = useState(false);
   const [chooseCandidates, setChooseCandidates] = useState<Task[]>([]);
 
-  // NEW: Prioritisation modal state
+  // Prioritisation modal state
   const [prioritiseOpen, setPrioritiseOpen] = useState(false);
   const [prioDraft, setPrioDraft] = useState<Task[]>([]);
   const [draggingId, setDraggingId] = useState<number | null>(null);
@@ -724,7 +753,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   }
   function obSkip() { setObStep((s) => (s >= 3 ? 0 : (s + 1) as any)); }
 
-  /* ===== NEW: Prioritisation helpers ===== */
+  /* ===== Prioritisation helpers ===== */
 
   function openPrioritise() {
     const todaysPending = tasks.filter(t => t.due_date === dateISO && t.status !== "done");
@@ -750,7 +779,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     });
   }
 
-  // arrayMove for DnD
+  // arrayMove for DnD (desktop)
   function arrayMove<T>(arr: T[], from: number, to: number) {
     const copy = [...arr];
     const [it] = copy.splice(from, 1);
@@ -758,7 +787,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     return copy;
   }
 
-  // Drag handlers (mobile-friendly HTML5 DnD)
+  // Drag handlers (desktop HTML5 DnD; on mobile, use buttons)
   function handleDragStart(i: number) {
     dragIndexRef.current = i;
     setDraggingId(prioDraft[i]?.id ?? null);
@@ -778,7 +807,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   async function savePrioritisation() {
     if (!userId) return;
     try {
-      // Demote everything pending today to 0
+      // 1) Set everyone pending today to Normal (0)
       await supabase
         .from("tasks")
         .update({ priority: 0 })
@@ -786,21 +815,19 @@ export default function TodayScreen({ externalDateISO }: Props) {
         .eq("due_date", dateISO)
         .neq("status", "done");
 
-      // Promote draft items
+      // 2) First draft item -> Top of Day (3), rest -> Top (2)
       const ids = prioDraft.map(t => t.id);
       if (ids.length > 0) {
-        const firstId = ids[0];
-        const restIds = ids.slice(1);
-
-        await supabase.from("tasks").update({ priority: 3 }).eq("id", firstId); // Top of Day
+        const [firstId, ...restIds] = ids;
+        await supabase.from("tasks").update({ priority: 3 }).eq("id", firstId);
         if (restIds.length > 0) {
-          await supabase.from("tasks").update({ priority: 2 }).in("id", restIds); // Top Priorities
+          await supabase.from("tasks").update({ priority: 2 }).in("id", restIds);
         }
       }
 
       setPrioritiseOpen(false);
       await loadAll();
-      toast.show(`Alfred: Priorities locked in. ${pick(ALFRED_LINES)}`);
+      toast.show(`Alfred: Priorities set. ${pick(ALFRED_LINES)}`);
     } catch (e: any) {
       setErr(e.message || String(e));
     }
@@ -948,7 +975,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
             )}
           </div>
         </div>
-        {!topOfDay && <div className="muted" style={{ marginTop: 6 }}>Promote any Top task below to make it your Top of Day.</div>}
+        {!topOfDay && <div className="muted" style={{ marginTop: 6 }}>Tip: use <b>Prioritise Today’s Tasks</b>. Whatever is #1 there becomes your <b>Top of Day</b>.</div>}
       </div>
 
       {/* Top Priorities */}
@@ -1178,7 +1205,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* NEW: Prioritisation Modal with Drag & Drop */}
+      {/* Prioritisation Modal (mobile-friendly) */}
       {prioritiseOpen && (
         <div
           role="dialog"
@@ -1193,7 +1220,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
           >
             <div className="card" style={{ borderRadius: 0 }}>
               <h3 style={{ margin: 0 }}>Prioritise Today’s Tasks</h3>
-              <div className="muted">Drag items (☰) to reorder, or use ↑/↓.</div>
+              <div className="muted" style={{ marginTop: 4 }}>
+                Put your most important task at <b>#1</b> — it will become <b>Top of Day</b>.  
+                Drag (desktop) or tap <b>↑ / ↓</b> (mobile) to reorder.
+              </div>
             </div>
 
             <div style={{ overflow: "auto", padding: 12 }}>
@@ -1204,25 +1234,21 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   {prioDraft.map((t, i) => (
                     <li
                       key={t.id}
-                      className={`item ${draggingId === t.id ? "dragging" : ""}`}
+                      className={`item prio-row ${draggingId === t.id ? "dragging" : ""}`}
                       draggable
                       onDragStart={() => handleDragStart(i)}
                       onDragOver={(e) => handleDragOver(e, i)}
                       onDragEnd={handleDragEnd}
-                      style={{ display: "flex", gap: 8, alignItems: "center", touchAction: "manipulation" }}
+                      style={{ touchAction: "manipulation" }}
                     >
-                      <div
-                        aria-hidden
-                        title="Drag to reorder"
-                        style={{ cursor: "grab", fontSize: 18, lineHeight: 1, userSelect: "none" }}
-                      >
-                        ☰
-                      </div>
+                      {/* drag handle */}
+                      <div aria-hidden title="Drag to reorder" style={{ cursor: "grab", fontSize: 18, lineHeight: 1, userSelect: "none" }}>☰</div>
+                      {/* index */}
                       <div className="badge" aria-hidden style={{ minWidth: 28, justifyContent: "center" }}>{i + 1}</div>
-                      <div style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {displayTitle(t)}
-                      </div>
-                      <div style={{ display: "flex", gap: 6 }}>
+                      {/* title */}
+                      <div className="title">{displayTitle(t)}</div>
+                      {/* controls */}
+                      <div className="controls">
                         <button className="btn-soft" onClick={() => movePrioTask(i, -1)} disabled={i === 0} title="Move up">↑</button>
                         <button className="btn-soft" onClick={() => movePrioTask(i, +1)} disabled={i === prioDraft.length - 1} title="Move down">↓</button>
                       </div>
@@ -1232,11 +1258,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
               )}
             </div>
 
-            <div className="card" style={{ display: "flex", gap: 8, justifyContent: "flex-end", borderRadius: 0 }}>
-              <button className="btn-soft" onClick={() => setPrioritiseOpen(false)}>Cancel</button>
-              <button className="btn-primary" onClick={savePrioritisation} disabled={prioDraft.length === 0} style={{ borderRadius: 10 }}>
-                Confirm Priorities
-              </button>
+            <div className="card" style={{ display: "flex", gap: 8, justifyContent: "space-between", alignItems: "center", borderRadius: 0 }}>
+              <div className="muted">#1 = Top of Day • #2+ = Top Priorities</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn-soft" onClick={() => setPrioritiseOpen(false)}>Cancel</button>
+                <button className="btn-primary" onClick={savePrioritisation} disabled={prioDraft.length === 0} style={{ borderRadius: 10 }}>
+                  Confirm Priorities
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1293,4 +1322,3 @@ export default function TodayScreen({ externalDateISO }: Props) {
     </div>
   );
 }
-
