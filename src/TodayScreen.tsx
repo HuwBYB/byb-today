@@ -65,7 +65,7 @@ function generateOccurrences(startISO: string, repeat: Repeat): string[] {
     const out: string[] = [];
     const d = fromISO(startISO);
     while (out.length < count) {
-      const dow = d.getDay(); // Sun=0 .. Sat=6
+      const dow = d.getDay();
       if (dow >= 1 && dow <= 5) out.push(toISO(d));
       d.setDate(d.getDate() + 1);
     }
@@ -96,24 +96,18 @@ function makeSeriesKey(repeat: Repeat) {
 
 /* ===== Greeting helpers ===== */
 const LS_NAME = "byb:display_name";
-const LS_POOL = "byb:display_pool"; // string[]
-const LS_ROTATE = "byb:rotate_nicknames"; // "1" | "0" (default on)
+const LS_POOL = "byb:display_pool";
+const LS_ROTATE = "byb:rotate_nicknames";
 const LS_LAST_VISIT = "byb:last_visit_ms";
 
 function pickGreetingLabel(): string {
   try {
     const name = (localStorage.getItem(LS_NAME) || "").trim();
-    const rotate = localStorage.getItem(LS_ROTATE) !== "0"; // default ON
+    const rotate = localStorage.getItem(LS_ROTATE) !== "0";
     const pool = rotate ? (JSON.parse(localStorage.getItem(LS_POOL) || "[]") as string[]) : [];
-    const list = [
-      ...(name ? [name] : []),
-      ...(Array.isArray(pool) ? pool.filter(Boolean) : [])
-    ];
-    if (list.length === 0) return "";
-    return list[Math.floor(Math.random() * list.length)];
-  } catch {
-    return "";
-  }
+    const list = [(name || ""), ...pool.filter(Boolean)].filter(Boolean);
+    return list.length ? list[Math.floor(Math.random() * list.length)] : "";
+  } catch { return ""; }
 }
 
 const POSITIVE_GREETS = [
@@ -145,7 +139,7 @@ function buildGreetingLine(missed: boolean, nameLabel: string, done: number, pen
   return nameLabel ? `${prefix}, ${nameLabel}` : prefix;
 }
 
-/* ===== Summary / tiny helpers ===== */
+/* ===== Summary ===== */
 type Summary = {
   doneToday: number;
   pendingToday: number;
@@ -159,17 +153,11 @@ type Summary = {
 function formatNiceDate(iso: string): string {
   try {
     const d = fromISO(iso);
-    return d.toLocaleDateString(undefined, {
-      weekday: "short",
-      day: "2-digit",
-      month: "short"
-    });
-  } catch {
-    return iso;
-  }
+    return d.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" });
+  } catch { return iso; }
 }
 
-/* ===== Lightweight Confetti (no deps) ===== */
+/* ===== Confetti ===== */
 function fireConfetti() {
   const container = document.createElement("div");
   container.style.position = "fixed";
@@ -204,7 +192,7 @@ function fireConfetti() {
   setTimeout(() => container.remove(), 2200);
 }
 
-/* ===== Alfred micro-encouragements ===== */
+/* ===== Alfred lines ===== */
 const ALFRED_LINES = [
   "Lovely momentum. Keep it rolling.",
   "One pebble at a time becomes a mountain.",
@@ -214,20 +202,13 @@ const ALFRED_LINES = [
 ];
 function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)] as T; }
 
-/* ===== Tiny toast hook ===== */
+/* ===== Toast ===== */
 function useToast() {
   const [msg, setMsg] = useState<string | null>(null);
-  function show(m: string) {
-    setMsg(m);
-    setTimeout(() => setMsg(null), 2500);
-  }
+  function show(m: string) { setMsg(m); setTimeout(() => setMsg(null), 2500); }
   const node = (
     <div aria-live="polite" style={{ position: "fixed", left: 0, right: 0, bottom: "calc(16px + env(safe-area-inset-bottom,0))", display: "flex", justifyContent: "center", pointerEvents: "none", zIndex: 3500 }}>
-      {msg && (
-        <div className="card" style={{ background: "#111827", color: "white", borderRadius: 12, padding: "10px 14px", boxShadow: "0 8px 20px rgba(0,0,0,.25)", pointerEvents: "all" }}>
-          {msg}
-        </div>
-      )}
+      {msg && <div className="card" style={{ background: "#111827", color: "white", borderRadius: 12, padding: "10px 14px", boxShadow: "0 8px 20px rgba(0,0,0,.25)", pointerEvents: "all" }}>{msg}</div>}
     </div>
   );
   return { node, show };
@@ -237,81 +218,48 @@ function useToast() {
    Component
    ============================================= */
 export default function TodayScreen({ externalDateISO }: Props) {
-  /* ===== Global theme + NO-BLEED CSS ===== */
+  /* ===== Global CSS ===== */
   useEffect(() => {
     const style = document.createElement("style");
     style.setAttribute("data-byb-global", "1");
     style.innerHTML = `
       :root{
-        --bg: #fafafa;
-        --bg-gradient: radial-gradient(1200px 600px at 20% -10%, #f7f6ff 10%, transparent 60%),
-                       radial-gradient(900px 500px at 120% 10%, #f0fff7 10%, transparent 60%),
-                       #fafafa;
-        --card:#fff; --border:#e5e7eb; --text:#0f172a; --muted:#6b7280;
+        --bg:#fafafa; --card:#fff; --border:#e5e7eb; --text:#0f172a; --muted:#6b7280;
         --primary:#6c8cff; --primary-soft:#eef2ff; --success-soft:#dcfce7; --danger-soft:#fee2e2;
         --shadow:0 10px 30px rgba(0,0,0,.06);
       }
+      html,body,#root{ margin:0; background:var(--bg); color:var(--text); }
       *,*::before,*::after{ box-sizing:border-box; }
-      html,body,#root{ margin:0; width:100%; max-width:100%; background:var(--bg-gradient); color:var(--text); }
-      html, body { overflow-x: hidden; }
-      :root { overflow-x: clip; }
-      #root, body { max-width: 100vw; }
-      img,svg,video,canvas{ max-width:100%; height:auto; display:block; }
-      button img, button svg { max-width:100%; height:auto; display:block; }
-      h1,h2,h3,h4,p,span,small,button{ overflow-wrap:anywhere; }
-      .card{ width:100%; max-width:100%; background:var(--card); border:1px solid var(--border);
-             border-radius:16px; padding:12px; box-shadow:var(--shadow); }
-      .badge{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px;
-              background:var(--primary-soft); color:#273a91; font-size:12px; }
+      .card{ background:var(--card); border:1px solid var(--border); border-radius:16px; padding:12px; box-shadow:var(--shadow); }
+      .badge{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; background:var(--primary-soft); color:#273a91; font-size:12px; }
       .muted{ color:var(--muted); }
-      .btn-primary{ background:var(--primary); color:#fff; border:0; padding:8px 12px; border-radius:10px;
-                    box-shadow:0 6px 14px rgba(108,140,255,.25); transform:translateZ(0); }
-      .btn-primary:active{ transform:scale(.98); }
+      .btn-primary{ background:var(--primary); color:#fff; border:0; padding:8px 12px; border-radius:10px; box-shadow:0 6px 14px rgba(108,140,255,.25); }
       .btn-soft{ background:#fff; border:1px solid var(--border); padding:8px 12px; border-radius:12px; }
       .btn-ghost{ background:transparent; border:0; color:var(--muted); }
-      input,select,button{ max-width:100%; }
       input,select{ width:100%; border:1px solid var(--border); border-radius:10px; padding:10px 12px; background:#fff; }
-      input[type="date"]{ width:100%; max-width:180px; }
-      @media (max-width: 360px){ input[type="date"]{ max-width:140px; } }
       ul.list{ list-style:none; padding:0; margin:0; display:grid; gap:8px; }
       li.item{ background:#fff; border:1px solid var(--border); border-radius:12px; padding:10px; box-shadow:var(--shadow); }
-      .h-scroll{ display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:4px; }
-      .h-scroll::-webkit-scrollbar{ display:none; }
 
-      /* Drag styles (desktop) */
-      .dragging { opacity:.85; box-shadow:0 6px 16px rgba(0,0,0,.15); }
-
-      /* Prioritise modal compact rows */
+      /* Prioritise modal rows: always reserve space for controls; stack on very small screens */
       .prio-row{
         display:grid;
-        grid-template-columns: 24px 28px 1fr auto; /* handle # index | title | buttons */
+        grid-template-columns: 28px 1fr 112px;  /* index | title | controls */
         align-items:center;
         gap:8px;
       }
       .prio-row .title{
-        min-width:0;
-        overflow:hidden;
-        text-overflow:ellipsis;
-        white-space:nowrap;
+        min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
       }
-      .prio-row .controls{
-        display:flex;
-        gap:6px;
-        flex: 0 0 auto;
-      }
-      @media (max-width: 420px){
-        .prio-row{
-          grid-template-columns: 24px 28px 1fr 88px; /* reserve width so buttons never overflow */
-        }
-        .prio-row .controls button{
-          padding:10px 10px;
-          font-size:16px;
-        }
+      .prio-row .controls{ display:flex; gap:6px; justify-content:flex-end; }
+      .prio-row .controls button{ min-width:48px; }
+
+      @media (max-width: 380px){
+        .prio-row{ grid-template-columns: 28px 1fr; grid-template-rows: auto auto; grid-auto-flow: row; }
+        .prio-row .controls{ grid-column: 1 / -1; justify-content:flex-end; }
       }
 
-      @media (prefers-reduced-motion: reduce){
-        *{ animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; }
-      }
+      /* Drag hint (desktop) */
+      .dragging{ opacity:.85; box-shadow:0 6px 16px rgba(0,0,0,.15); }
     `;
     document.head.appendChild(style);
     return () => { try { document.head.removeChild(style); } catch {} };
@@ -344,27 +292,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [missed, setMissed] = useState<boolean>(false);
   const [greetLine, setGreetLine] = useState<string>("");
 
-  // Responsive: <420px treated as compact
-  const [isCompact, setIsCompact] = useState<boolean>(false);
-  useEffect(() => {
-    function check() { setIsCompact(window.innerWidth < 420); }
-    check();
-    window.addEventListener("resize", check);
-    return () => window.removeEventListener("resize", check);
-  }, []);
+  // Summary
+  const [summary, setSummary] = useState<Summary>({ doneToday: 0, pendingToday: 0, topDone: 0, topTotal: 0, isWin: false, streak: 0, bestStreak: 0 });
 
-  // Daily summary
-  const [summary, setSummary] = useState<Summary>({
-    doneToday: 0,
-    pendingToday: 0,
-    topDone: 0,
-    topTotal: 0,
-    isWin: false,
-    streak: 0,
-    bestStreak: 0
-  });
-
-  // streak micro animation
+  // streak anim
   const prevStreak = useRef(0);
   const [streakPulse, setStreakPulse] = useState(false);
   useEffect(() => {
@@ -397,7 +328,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [chooseTopOpen, setChooseTopOpen] = useState(false);
   const [chooseCandidates, setChooseCandidates] = useState<Task[]>([]);
 
-  // Prioritisation modal state
+  // Prioritise
   const [prioritiseOpen, setPrioritiseOpen] = useState(false);
   const [prioDraft, setPrioDraft] = useState<Task[]>([]);
   const [draggingId, setDraggingId] = useState<number | null>(null);
@@ -405,10 +336,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
   const toast = useToast();
 
-  // external date change
+  /* External date change */
   useEffect(() => { if (externalDateISO) setDateISO(externalDateISO); }, [externalDateISO]);
 
-  // user + greeting + onboarding + last-visit
+  /* Auth + greet + onboarding + last-visit */
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -417,31 +348,29 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
       setGreetName(pickGreetingLabel());
 
-      // Local last-visit
       try {
         const nowMs = Date.now();
         const lastMs = Number(localStorage.getItem(LS_LAST_VISIT) || "0");
         const missedNow = lastMs > 0 ? (nowMs - lastMs) > 86400000 : false;
         setMissed(missedNow);
         localStorage.setItem(LS_LAST_VISIT, String(nowMs));
-      } catch { /* ignore */ }
+      } catch {}
 
       const hasName = (localStorage.getItem(LS_NAME) || "").trim().length > 0;
       if (!hasName) setObStep(1);
     });
   }, []);
 
-  // clock
+  /* clock */
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id); }, []);
 
-  // helper
+  /* helpers */
   const isOverdueFn = (t: Task) => !!t.due_date && t.due_date < dateISO && t.status !== "done";
 
-  /* ===== Data loading ===== */
+  /* ===== Data ===== */
   async function load() {
     if (!userId) return;
-    setLoading(true);
-    setErr(null);
+    setLoading(true); setErr(null);
     try {
       const { data, error } = await supabase
         .from("tasks")
@@ -453,45 +382,37 @@ export default function TodayScreen({ externalDateISO }: Props) {
       if (error) throw error;
 
       const raw = (data as Task[]) || [];
-      // keep today's + overdue (pending)
-      const list = raw.filter((t) => t.due_date === dateISO || (t.due_date! < dateISO && t.status !== "done"));
+      const list = raw.filter(t => t.due_date === dateISO || (t.due_date! < dateISO && t.status !== "done"));
       setTasks(list);
 
-      const ids = Array.from(new Set(list.map((t) => t.goal_id).filter((v): v is number => typeof v === "number")));
+      const ids = Array.from(new Set(list.map(t => t.goal_id).filter((v): v is number => typeof v === "number")));
       if (ids.length) {
         const { data: gs, error: ge } = await supabase.from("goals").select("id,title").in("id", ids);
         if (ge) throw ge;
         const map: Record<number, string> = {};
-        (gs as GoalLite[]).forEach((g) => (map[g.id] = g.title));
+        (gs as GoalLite[]).forEach(g => (map[g.id] = g.title));
         setGoalMap(map);
-      } else {
-        setGoalMap({});
-      }
+      } else setGoalMap({});
 
-      // summary
-      const doneToday = list.filter((t) => t.due_date === dateISO && t.status === "done").length;
-      const pendingToday = list.filter((t) => t.due_date === dateISO && t.status !== "done").length;
-      const topToday = list.filter((t) => t.due_date === dateISO && (t.priority ?? 0) >= 2);
-      const topDone = topToday.filter((t) => t.status === "done").length;
+      const doneToday = list.filter(t => t.due_date === dateISO && t.status === "done").length;
+      const pendingToday = list.filter(t => t.due_date === dateISO && t.status !== "done").length;
+      const topToday = list.filter(t => t.due_date === dateISO && (t.priority ?? 0) >= 2);
+      const topDone = topToday.filter(t => t.status === "done").length;
       const topTotal = topToday.length;
       const isWin = topDone >= 1 || doneToday >= 3;
-      setSummary((s) => ({ ...s, doneToday, pendingToday, topDone, topTotal, isWin }));
+      setSummary(s => ({ ...s, doneToday, pendingToday, topDone, topTotal, isWin }));
 
-      // top of day (for this date)
       setTopOfDay(topToday.find(t => (t.priority ?? 0) >= 3) || null);
     } catch (e: any) {
       setErr(e.message || String(e));
-      setTasks([]);
-      setGoalMap({});
-      setTopOfDay(null);
+      setTasks([]); setGoalMap({}); setTopOfDay(null);
     } finally { setLoading(false); }
   }
 
   async function loadStreaks() {
     if (!userId) return;
     try {
-      const since = new Date();
-      since.setDate(since.getDate() - 180);
+      const since = new Date(); since.setDate(since.getDate() - 180);
       const { data, error } = await supabase
         .from("tasks")
         .select("completed_at,status,user_id")
@@ -514,21 +435,17 @@ export default function TodayScreen({ externalDateISO }: Props) {
       let best = 0, run = 0; let prev: string | null = null;
       for (const d of sorted) {
         if (!prev) run = 1;
-        else {
-          const nextOfPrev = addDays(prev, 1);
-          run = d === nextOfPrev ? run + 1 : 1;
-        }
+        else run = d === addDays(prev, 1) ? run + 1 : 1;
         best = Math.max(best, run);
         prev = d;
       }
-      setSummary((s) => ({ ...s, streak, bestStreak: best }));
-    } catch { /* ignore */ }
+      setSummary(s => ({ ...s, streak, bestStreak: best }));
+    } catch {}
   }
 
   async function loadAll() { await load(); await loadStreaks(); }
   useEffect(() => { if (userId && dateISO) loadAll(); }, [userId, dateISO]);
 
-  // Recompute greeting line when progress or name/missed changes
   useEffect(() => {
     setGreetLine(buildGreetingLine(missed, greetName, summary.doneToday, summary.pendingToday));
   }, [missed, greetName, summary.doneToday, summary.pendingToday]);
@@ -554,15 +471,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
       if (markDone) {
         fireConfetti();
         toast.show(`Alfred: ${pick(ALFRED_LINES)}`);
-
-        // If Top-of-Day completed, offer to pick another
         if ((t.priority ?? 0) >= 3 && t.due_date === dateISO) {
-          const cands = tasks
-            .filter(x => x.id !== t.id && x.due_date === dateISO && (x.priority ?? 0) >= 2 && x.status !== "done");
-          if (cands.length > 0) {
-            setChooseCandidates(cands);
-            setChooseTopOpen(true);
-          }
+          const cands = tasks.filter(x => x.id !== t.id && x.due_date === dateISO && (x.priority ?? 0) >= 2 && x.status !== "done");
+          if (cands.length > 0) { setChooseCandidates(cands); setChooseTopOpen(true); }
         }
       }
     } catch (e: any) { setErr(e.message || String(e)); }
@@ -577,8 +488,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
   async function moveAllOverdueHere() {
     try {
-      const overdueIds = tasks.filter(isOverdueFn).map((t) => t.id);
-      if (overdueIds.length === 0) return;
+      const overdueIds = tasks.filter(isOverdueFn).map(t => t.id);
+      if (!overdueIds.length) return;
       const { error } = await supabase.from("tasks").update({ due_date: dateISO }).in("id", overdueIds);
       if (error) throw error; await loadAll();
     } catch (e: any) { setErr(e.message || String(e)); }
@@ -588,7 +499,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     if (!userId || !title.trim()) return;
     const clean = title.trim();
     const occurrences = generateOccurrences(dateISO, repeat);
-    const rows = occurrences.map((iso) => ({
+    const rows = occurrences.map(iso => ({
       user_id: userId, title: clean, due_date: iso, status: "pending",
       priority: top ? 2 : 0, source: repeat ? makeSeriesKey(repeat) : "manual"
     }));
@@ -621,7 +532,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
     if (!userId) return;
     setErr(null);
     try {
-      // Demote any existing Top-of-Day for this date
       await supabase
         .from("tasks")
         .update({ priority: 2 })
@@ -635,22 +545,15 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
       await loadAll();
       setChooseTopOpen(false);
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    }
+    } catch (e: any) { setErr(e.message || String(e)); }
   }
 
-  function openChooseTop(forceAllTop = false) {
-    const cands = tasks.filter(t =>
-      t.due_date === dateISO &&
-      (t.priority ?? 0) >= (forceAllTop ? 2 : 2) &&
-      t.status !== "done"
-    );
-    setChooseCandidates(cands);
-    setChooseTopOpen(true);
+  function openChooseTop() {
+    const cands = tasks.filter(t => t.due_date === dateISO && (t.priority ?? 0) >= 2 && t.status !== "done");
+    setChooseCandidates(cands); setChooseTopOpen(true);
   }
 
-  /* ===== Edit modal helpers ===== */
+  /* ===== Edit modal ===== */
   function openEdit(t: Task) {
     setEditing(t);
     setEditTitle(t.title || "");
@@ -697,9 +600,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
       if (editRepeat && editRepeat !== originalRepeat) {
         const occurrences = generateOccurrences(due as string, editRepeat).slice(1);
         if (occurrences.length) {
-          const rows = occurrences.map((iso) => ({
-            user_id: userId, title, due_date: iso, status: "pending", priority: top, source: makeSeriesKey(editRepeat)
-          }));
+          const rows = occurrences.map(iso => ({ user_id: userId, title, due_date: iso, status: "pending", priority: top, source: makeSeriesKey(editRepeat) }));
           await supabase.from("tasks").insert(rows as any);
         }
       }
@@ -730,38 +631,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
     } catch (e: any) { setErr(e.message || String(e)); } finally { setBusyEdit(false); }
   }
 
-  /* ===== Onboarding ===== */
-  async function obSaveAndNext() {
-    if (obStep === 1) {
-      const name = obName.trim();
-      if (name) localStorage.setItem(LS_NAME, name);
-      setObStep(2);
-    } else if (obStep === 2) {
-      const arr = obNicks.split(",").map((s) => s.trim()).filter(Boolean);
-      localStorage.setItem(LS_POOL, JSON.stringify(arr));
-      localStorage.setItem(LS_ROTATE, "1");
-      setObStep(3);
-    } else if (obStep === 3) {
-      const title = obGoal.trim();
-      if (title && userId) {
-        try { await supabase.from("goals").insert({ user_id: userId, title, is_big: true }); } catch { /* ignore */ }
-      }
-      setObStep(0);
-      setGreetName(pickGreetingLabel());
-      await loadAll();
-    }
-  }
-  function obSkip() { setObStep((s) => (s >= 3 ? 0 : (s + 1) as any)); }
-
-  /* ===== Prioritisation helpers ===== */
-
+  /* ===== Prioritisation ===== */
   function openPrioritise() {
     const todaysPending = tasks.filter(t => t.due_date === dateISO && t.status !== "done");
     const sorted = [...todaysPending].sort((a, b) => {
       const pa = a.priority ?? 0;
       const pb = b.priority ?? 0;
-      if (pb !== pa) return pb - pa;        // 3,2,0 descending
-      return a.id - b.id;                   // stable-ish
+      if (pb !== pa) return pb - pa; // 3,2,0
+      return a.id - b.id;
     });
     setPrioDraft(sorted);
     setPrioritiseOpen(true);
@@ -779,7 +656,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
     });
   }
 
-  // arrayMove for DnD (desktop)
   function arrayMove<T>(arr: T[], from: number, to: number) {
     const copy = [...arr];
     const [it] = copy.splice(from, 1);
@@ -787,27 +663,20 @@ export default function TodayScreen({ externalDateISO }: Props) {
     return copy;
   }
 
-  // Drag handlers (desktop HTML5 DnD; on mobile, use buttons)
-  function handleDragStart(i: number) {
-    dragIndexRef.current = i;
-    setDraggingId(prioDraft[i]?.id ?? null);
-  }
+  function handleDragStart(i: number) { dragIndexRef.current = i; setDraggingId(prioDraft[i]?.id ?? null); }
   function handleDragOver(e: React.DragEvent, overIndex: number) {
-    e.preventDefault(); // allow drop
+    e.preventDefault();
     const from = dragIndexRef.current;
     if (from == null || from === overIndex) return;
     setPrioDraft(prev => arrayMove(prev, from, overIndex));
     dragIndexRef.current = overIndex;
   }
-  function handleDragEnd() {
-    dragIndexRef.current = null;
-    setDraggingId(null);
-  }
+  function handleDragEnd() { dragIndexRef.current = null; setDraggingId(null); }
 
   async function savePrioritisation() {
     if (!userId) return;
     try {
-      // 1) Set everyone pending today to Normal (0)
+      // 1) Everyone pending today -> 0
       await supabase
         .from("tasks")
         .update({ priority: 0 })
@@ -815,14 +684,17 @@ export default function TodayScreen({ externalDateISO }: Props) {
         .eq("due_date", dateISO)
         .neq("status", "done");
 
-      // 2) First draft item -> Top of Day (3), rest -> Top (2)
+      // 2) First -> 3, rest -> 2
       const ids = prioDraft.map(t => t.id);
       if (ids.length > 0) {
         const [firstId, ...restIds] = ids;
         await supabase.from("tasks").update({ priority: 3 }).eq("id", firstId);
-        if (restIds.length > 0) {
+        if (restIds.length) {
           await supabase.from("tasks").update({ priority: 2 }).in("id", restIds);
         }
+        // immediate UI feedback (don’t wait for roundtrip)
+        const firstTask = prioDraft[0];
+        setTopOfDay({ ...firstTask, priority: 3 });
       }
 
       setPrioritiseOpen(false);
@@ -838,14 +710,11 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const greeting = useMemo(() => (greetLine || timeGreeting(now)), [greetLine, now]);
   const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-  const top = tasks.filter((t) => (t.priority ?? 0) >= 2);
-  const rest = tasks.filter((t) => (t.priority ?? 0) < 2);
+  const top = tasks.filter(t => (t.priority ?? 0) >= 2);
+  const rest = tasks.filter(t => (t.priority ?? 0) < 2);
   const overdueCount = tasks.filter(isOverdueFn).length;
 
-  const pendingToday = useMemo(
-    () => tasks.filter(t => t.due_date === dateISO && t.status !== "done"),
-    [tasks, dateISO]
-  );
+  const pendingToday = useMemo(() => tasks.filter(t => t.due_date === dateISO && t.status !== "done"), [tasks, dateISO]);
   const showPrioritiseButton = !topOfDay && pendingToday.length > 0;
 
   /* ===== Section helper ===== */
@@ -866,30 +735,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
   /* ===== Render ===== */
   return (
-    <div
-      style={{
-        display: "grid",
-        gap: 12,
-        overflowX: "hidden",
-        width: "100%",
-        maxWidth: "100vw",
-        padding: "12px 12px calc(72px + env(safe-area-inset-bottom,0))",
-      }}
-    >
+    <div style={{ display: "grid", gap: 12, overflowX: "hidden", width: "100%", maxWidth: "100vw", padding: "12px 12px calc(72px + env(safe-area-inset-bottom,0))" }}>
       {/* Top app bar */}
-      <div
-        className="card"
-        style={{
-          position: "sticky",
-          top: "env(safe-area-inset-top, 0)",
-          zIndex: 60,
-          display: "grid",
-          gap: 8,
-          background: "#fff",
-          borderRadius: 16,
-          padding: 12
-        }}
-      >
+      <div className="card" style={{ position: "sticky", top: "env(safe-area-inset-top, 0)", zIndex: 60, display: "grid", gap: 8, background: "#fff", borderRadius: 16, padding: 12 }}>
         <div className="row" style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap", width: "100%", minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
             <div style={{ fontWeight: 800, fontSize: 18 }}>BYB</div>
@@ -903,7 +751,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
           </div>
         </div>
 
-        {/* Greeting line */}
+        {/* Greeting */}
         {(greetName || greetLine) && (
           <div style={{ fontWeight: 700, wordBreak: "break-word" }}>
             {greeting} {missed ? "💜" : ""}
@@ -928,24 +776,19 @@ export default function TodayScreen({ externalDateISO }: Props) {
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
             <input type="checkbox" checked={quickTop} onChange={(e) => setQuickTop(e.target.checked)} /> Top
           </label>
-          <button className="btn-primary" onClick={addQuick} disabled={!quickTitle.trim() || savingQuick} style={{ borderRadius: 10, flex: isCompact ? "1 1 100%" : undefined }}>{savingQuick ? "Adding…" : "Add"}</button>
+          <button className="btn-primary" onClick={addQuick} disabled={!quickTitle.trim() || savingQuick} style={{ borderRadius: 10 }}>{savingQuick ? "Adding…" : "Add"}</button>
         </div>
 
         {/* Date controls */}
         <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%", minWidth: 0 }}>
           {overdueCount > 0 && (
-            <button
-              onClick={moveAllOverdueHere}
-              className="btn-soft"
-              title="Change due date for all overdue pending tasks to this day"
-              style={{ flex: isCompact ? "1 1 100%" : undefined, minWidth: 0 }}
-            >
+            <button onClick={moveAllOverdueHere} className="btn-soft" title="Change due date for all overdue pending tasks to this day" style={{ minWidth: 0 }}>
               Move all overdue here ({overdueCount})
             </button>
           )}
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", flexWrap: "wrap", width: isCompact ? "100%" : "auto", minWidth: 0 }}>
-            <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} style={{ flex: isCompact ? "1 1 220px" : undefined, minWidth: 0, maxWidth: "100%" }} />
-            <button className="btn-soft" onClick={() => setDateISO(todayISO())} style={{ flex: isCompact ? "1 1 120px" : undefined }}>Today</button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", flexWrap: "wrap", minWidth: 0 }}>
+            <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} style={{ minWidth: 0, maxWidth: "100%" }} />
+            <button className="btn-soft" onClick={() => setDateISO(todayISO())}>Today</button>
           </div>
         </div>
         {err && <div style={{ color: "red" }}>{err}</div>}
@@ -955,7 +798,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
       <div className="card" style={{ borderLeft: "6px solid #a7f3d0", borderRadius: 16 }}>
         <div className="row" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           <h2 style={{ margin: 0, fontSize: 18, minWidth: 0 }}>Today’s Top Priority</h2>
-          {topOfDay ? <span className="badge" title="Pinned for today">Pinned</span> : <span className="badge" title="Pick one from your Top tasks">Not set</span>}
+          {topOfDay ? <span className="badge">Pinned</span> : <span className="badge">Not set</span>}
           <div style={{ marginLeft: "auto", minWidth: 0, display: "flex", gap: 8, flexWrap: "wrap" }}>
             {showPrioritiseButton && (
               <button className="btn-primary" onClick={openPrioritise} style={{ borderRadius: 10 }}>
@@ -963,7 +806,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
               </button>
             )}
             {!topOfDay && !showPrioritiseButton && (
-              <button className="btn-soft" onClick={() => openChooseTop(true)}>Choose</button>
+              <button className="btn-soft" onClick={openChooseTop}>Choose</button>
             )}
             {topOfDay && (
               <>
@@ -975,17 +818,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
             )}
           </div>
         </div>
-        {!topOfDay && <div className="muted" style={{ marginTop: 6 }}>Tip: use <b>Prioritise Today’s Tasks</b>. Whatever is #1 there becomes your <b>Top of Day</b>.</div>}
+        {!topOfDay && <div className="muted" style={{ marginTop: 6 }}>Tip: put your most important task at <b>#1</b> in “Prioritise Today’s Tasks”. That becomes <b>Top of Day</b>.</div>}
       </div>
 
       {/* Top Priorities */}
       <Section
         title="Top Priorities"
-        right={
-          top.length > 0
-            ? <button className="btn-soft" onClick={openPrioritise} title="Reorder today’s tasks">Reorder</button>
-            : null
-        }
+        right={top.length > 0 ? <button className="btn-soft" onClick={openPrioritise}>Reorder</button> : null}
       >
         {top.length === 0 ? (
           <div className="muted">Nothing marked top priority for this day.</div>
@@ -993,23 +832,21 @@ export default function TodayScreen({ externalDateISO }: Props) {
           <ul className="list">
             {top.map((t) => {
               const overdue = isOverdueFn(t);
-              const isTopOfDay = (t.priority ?? 0) >= 3 && t.due_date === dateISO;
+              const isTop = (t.priority ?? 0) >= 3 && t.due_date === dateISO;
               return (
                 <li key={t.id} className="item">
                   <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
                     <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
                         <span style={{ minWidth:0, overflow:"hidden", textOverflow:"ellipsis" }}>{displayTitle(t)}</span>
-                        {isTopOfDay && <span className="badge" title="Today’s Top Priority">Top of Day</span>}
+                        {isTop && <span className="badge">Top of Day</span>}
                         {overdue && <span className="badge">Overdue</span>}
                         <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          {!isTopOfDay && t.status !== "done" && t.due_date === dateISO && (
-                            <button className="btn-ghost" onClick={() => setTopPriorityOfDay(t.id)} title="Make this Today’s Top Priority">
-                              Make Top of Day
-                            </button>
+                          {!isTop && t.status !== "done" && t.due_date === dateISO && (
+                            <button className="btn-ghost" onClick={() => setTopPriorityOfDay(t.id)}>Make Top of Day</button>
                           )}
-                          <button className="btn-ghost" onClick={() => openEdit(t)} title="Edit task">Edit</button>
+                          <button className="btn-ghost" onClick={() => openEdit(t)}>Edit</button>
                         </div>
                       </div>
                       {overdue && (
@@ -1039,10 +876,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
                     <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
                         <span style={{ minWidth:0, overflow:"hidden", textOverflow:"ellipsis" }}>{displayTitle(t)}</span>
                         {overdue && <span className="badge">Overdue</span>}
-                        <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => openEdit(t)} title="Edit task">Edit</button>
+                        <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => openEdit(t)}>Edit</button>
                       </div>
                       {overdue && (
                         <div className="muted" style={{ marginTop: 4, minWidth: 0 }}>
@@ -1089,9 +926,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
             </select>
           </label>
 
-          <div className="muted" style={{ minWidth: 0, wordBreak: "break-word" }}>
-            Will be created for {dateISO}{newRepeat ? " + future repeats" : ""}
-          </div>
+          <div className="muted" style={{ minWidth: 0 }}>Will be created for {dateISO}{newRepeat ? " + future repeats" : ""}</div>
 
           <button onClick={addTask} disabled={!newTitle.trim() || adding} className="btn-primary" style={{ marginLeft: "auto", borderRadius: 10 }}>{adding ? "Adding…" : "Add"}</button>
         </div>
@@ -1099,17 +934,11 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-      {/* Bottom Tab Bar (legacy demo bar — kept as-is) */}
+      {/* Bottom demo bar (unchanged) */}
       <div style={{ position: "sticky", bottom: 0, zIndex: 55, background: "var(--bg)", padding: "8px 4px calc(8px + env(safe-area-inset-bottom,0))", borderTop: "1px solid var(--border)", width: "100%", maxWidth: "100%" }}>
-        <div className="h-scroll">
-          {[
-            { key: "today", label: "Today" },
-            { key: "calendar", label: "Calendar" },
-            { key: "goals", label: "Goals" },
-            { key: "vision", label: "Vision" },
-            { key: "gratitude", label: "Gratitude" }
-          ].map((t) => (
-            <button key={t.key} className="btn-soft" style={{ borderRadius: 999, padding: "10px 14px", flex: "0 0 auto" }}>{t.label}</button>
+        <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: 4 }}>
+          {["Today","Calendar","Goals","Vision","Gratitude"].map((label) => (
+            <button key={label} className="btn-soft" style={{ borderRadius: 999, padding: "10px 14px", flex: "0 0 auto" }}>{label}</button>
           ))}
         </div>
       </div>
@@ -1141,7 +970,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                   Repeat
-                  <select value={editRepeat} onChange={(e) => setEditRepeat(e.target.value as Repeat)} title={getRepeatFromSource(editing.source) ? "Change frequency" : "Make this a repeating task"}>
+                  <select value={editRepeat} onChange={(e) => setEditRepeat(e.target.value as Repeat)}>
                     <option value="">No repeat</option>
                     <option value="daily">Daily</option>
                     <option value="weekdays">Daily (Mon–Fri)</option>
@@ -1159,28 +988,27 @@ export default function TodayScreen({ externalDateISO }: Props) {
               )}
 
               <div className="row" style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap", marginTop: 6, minWidth: 0 }}>
-                <button className="btn-soft" onClick={() => deleteTask("one")} disabled={busyEdit} title="Delete just this task">Delete this</button>
+                <button className="btn-soft" onClick={() => deleteTask("one")} disabled={busyEdit}>Delete this</button>
                 {getRepeatFromSource(editing.source) && (
                   <>
-                    <button className="btn-soft" onClick={() => deleteTask("future")} disabled={busyEdit} title="Delete this and all future in series">Delete future in series</button>
-                    <button className="btn-soft" onClick={() => deleteTask("all")} disabled={busyEdit} title="Delete entire series">Delete entire series</button>
+                    <button className="btn-soft" onClick={() => deleteTask("future")} disabled={busyEdit}>Delete future in series</button>
+                    <button className="btn-soft" onClick={() => deleteTask("all")} disabled={busyEdit}>Delete entire series</button>
                   </>
                 )}
-                <button className="btn-primary" onClick={saveEdit} disabled={busyEdit || !editTitle.trim()} style={{ borderRadius: 10 }} title={getRepeatFromSource(editing.source) !== editRepeat ? "Saves and updates series from the selected due date" : "Save"}>{busyEdit ? "Saving…" : "Save"}</button>
+                <button className="btn-primary" onClick={saveEdit} disabled={busyEdit || !editTitle.trim()} style={{ borderRadius: 10 }}>{busyEdit ? "Saving…" : "Save"}</button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Choose/Replace Top of Day Prompt */}
+      {/* Choose Top of Day */}
       {chooseTopOpen && (
         <div role="dialog" aria-modal="true" aria-label="Choose Top of Day" onClick={() => setChooseTopOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 2100 }}>
           <div onClick={(e) => e.stopPropagation()} className="card" style={{ width: "min(680px, 96vw)", borderRadius: 16, padding: 16, background: "#fff" }}>
             <h3 style={{ marginTop: 0 }}>Pick a new Top Priority?</h3>
             <div className="muted" style={{ marginBottom: 8 }}>
-              Well done — you completed today’s top priority! 💪<br />
-              Would you like to make another task your top priority for the rest of the day? No pressure.
+              You completed today’s top priority — want to promote another task?
             </div>
             {chooseCandidates.length === 0 ? (
               <div className="muted">No other Top tasks available.</div>
@@ -1205,25 +1033,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* Prioritisation Modal (mobile-friendly) */}
+      {/* Prioritisation Modal */}
       {prioritiseOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Prioritise Today’s Tasks"
-          onClick={() => setPrioritiseOpen(false)}
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 0, zIndex: 3000 }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{ width: "100%", height: "100%", maxWidth: "100vw", maxHeight: "100vh", display: "grid", gridTemplateRows: "auto 1fr auto", background: "#fff" }}
-          >
+        <div role="dialog" aria-modal="true" aria-label="Prioritise Today’s Tasks" onClick={() => setPrioritiseOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 0, zIndex: 3000 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", height: "100%", maxWidth: "100vw", maxHeight: "100vh", display: "grid", gridTemplateRows: "auto 1fr auto", background: "#fff" }}>
             <div className="card" style={{ borderRadius: 0 }}>
               <h3 style={{ margin: 0 }}>Prioritise Today’s Tasks</h3>
-              <div className="muted" style={{ marginTop: 4 }}>
-                Put your most important task at <b>#1</b> — it will become <b>Top of Day</b>.  
-                Drag (desktop) or tap <b>↑ / ↓</b> (mobile) to reorder.
-              </div>
+              <div className="muted" style={{ marginTop: 4 }}>Put your most important task at <b>#1</b> — it becomes <b>Top of Day</b>. Drag (desktop) or tap <b>↑ / ↓</b> (mobile).</div>
             </div>
 
             <div style={{ overflow: "auto", padding: 12 }}>
@@ -1236,18 +1052,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
                       key={t.id}
                       className={`item prio-row ${draggingId === t.id ? "dragging" : ""}`}
                       draggable
-                      onDragStart={() => handleDragStart(i)}
-                      onDragOver={(e) => handleDragOver(e, i)}
-                      onDragEnd={handleDragEnd}
+                      onDragStart={() => { dragIndexRef.current = i; setDraggingId(prioDraft[i]?.id ?? null); }}
+                      onDragOver={(e) => { e.preventDefault(); const from = dragIndexRef.current; if (from == null || from === i) return; setPrioDraft(prev => arrayMove(prev, from, i)); dragIndexRef.current = i; }}
+                      onDragEnd={() => { dragIndexRef.current = null; setDraggingId(null); }}
                       style={{ touchAction: "manipulation" }}
                     >
-                      {/* drag handle */}
-                      <div aria-hidden title="Drag to reorder" style={{ cursor: "grab", fontSize: 18, lineHeight: 1, userSelect: "none" }}>☰</div>
-                      {/* index */}
                       <div className="badge" aria-hidden style={{ minWidth: 28, justifyContent: "center" }}>{i + 1}</div>
-                      {/* title */}
                       <div className="title">{displayTitle(t)}</div>
-                      {/* controls */}
                       <div className="controls">
                         <button className="btn-soft" onClick={() => movePrioTask(i, -1)} disabled={i === 0} title="Move up">↑</button>
                         <button className="btn-soft" onClick={() => movePrioTask(i, +1)} disabled={i === prioDraft.length - 1} title="Move down">↓</button>
@@ -1271,7 +1082,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* Onboarding Modal */}
+      {/* Onboarding */}
       {obStep !== 0 && (
         <div role="dialog" aria-modal="true" aria-label="Onboarding" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 3000 }}>
           <div className="card" style={{ width: "min(520px, 96vw)", borderRadius: 16, padding: 16, background: "#fff" }}>
@@ -1281,8 +1092,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 <div className="muted">What should we call you?</div>
                 <input value={obName} onChange={(e) => setObName(e.target.value)} placeholder="Your name" />
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                  <button className="btn-ghost" onClick={obSkip}>Skip</button>
-                  <button className="btn-primary" onClick={obSaveAndNext} disabled={!obName.trim()}>Next</button>
+                  <button className="btn-ghost" onClick={() => setObStep(2)}>Skip</button>
+                  <button className="btn-primary" onClick={() => { if (obName.trim()) localStorage.setItem(LS_NAME, obName.trim()); setObStep(2);} } disabled={!obName.trim()}>Next</button>
                 </div>
               </div>
             )}
@@ -1296,8 +1107,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
                     <input type="checkbox" defaultChecked onChange={(e) => localStorage.setItem(LS_ROTATE, e.target.checked ? "1" : "0")} /> Rotate nicknames
                   </label>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <button className="btn-ghost" onClick={obSkip}>Skip</button>
-                    <button className="btn-primary" onClick={obSaveAndNext}>Next</button>
+                    <button className="btn-ghost" onClick={() => setObStep(3)}>Skip</button>
+                    <button className="btn-primary" onClick={() => { localStorage.setItem(LS_POOL, JSON.stringify(obNicks.split(",").map(s=>s.trim()).filter(Boolean))); setObStep(3);} }>Next</button>
                   </div>
                 </div>
               </div>
@@ -1309,7 +1120,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 <input value={obGoal} onChange={(e) => setObGoal(e.target.value)} placeholder="e.g. Launch BYB MVP" />
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                   <button className="btn-ghost" onClick={() => setObStep(0)}>Skip</button>
-                  <button className="btn-primary" onClick={obSaveAndNext} disabled={!obGoal.trim()}>Finish</button>
+                  <button className="btn-primary" onClick={async () => { 
+                    if (obGoal.trim() && userId) { try { await supabase.from("goals").insert({ user_id: userId, title: obGoal.trim(), is_big: true }); } catch {} }
+                    setObStep(0);
+                  }} disabled={!obGoal.trim()}>Finish</button>
                 </div>
               </div>
             )}
@@ -1317,7 +1131,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* Toast node */}
+      {/* Toast */}
       {toast.node}
     </div>
   );
