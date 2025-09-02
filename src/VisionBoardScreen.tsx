@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-// ---- Debug build tag (safe to keep; helps bust caches) ----
-const BUILD_VERSION = "vb-10-images-debug-v1";
 
 /* ---------- Public path helper ---------- */
 function publicPath(p: string) {
@@ -558,13 +556,6 @@ export default function VisionBoardScreen() {
         </div>
 
         {err && <div style={{ color: "red" }}>{err}</div>}
-      </div>
-
-      {/* Debug (temporary): shows build + image count and a reload button */}
-      <div className="card" style={{display:'flex',gap:8,alignItems:'center'}}>
-        <span className="muted">Build: {BUILD_VERSION}</span>
-        <span className="muted">Images: {images.length}/{MAX_IMAGES}</span>
-        <button className="btn-soft" onClick={reloadFromStorage}>Reload from storage</button>
       </div>
 
       {/* Big viewer (manual arrows + slideshow) */}
