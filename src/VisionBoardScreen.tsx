@@ -125,7 +125,8 @@ export default function VisionBoardScreen() {
   const fileRef = useRef<HTMLInputElement>(null);
   const dragFrom = useRef<number | null>(null);
 
-  const MAX_IMAGES = 6;
+  // ⬆️ Increased from 6 → 10
+  const MAX_IMAGES = 10;
 
   /* ----- inline CSS (mobile-first) ----- */
   const styleTag = (
@@ -196,7 +197,9 @@ export default function VisionBoardScreen() {
         const listPath = underUser ? userId : undefined;
         const listRes = await supabase.storage.from(VISION_BUCKET).list(listPath, {
           sortBy: { column: "created_at", order: "asc" },
-        });
+          // ensure we fetch enough to cover 10 images
+          limit: 100,
+        } as any);
         if (listRes.error) throw listRes.error;
 
         const files = (listRes.data || []).filter((f: any) => !("id" in f && (f as any).id === null));
@@ -405,10 +408,10 @@ export default function VisionBoardScreen() {
     ctx.font = "bold 40px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial";
     ctx.fillText("My Vision", P, 72);
 
-    // grid: up to 6 images (2 cols x 3 rows)
-    const cols = 2, rows = 3;
+    // grid: up to 10 images (2 cols x 5 rows)
+    const cols = 2, rows = 5;
     const cellW = Math.floor((W - P * 3) / cols);
-    const cellH = Math.floor((H - 200 - P * 4) / rows); // leave top area for title
+    const cellH = Math.floor((H - 200 - P * 6) / rows); // leave top area for title
 
     // load
     const imgs = await Promise.all(src.map((it) => new Promise<HTMLImageElement>((resolve) => {
@@ -441,8 +444,8 @@ export default function VisionBoardScreen() {
       const cap = (src[idx].caption || "").trim();
       if (cap) {
         ctx.fillStyle = "#e5e7eb";
-        ctx.font = "600 26px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial";
-        wrapText(ctx, cap, x + 12, y + cellH - 10, cellW - 24, 30);
+        ctx.font = "600 24px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial";
+        wrapText(ctx, cap, x + 12, y + cellH - 10, cellW - 24, 28);
       }
     });
 
