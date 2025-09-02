@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
+// ---- Debug build tag (safe to keep; helps bust caches) ----
+const BUILD_VERSION = "vb-10-images-debug-v1";
+
 /* ---------- Public path helper ---------- */
 function publicPath(p: string) {
   // @ts-ignore
@@ -177,75 +180,78 @@ export default function VisionBoardScreen() {
   }, []);
 
   /* ----- load images ----- */
+  // Manual reload utility (used by the debug strip)
+  async function reloadFromStorage() {
+    if (!userId) return;
+    setErr(null);
+    try {
+      // sanity check bucket exists
+      const ping = await supabase.storage.from(VISION_BUCKET).list(undefined, { limit: 1 });
+      if (ping.error) throw ping.error;
+
+      // choose folder: prefer userId/ if exists else root
+      let underUser = true;
+      const testUser = await supabase.storage.from(VISION_BUCKET).list(userId, { limit: 1 });
+      if (testUser.error || (testUser.data || []).length === 0) {
+        const testRoot = await supabase.storage.from(VISION_BUCKET).list(undefined, { limit: 1 });
+        if (!testRoot.error && (testRoot.data || []).length > 0) underUser = false;
+      }
+
+      const listPath = underUser ? userId : undefined;
+      const listRes = await supabase.storage.from(VISION_BUCKET).list(listPath, {
+        sortBy: { column: "created_at", order: "asc" },
+        limit: 100,
+      } as any);
+      if (listRes.error) throw listRes.error;
+
+      const files = (listRes.data || []).filter((f: any) => !("id" in f && (f as any).id === null));
+      const baseRows: VBImage[] = files.map((f: any, i: number) => {
+        const path = underUser ? `${userId}/${f.name}` : f.name;
+        const { data: pub } = supabase.storage.from(VISION_BUCKET).getPublicUrl(path);
+        return { path, url: pub.publicUrl, caption: "", section: "other", order_index: i, created_at: (f as any)?.created_at };
+      });
+
+      try {
+        const { data: rows, error } = await supabase
+          .from("vision_images")
+          .select("path, caption, section, order_index")
+          .eq("user_id", userId);
+        if (!error && rows && Array.isArray(rows)) {
+          const map = new Map<string, { caption?: string; section?: SectionKey; order_index?: number }>(
+            rows.map((r: any) => [r.path, { caption: r.caption || "", section: (r.section as SectionKey) || "other", order_index: Number(r.order_index ?? 0) }])
+          );
+          baseRows.forEach(r => {
+            const m = map.get(r.path);
+            if (m) {
+              r.caption = m.caption ?? "";
+              r.section = (m.section as SectionKey) ?? "other";
+              r.order_index = Number.isFinite(m.order_index) ? (m.order_index as number) : r.order_index;
+            }
+          });
+        }
+      } catch {}
+
+      const lc = readLocalCaps(userId);
+      const lo = readLocalOrder(userId);
+      baseRows.forEach(r => {
+        if (!r.caption && lc[r.path]) r.caption = lc[r.path];
+        if (lo[r.path] != null) r.order_index = lo[r.path];
+      });
+
+      baseRows.sort((a, b) => a.order_index - b.order_index);
+      setImages(baseRows.slice(0, MAX_IMAGES));
+      setSelectedIdx(0);
+    } catch (e: any) {
+      setErr(e.message || String(e));
+      setImages([]);
+    }
+  }
+
+  // Keep original automatic load behaviour
+
   useEffect(() => {
     if (!userId) return;
-    (async () => {
-      setErr(null);
-      try {
-        // sanity check bucket exists
-        const ping = await supabase.storage.from(VISION_BUCKET).list(undefined, { limit: 1 });
-        if (ping.error) throw ping.error;
-
-        // choose folder: prefer userId/ if exists else root
-        let underUser = true;
-        const testUser = await supabase.storage.from(VISION_BUCKET).list(userId, { limit: 1 });
-        if (testUser.error || (testUser.data || []).length === 0) {
-          const testRoot = await supabase.storage.from(VISION_BUCKET).list(undefined, { limit: 1 });
-          if (!testRoot.error && (testRoot.data || []).length > 0) underUser = false;
-        }
-
-        const listPath = underUser ? userId : undefined;
-        const listRes = await supabase.storage.from(VISION_BUCKET).list(listPath, {
-          sortBy: { column: "created_at", order: "asc" },
-          // ensure we fetch enough to cover 10 images
-          limit: 100,
-        } as any);
-        if (listRes.error) throw listRes.error;
-
-        const files = (listRes.data || []).filter((f: any) => !("id" in f && (f as any).id === null));
-        const baseRows: VBImage[] = files.map((f: any, i: number) => {
-          const path = underUser ? `${userId}/${f.name}` : f.name;
-          const { data: pub } = supabase.storage.from(VISION_BUCKET).getPublicUrl(path);
-          return { path, url: pub.publicUrl, caption: "", section: "other", order_index: i, created_at: (f as any)?.created_at };
-        });
-
-        // Merge DB captions/section/order if table exists
-        try {
-          const { data: rows, error } = await supabase
-            .from("vision_images")
-            .select("path, caption, section, order_index")
-            .eq("user_id", userId);
-          if (!error && rows && Array.isArray(rows)) {
-            const map = new Map<string, { caption?: string; section?: SectionKey; order_index?: number }>(
-              rows.map((r: any) => [r.path, { caption: r.caption || "", section: (r.section as SectionKey) || "other", order_index: Number(r.order_index ?? 0) }])
-            );
-            baseRows.forEach(r => {
-              const m = map.get(r.path);
-              if (m) {
-                r.caption = m.caption ?? "";
-                r.section = (m.section as SectionKey) ?? "other";
-                r.order_index = Number.isFinite(m.order_index) ? (m.order_index as number) : r.order_index;
-              }
-            });
-          }
-        } catch { /* table may not exist; ignore */ }
-
-        // Merge local fallbacks
-        const lc = readLocalCaps(userId);
-        const lo = readLocalOrder(userId);
-        baseRows.forEach(r => {
-          if (!r.caption && lc[r.path]) r.caption = lc[r.path];
-          if (lo[r.path] != null) r.order_index = lo[r.path];
-        });
-
-        baseRows.sort((a, b) => a.order_index - b.order_index);
-        setImages(baseRows.slice(0, MAX_IMAGES));
-        setSelectedIdx(0);
-      } catch (e: any) {
-        setErr(e.message || String(e));
-        setImages([]);
-      }
-    })();
+    reloadFromStorage();
   }, [userId]);
 
   /* ----- slideshow ----- */
@@ -552,6 +558,13 @@ export default function VisionBoardScreen() {
         </div>
 
         {err && <div style={{ color: "red" }}>{err}</div>}
+      </div>
+
+      {/* Debug (temporary): shows build + image count and a reload button */}
+      <div className="card" style={{display:'flex',gap:8,alignItems:'center'}}>
+        <span className="muted">Build: {BUILD_VERSION}</span>
+        <span className="muted">Images: {images.length}/{MAX_IMAGES}</span>
+        <button className="btn-soft" onClick={reloadFromStorage}>Reload from storage</button>
       </div>
 
       {/* Big viewer (manual arrows + slideshow) */}
