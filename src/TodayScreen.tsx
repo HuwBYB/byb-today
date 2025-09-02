@@ -1,12 +1,10 @@
-// TodayScreen.tsx
+// src/TodayScreen.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* =============================================
-   BYB — Today Screen (Top-of-Day + Friendly Greets)
-   - Pastel theme + no horizontal bleed
-   - Sticky bars, confetti, streaks, onboarding
+   BYB — Today Screen (Simple + Defensive Filter)
    ============================================= */
 
 /* ===== Types ===== */
@@ -14,10 +12,10 @@ type Task = {
   id: number;
   user_id: string;
   title: string;
-  due_date: string | null;
+  due_date: string | null; // may come as full ISO; we normalize to YYYY-MM-DD
   status: "pending" | "done" | string;
-  priority: number | null; // 3 => Top of Day, 2 => Top
-  source: string | null;   // e.g., today_repeat_daily
+  priority: number | null; // not used here
+  source: string | null;
   goal_id: number | null;
   completed_at: string | null;
 };
@@ -48,7 +46,7 @@ function addDays(iso: string, n: number) {
   return toISO(d);
 }
 
-/* ===== Repeat config ===== */
+/* ===== (Optional) Repeat helpers kept for Add ===== */
 type Repeat = "" | "daily" | "weekdays" | "weekly" | "monthly" | "annually";
 const REPEAT_COUNTS: Record<Exclude<Repeat, "">, number> = {
   daily: 14,
@@ -61,22 +59,18 @@ const REPEAT_PREFIX = "today_repeat_";
 
 function generateOccurrences(startISO: string, repeat: Repeat): string[] {
   if (!repeat) return [startISO];
-
   if (repeat === "weekdays") {
-    const count = REPEAT_COUNTS.weekdays;
     const out: string[] = [];
     const d = fromISO(startISO);
-    while (out.length < count) {
-      const dow = d.getDay(); // Sun=0 .. Sat=6
+    while (out.length < REPEAT_COUNTS.weekdays) {
+      const dow = d.getDay(); // 0=Sun..6=Sat
       if (dow >= 1 && dow <= 5) out.push(toISO(d));
       d.setDate(d.getDate() + 1);
     }
     return out;
   }
-
-  const count = REPEAT_COUNTS[repeat];
   const out: string[] = [];
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < REPEAT_COUNTS[repeat]; i++) {
     const d = fromISO(startISO);
     if (repeat === "daily") d.setDate(d.getDate() + i);
     else if (repeat === "weekly") d.setDate(d.getDate() + 7 * i);
@@ -85,12 +79,6 @@ function generateOccurrences(startISO: string, repeat: Repeat): string[] {
     out.push(toISO(d));
   }
   return out;
-}
-function getRepeatFromSource(source: string | null): Repeat {
-  if (!source || !source.startsWith(REPEAT_PREFIX)) return "";
-  const suffix = source.slice(REPEAT_PREFIX.length) as Repeat;
-  if (["daily", "weekdays", "weekly", "monthly", "annually"].includes(suffix)) return suffix;
-  return "";
 }
 function makeSeriesKey(repeat: Repeat) {
   return repeat ? `${REPEAT_PREFIX}${repeat}` : "manual";
@@ -113,9 +101,7 @@ function pickGreetingLabel(): string {
     ];
     if (list.length === 0) return "";
     return list[Math.floor(Math.random() * list.length)];
-  } catch {
-    return "";
-  }
+  } catch { return ""; }
 }
 
 const POSITIVE_GREETS = [
@@ -147,12 +133,10 @@ function buildGreetingLine(missed: boolean, nameLabel: string, done: number, pen
   return nameLabel ? `${prefix}, ${nameLabel}` : prefix;
 }
 
-/* ===== Summary / tiny helpers ===== */
+/* ===== Summary ===== */
 type Summary = {
   doneToday: number;
   pendingToday: number;
-  topDone: number;
-  topTotal: number;
   isWin: boolean;
   streak: number;
   bestStreak: number;
@@ -161,17 +145,11 @@ type Summary = {
 function formatNiceDate(iso: string): string {
   try {
     const d = fromISO(iso);
-    return d.toLocaleDateString(undefined, {
-      weekday: "short",
-      day: "2-digit",
-      month: "short"
-    });
-  } catch {
-    return iso;
-  }
+    return d.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" });
+  } catch { return iso; }
 }
 
-/* ===== Lightweight Confetti (no deps) ===== */
+/* ===== Confetti ===== */
 function fireConfetti() {
   const container = document.createElement("div");
   container.style.position = "fixed";
@@ -206,7 +184,7 @@ function fireConfetti() {
   setTimeout(() => container.remove(), 2200);
 }
 
-/* ===== Alfred micro-encouragements ===== */
+/* ===== Encouragements + Toast ===== */
 const ALFRED_LINES = [
   "Lovely momentum. Keep it rolling.",
   "One pebble at a time becomes a mountain.",
@@ -216,13 +194,9 @@ const ALFRED_LINES = [
 ];
 function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)] as T; }
 
-/* ===== Tiny toast hook ===== */
 function useToast() {
   const [msg, setMsg] = useState<string | null>(null);
-  function show(m: string) {
-    setMsg(m);
-    setTimeout(() => setMsg(null), 2500);
-  }
+  function show(m: string) { setMsg(m); setTimeout(() => setMsg(null), 2500); }
   const node = (
     <div aria-live="polite" style={{ position: "fixed", left: 0, right: 0, bottom: "calc(16px + env(safe-area-inset-bottom,0))", display: "flex", justifyContent: "center", pointerEvents: "none", zIndex: 3500 }}>
       {msg && (
@@ -297,16 +271,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Add task (advanced)
+  // Add task
   const [newTitle, setNewTitle] = useState("");
-  const [newTop, setNewTop] = useState(false);
   const [newRepeat, setNewRepeat] = useState<Repeat>("");
   const [adding, setAdding] = useState(false);
 
   // Quick capture
   const [now, setNow] = useState<Date>(new Date());
   const [quickTitle, setQuickTitle] = useState("");
-  const [quickTop, setQuickTop] = useState(false);
   const [savingQuick, setSavingQuick] = useState(false);
 
   // Greetings
@@ -323,12 +295,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  // Daily summary
+  // Summary
   const [summary, setSummary] = useState<Summary>({
     doneToday: 0,
     pendingToday: 0,
-    topDone: 0,
-    topTotal: 0,
     isWin: false,
     streak: 0,
     bestStreak: 0
@@ -346,33 +316,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
     prevStreak.current = summary.streak;
   }, [summary.streak]);
 
-  // Edit modal
-  const [editOpen, setEditOpen] = useState(false);
-  const [editing, setEditing] = useState<Task | null>(null);
-  const [editTitle, setEditTitle] = useState("");
-  const [editTop, setEditTop] = useState(false);
-  const [editDue, setEditDue] = useState<string | null>(null);
-  const [editRepeat, setEditRepeat] = useState<Repeat>("");
-  const [applyFuture, setApplyFuture] = useState(false);
-  const [busyEdit, setBusyEdit] = useState(false);
-
-  // Onboarding
-  const [obStep, setObStep] = useState<0 | 1 | 2 | 3>(0);
-  const [obName, setObName] = useState("");
-  const [obNicks, setObNicks] = useState("");
-  const [obGoal, setObGoal] = useState("");
-
-  // Top of Day
-  const [topOfDay, setTopOfDay] = useState<Task | null>(null);
-  const [chooseTopOpen, setChooseTopOpen] = useState(false);
-  const [chooseCandidates, setChooseCandidates] = useState<Task[]>([]);
-
   const toast = useToast();
 
   // external date change
   useEffect(() => { if (externalDateISO) setDateISO(externalDateISO); }, [externalDateISO]);
 
-  // user + greeting + onboarding + last-visit
+  // user + greeting + last-visit
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
       if (error) { setErr(error.message); return; }
@@ -380,82 +329,97 @@ export default function TodayScreen({ externalDateISO }: Props) {
       setUserId(user?.id ?? null);
 
       setGreetName(pickGreetingLabel());
-
-      // Local last-visit (fixes "we missed you" showing too much)
       try {
         const nowMs = Date.now();
         const lastMs = Number(localStorage.getItem(LS_LAST_VISIT) || "0");
         const missedNow = lastMs > 0 ? (nowMs - lastMs) > 86400000 : false;
         setMissed(missedNow);
         localStorage.setItem(LS_LAST_VISIT, String(nowMs));
-      } catch { /* ignore */ }
-
-      const hasName = (localStorage.getItem(LS_NAME) || "").trim().length > 0;
-      if (!hasName) setObStep(1);
+      } catch {}
     });
   }, []);
 
   // clock
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id); }, []);
 
-  // helper (avoids shadowing/TS label weirdness)
-  const isOverdueFn = (t: Task) => !!t.due_date && t.due_date < dateISO && t.status !== "done";
+  // Overdue helper (DATE-SAFE)
+  const isOverdueFn = (t: Task) =>
+    !!t.due_date &&
+    t.status !== "done" &&
+    fromISO(t.due_date.slice(0,10)).getTime() < fromISO(dateISO).getTime();
 
-  /* ===== Data loading ===== */
+  /* ===== Data loading (DEFENSIVE) ===== */
   async function load() {
     if (!userId) return;
     setLoading(true);
     setErr(null);
     try {
+      // Defensive: fetch the user's tasks (no date WHERE),
+      // then strictly filter on the client to avoid view/rule side-effects.
       const { data, error } = await supabase
         .from("tasks")
         .select("id,user_id,title,due_date,status,priority,source,goal_id,completed_at")
-        .eq("user_id", userId)
-        .lte("due_date", dateISO)
-        .order("priority", { ascending: false })
-        .order("id", { ascending: true });
+        .eq("user_id", userId);
       if (error) throw error;
 
       const raw = (data as Task[]) || [];
-      // keep today's + overdue (pending)
-      const list = raw.filter((t) => t.due_date === dateISO || (t.due_date! < dateISO && t.status !== "done"));
+
+      // Normalize due_date to YYYY-MM-DD
+      const normalized: Task[] = raw.map(t => ({
+        ...t,
+        due_date: t.due_date ? t.due_date.slice(0, 10) : null,
+      }));
+
+      // STRICT client-side filter: only (due today) OR (overdue & still open)
+      const list = normalized.filter(t =>
+        t.due_date !== null &&
+        (
+          t.due_date === dateISO ||
+          (t.due_date < dateISO && t.status !== "done")
+        )
+      );
+
+      // Sort: overdue first by oldest due date, then today's by id for stability
+      list.sort((a, b) => {
+        const aOver = a.due_date! < dateISO ? 0 : 1;
+        const bOver = b.due_date! < dateISO ? 0 : 1;
+        if (aOver !== bOver) return aOver - bOver;                        // overdue before today
+        if (aOver === 0) {                                                // both overdue: oldest first
+          if (a.due_date! !== b.due_date!) return a.due_date! < b.due_date! ? -1 : 1;
+        }
+        return a.id - b.id;
+      });
+
       setTasks(list);
 
-      const ids = Array.from(new Set(list.map((t) => t.goal_id).filter((v): v is number => typeof v === "number")));
+      // Load goal titles for visible tasks only
+      const ids = Array.from(new Set(list.map(t => t.goal_id).filter((v): v is number => typeof v === "number")));
       if (ids.length) {
         const { data: gs, error: ge } = await supabase.from("goals").select("id,title").in("id", ids);
         if (ge) throw ge;
         const map: Record<number, string> = {};
-        (gs as GoalLite[]).forEach((g) => (map[g.id] = g.title));
+        (gs as GoalLite[]).forEach(g => (map[g.id] = g.title));
         setGoalMap(map);
       } else {
         setGoalMap({});
       }
 
-      // summary
-      const doneToday = list.filter((t) => t.due_date === dateISO && t.status === "done").length;
-      const pendingToday = list.filter((t) => t.due_date === dateISO && t.status !== "done").length;
-      const topToday = list.filter((t) => t.due_date === dateISO && (t.priority ?? 0) >= 2);
-      const topDone = topToday.filter((t) => t.status === "done").length;
-      const topTotal = topToday.length;
-      const isWin = topDone >= 1 || doneToday >= 3;
-      setSummary((s) => ({ ...s, doneToday, pendingToday, topDone, topTotal, isWin }));
-
-      // top of day (for this date)
-      setTopOfDay(topToday.find(t => (t.priority ?? 0) >= 3) || null);
+      // Summary
+      const doneToday = list.filter(t => t.due_date === dateISO && t.status === "done").length;
+      const pendingToday = list.filter(t => t.due_date === dateISO && t.status !== "done").length;
+      const isWin = doneToday >= 3;
+      setSummary(s => ({ ...s, doneToday, pendingToday, isWin }));
     } catch (e: any) {
       setErr(e.message || String(e));
       setTasks([]);
       setGoalMap({});
-      setTopOfDay(null);
     } finally { setLoading(false); }
   }
 
   async function loadStreaks() {
     if (!userId) return;
     try {
-      const since = new Date();
-      since.setDate(since.getDate() - 180);
+      const since = new Date(); since.setDate(since.getDate() - 180);
       const { data, error } = await supabase
         .from("tasks")
         .select("completed_at,status,user_id")
@@ -485,14 +449,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
         best = Math.max(best, run);
         prev = d;
       }
-      setSummary((s) => ({ ...s, streak, bestStreak: best }));
+      setSummary(s => ({ ...s, streak, bestStreak: best }));
     } catch { /* ignore */ }
   }
 
   async function loadAll() { await load(); await loadStreaks(); }
   useEffect(() => { if (userId && dateISO) loadAll(); }, [userId, dateISO]);
 
-  // Recompute greeting line when progress or name/missed changes
+  // Recompute greeting line
   useEffect(() => {
     setGreetLine(buildGreetingLine(missed, greetName, summary.doneToday, summary.pendingToday));
   }, [missed, greetName, summary.doneToday, summary.pendingToday]);
@@ -512,23 +476,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
         .update({ status: markDone ? "done" : "pending", completed_at: markDone ? new Date().toISOString() : null })
         .eq("id", t.id);
       if (error) throw error;
-
       await loadAll();
-
-      if (markDone) {
-        fireConfetti();
-        toast.show(`Alfred: ${pick(ALFRED_LINES)}`);
-
-        // If Top-of-Day completed, offer to pick another
-        if ((t.priority ?? 0) >= 3 && t.due_date === dateISO) {
-          const cands = tasks
-            .filter(x => x.id !== t.id && x.due_date === dateISO && (x.priority ?? 0) >= 2 && x.status !== "done");
-          if (cands.length > 0) {
-            setChooseCandidates(cands);
-            setChooseTopOpen(true);
-          }
-        }
-      }
+      if (markDone) { fireConfetti(); toast.show(`Alfred: ${pick(ALFRED_LINES)}`); }
     } catch (e: any) { setErr(e.message || String(e)); }
   }
 
@@ -541,20 +490,20 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
   async function moveAllOverdueHere() {
     try {
-      const overdueIds = tasks.filter(isOverdueFn).map((t) => t.id);
+      const overdueIds = tasks.filter(isOverdueFn).map(t => t.id);
       if (overdueIds.length === 0) return;
       const { error } = await supabase.from("tasks").update({ due_date: dateISO }).in("id", overdueIds);
       if (error) throw error; await loadAll();
     } catch (e: any) { setErr(e.message || String(e)); }
   }
 
-  async function addTaskWithArgs(title: string, top: boolean, repeat: Repeat) {
+  async function addTaskWithArgs(title: string, repeat: Repeat) {
     if (!userId || !title.trim()) return;
     const clean = title.trim();
     const occurrences = generateOccurrences(dateISO, repeat);
     const rows = occurrences.map((iso) => ({
       user_id: userId, title: clean, due_date: iso, status: "pending",
-      priority: top ? 2 : 0, source: repeat ? makeSeriesKey(repeat) : "manual"
+      priority: 0, source: repeat ? makeSeriesKey(repeat) : "manual"
     }));
     const { error } = await supabase.from("tasks").insert(rows as any);
     if (error) throw error;
@@ -564,8 +513,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
     if (!userId || !newTitle.trim()) return;
     setAdding(true); setErr(null);
     try {
-      await addTaskWithArgs(newTitle, newTop, newRepeat);
-      setNewTitle(""); setNewTop(false); setNewRepeat("");
+      await addTaskWithArgs(newTitle, newRepeat);
+      setNewTitle(""); setNewRepeat("");
       await loadAll();
     } catch (e: any) { setErr(e.message || String(e)); } finally { setAdding(false); }
   }
@@ -574,157 +523,19 @@ export default function TodayScreen({ externalDateISO }: Props) {
     if (!userId || !quickTitle.trim()) return;
     setSavingQuick(true);
     try {
-      await addTaskWithArgs(quickTitle, quickTop, "");
-      setQuickTitle(""); setQuickTop(false);
+      await addTaskWithArgs(quickTitle, "");
+      setQuickTitle("");
       await loadAll();
     } catch (e: any) { setErr(e.message || String(e)); } finally { setSavingQuick(false); }
   }
-
-  // Promote/demote Top of Day (single for this date)
-  async function setTopPriorityOfDay(id: number | null) {
-    if (!userId) return;
-    setErr(null);
-    try {
-      // Demote any existing Top-of-Day for this date
-      await supabase
-        .from("tasks")
-        .update({ priority: 2 })
-        .eq("user_id", userId)
-        .eq("due_date", dateISO)
-        .eq("priority", 3);
-
-      if (id != null) {
-        await supabase.from("tasks").update({ priority: 3 }).eq("id", id);
-      }
-
-      await loadAll();
-      setChooseTopOpen(false);
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    }
-  }
-
-  function openChooseTop(forceAllTop = false) {
-    const cands = tasks.filter(t =>
-      t.due_date === dateISO &&
-      (t.priority ?? 0) >= (forceAllTop ? 2 : 2) &&
-      t.status !== "done"
-    );
-    setChooseCandidates(cands);
-    setChooseTopOpen(true);
-  }
-
-  /* ===== Edit modal helpers ===== */
-  function openEdit(t: Task) {
-    setEditing(t);
-    setEditTitle(t.title || "");
-    setEditTop((t.priority ?? 0) >= 2);
-    setEditDue(t.due_date);
-    setEditRepeat(getRepeatFromSource(t.source));
-    setApplyFuture(false);
-    setEditOpen(true);
-  }
-
-  async function saveEdit() {
-    if (!editing || !userId) return;
-    setBusyEdit(true); setErr(null);
-
-    const originalRepeat = getRepeatFromSource(editing.source);
-    const originalSeriesKey = editing.source?.startsWith(REPEAT_PREFIX) ? editing.source : null;
-    const newSeriesKey = editRepeat ? makeSeriesKey(editRepeat) : "manual";
-    const title = editTitle.trim();
-    const top = editTop ? 2 : 0;
-    const due = editDue || editing.due_date || dateISO;
-
-    try {
-      await supabase.from("tasks").update({ title, priority: top, due_date: due, source: newSeriesKey }).eq("id", editing.id);
-
-      if (applyFuture && originalSeriesKey) {
-        await supabase
-          .from("tasks")
-          .update({ title, priority: top })
-          .eq("user_id", userId)
-          .eq("source", originalSeriesKey)
-          .gte("due_date", (editing.due_date || due) as string);
-      }
-
-      if (originalSeriesKey && editRepeat !== originalRepeat) {
-        await supabase
-          .from("tasks")
-          .delete()
-          .eq("user_id", userId)
-          .eq("source", originalSeriesKey)
-          .gte("due_date", (editing.due_date || due) as string)
-          .neq("id", editing.id);
-      }
-
-      if (editRepeat && editRepeat !== originalRepeat) {
-        const occurrences = generateOccurrences(due as string, editRepeat).slice(1);
-        if (occurrences.length) {
-          const rows = occurrences.map((iso) => ({
-            user_id: userId, title, due_date: iso, status: "pending", priority: top, source: makeSeriesKey(editRepeat)
-          }));
-          await supabase.from("tasks").insert(rows as any);
-        }
-      }
-
-      setEditOpen(false); setEditing(null);
-      await loadAll();
-    } catch (e: any) { setErr(e.message || String(e)); } finally { setBusyEdit(false); }
-  }
-
-  async function deleteTask(scope: "one" | "future" | "all") {
-    if (!editing || !userId) return;
-    setBusyEdit(true); setErr(null);
-    try {
-      const originalSeriesKey = editing.source?.startsWith(REPEAT_PREFIX) ? editing.source : null;
-
-      if (scope === "one") {
-        await supabase.from("tasks").delete().eq("id", editing.id);
-      } else if (scope === "future" && originalSeriesKey) {
-        await supabase.from("tasks").delete().eq("user_id", userId).eq("source", originalSeriesKey).gte("due_date", editing.due_date || dateISO);
-      } else if (scope === "all" && originalSeriesKey) {
-        await supabase.from("tasks").delete().eq("user_id", userId).eq("source", originalSeriesKey);
-      } else {
-        await supabase.from("tasks").delete().eq("id", editing.id);
-      }
-
-      setEditOpen(false); setEditing(null);
-      await loadAll();
-    } catch (e: any) { setErr(e.message || String(e)); } finally { setBusyEdit(false); }
-  }
-
-  /* ===== Onboarding ===== */
-  async function obSaveAndNext() {
-    if (obStep === 1) {
-      const name = obName.trim();
-      if (name) localStorage.setItem(LS_NAME, name);
-      setObStep(2);
-    } else if (obStep === 2) {
-      const arr = obNicks.split(",").map((s) => s.trim()).filter(Boolean);
-      localStorage.setItem(LS_POOL, JSON.stringify(arr));
-      localStorage.setItem(LS_ROTATE, "1");
-      setObStep(3);
-    } else if (obStep === 3) {
-      const title = obGoal.trim();
-      if (title && userId) {
-        try { await supabase.from("goals").insert({ user_id: userId, title, is_big: true }); } catch { /* ignore */ }
-      }
-      setObStep(0);
-      setGreetName(pickGreetingLabel());
-      await loadAll();
-    }
-  }
-  function obSkip() { setObStep((s) => (s >= 3 ? 0 : (s + 1) as any)); }
 
   /* ===== Computed ===== */
   const niceDate = useMemo(() => formatNiceDate(dateISO), [dateISO]);
   const greeting = useMemo(() => (greetLine || timeGreeting(now)), [greetLine, now]);
   const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-  const top = tasks.filter((t) => (t.priority ?? 0) >= 2);
-  const rest = tasks.filter((t) => (t.priority ?? 0) < 2);
-  const overdueCount = tasks.filter(isOverdueFn).length;
+  const overdue = tasks.filter(isOverdueFn);
+  const todayPending = tasks.filter((t) => t.due_date === dateISO && t.status !== "done");
 
   /* ===== Section helper ===== */
   function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode; }) {
@@ -774,14 +585,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
             <div className="muted" style={{ minWidth: 0 }}>• {niceDate}</div>
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
-            <span className="badge" title="Win if 1+ top priority or 3+ tasks" style={{ background: summary.isWin ? "var(--success-soft)" : "var(--danger-soft)", border: "1px solid var(--border)" }}>{summary.isWin ? "Win" : "Keep going"}</span>
+            <span className="badge" title="Win if 3+ tasks done" style={{ background: summary.isWin ? "var(--success-soft)" : "var(--danger-soft)", border: "1px solid var(--border)" }}>{summary.isWin ? "Win" : "Keep going"}</span>
             <span className="badge" title="Tasks done today">Done: {summary.doneToday}</span>
-            {summary.topTotal > 0 && <span className="badge" title="Top priorities done / total">Top: {summary.topDone}/{summary.topTotal}</span>}
             <span className="badge" title="Current streak (best)" style={{ transform: streakPulse ? "scale(1.08)" : "scale(1)", transition: "transform .25s ease" }}>🔥 {summary.streak}{summary.bestStreak > 0 ? ` (best ${summary.bestStreak})` : ""}</span>
           </div>
         </div>
 
-        {/* Greeting line */}
         {(greetName || greetLine) && (
           <div style={{ fontWeight: 700, wordBreak: "break-word" }}>
             {greeting} {missed ? "💜" : ""}
@@ -803,22 +612,19 @@ export default function TodayScreen({ externalDateISO }: Props) {
             placeholder="Quick add a task for today…"
             style={{ flex: "1 1 220px", minWidth: 0, maxWidth: "100%" }}
           />
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
-            <input type="checkbox" checked={quickTop} onChange={(e) => setQuickTop(e.target.checked)} /> Top
-          </label>
           <button className="btn-primary" onClick={addQuick} disabled={!quickTitle.trim() || savingQuick} style={{ borderRadius: 10, flex: isCompact ? "1 1 100%" : undefined }}>{savingQuick ? "Adding…" : "Add"}</button>
         </div>
 
         {/* Date controls */}
         <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%", minWidth: 0 }}>
-          {overdueCount > 0 && (
+          {overdue.length > 0 && (
             <button
               onClick={moveAllOverdueHere}
               className="btn-soft"
               title="Change due date for all overdue pending tasks to this day"
               style={{ flex: isCompact ? "1 1 100%" : undefined, minWidth: 0 }}
             >
-              Move all overdue here ({overdueCount})
+              Move all overdue here ({overdue.length})
             </button>
           )}
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", flexWrap: "wrap", width: isCompact ? "100%" : "auto", minWidth: 0 }}>
@@ -829,97 +635,53 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-      {/* Today’s Top Priority (replaces Biggest Goal) */}
-      <div className="card" style={{ borderLeft: "6px solid #a7f3d0", borderRadius: 16 }}>
-        <div className="row" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-          <h2 style={{ margin: 0, fontSize: 18, minWidth: 0 }}>Today’s Top Priority</h2>
-          {topOfDay ? <span className="badge" title="Pinned for today">Pinned</span> : <span className="badge" title="Pick one from your Top tasks">Not set</span>}
-          <div style={{ marginLeft: "auto", minWidth: 0, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {!topOfDay && (
-              <button className="btn-soft" onClick={() => openChooseTop(true)}>Choose</button>
-            )}
-            {topOfDay && (
-              <>
-                <span className="muted" style={{ display:"block", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth: "52vw" }}>
-                  {displayTitle(topOfDay)}
-                </span>
-                <button className="btn-soft" onClick={() => setTopPriorityOfDay(null)}>Clear</button>
-              </>
-            )}
-          </div>
-        </div>
-        {!topOfDay && <div className="muted" style={{ marginTop: 6 }}>Promote any Top task below to make it your Top of Day.</div>}
-      </div>
-
-      {/* Top Priorities */}
-      <Section title="Top Priorities">
-        {top.length === 0 ? (
-          <div className="muted">Nothing marked top priority for this day.</div>
+      {/* Today (pending) */}
+      <Section title="Today">
+        {todayPending.length === 0 ? (
+          <div className="muted">Nothing due today.</div>
         ) : (
           <ul className="list">
-            {top.map((t) => {
-              const overdue = isOverdueFn(t);
-              const isTopOfDay = (t.priority ?? 0) >= 3 && t.due_date === dateISO;
-              return (
-                <li key={t.id} className="item">
-                  <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
-                    <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
-                        <span style={{ minWidth:0, overflow:"hidden", textOverflow:"ellipsis" }}>{displayTitle(t)}</span>
-                        {isTopOfDay && <span className="badge" title="Today’s Top Priority">Top of Day</span>}
-                        {overdue && <span className="badge">Overdue</span>}
-                        <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          {!isTopOfDay && t.status !== "done" && t.due_date === dateISO && (
-                            <button className="btn-ghost" onClick={() => setTopPriorityOfDay(t.id)} title="Make this Today’s Top Priority">
-                              Make Top of Day
-                            </button>
-                          )}
-                          <button className="btn-ghost" onClick={() => openEdit(t)} title="Edit task">Edit</button>
-                        </div>
-                      </div>
-                      {overdue && (
-                        <div className="muted" style={{ marginTop: 4, minWidth: 0 }}>
-                          Due {t.due_date} · <button className="btn-ghost" onClick={() => moveToSelectedDate(t.id)}>Move to {dateISO}</button>
-                        </div>
-                      )}
+            {todayPending.map((t) => (
+              <li key={t.id} className="item">
+                <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                  <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
+                      <span style={{ minWidth:0 }}>{displayTitle(t)}</span>
                     </div>
-                  </label>
-                </li>
-              );
-            })}
+                  </div>
+                </label>
+              </li>
+            ))}
           </ul>
         )}
       </Section>
 
-      {/* Everything Else */}
-      <Section title="Everything Else" right={overdueCount > 0 ? <span className="muted">{overdueCount} overdue</span> : null}>
-        {rest.length === 0 ? (
-          <div className="muted">Nothing else scheduled.</div>
+      {/* Overdue (pending) */}
+      <Section title="Overdue" right={overdue.length > 0 ? <span className="muted">{overdue.length}</span> : null}>
+        {overdue.length === 0 ? (
+          <div className="muted">Nothing overdue. Nice!</div>
         ) : (
           <ul className="list">
-            {rest.map((t) => {
-              const overdue = isOverdueFn(t);
-              return (
-                <li key={t.id} className="item">
-                  <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
-                    <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
-                        <span style={{ minWidth:0, overflow:"hidden", textOverflow:"ellipsis" }}>{displayTitle(t)}</span>
-                        {overdue && <span className="badge">Overdue</span>}
-                        <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => openEdit(t)} title="Edit task">Edit</button>
-                      </div>
-                      {overdue && (
-                        <div className="muted" style={{ marginTop: 4, minWidth: 0 }}>
-                          Due {t.due_date} · <button className="btn-ghost" onClick={() => moveToSelectedDate(t.id)}>Move to {dateISO}</button>
-                        </div>
-                      )}
+            {overdue.map((t) => (
+              <li key={t.id} className="item">
+                <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                  <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
+                      <span style={{ minWidth:0 }}>{displayTitle(t)}</span>
+                      <span className="badge">Overdue</span>
+                      <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => moveToSelectedDate(t.id)}>
+                        Move to {dateISO}
+                      </button>
                     </div>
-                  </label>
-                </li>
-              );
-            })}
+                    <div className="muted" style={{ marginTop: 4, minWidth: 0 }}>
+                      Due {t.due_date}
+                    </div>
+                  </div>
+                </label>
+              </li>
+            ))}
           </ul>
         )}
       </Section>
@@ -939,10 +701,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </label>
 
         <div className="row" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
-            <input type="checkbox" checked={newTop} onChange={(e) => setNewTop(e.target.checked)} /> Mark as Top Priority
-          </label>
-
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
             <span className="muted">Repeat</span>
             <select value={newRepeat} onChange={(e) => setNewRepeat(e.target.value as Repeat)} title="Repeat (optional)">
@@ -965,7 +723,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-      {/* Bottom Tab Bar (safe-area aware) */}
+      {/* Bottom Tab Bar */}
       <div style={{ position: "sticky", bottom: 0, zIndex: 55, background: "var(--bg)", padding: "8px 4px calc(8px + env(safe-area-inset-bottom,0))", borderTop: "1px solid var(--border)", width: "100%", maxWidth: "100%" }}>
         <div className="h-scroll">
           {[
@@ -979,143 +737,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
           ))}
         </div>
       </div>
-
-      {/* Edit Modal */}
-      {editOpen && editing && (
-        <div role="dialog" aria-modal="true" aria-label="Edit task" onClick={() => !busyEdit && setEditOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 2000 }}>
-          <div onClick={(e) => e.stopPropagation()} className="card" style={{ width: "min(720px, 96vw)", borderRadius: 16, padding: 16, background: "#fff" }}>
-            <div className="row" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-              <h3 style={{ margin: 0, fontSize: 18 }}>Edit task</h3>
-              <span className="muted" style={{ marginLeft: "auto" }}>{getRepeatFromSource(editing.source) ? "Recurring" : "Single"}</span>
-              <button className="btn-ghost" onClick={() => setEditOpen(false)} disabled={busyEdit} title="Close">✕</button>
-            </div>
-
-            <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-              <label style={{ display: "grid", gap: 6 }}>
-                <div className="section-title">Title</div>
-                <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="Enter task…" />
-              </label>
-
-              <div className="row" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", minWidth: 0 }}>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <input type="checkbox" checked={editTop} onChange={(e) => setEditTop(e.target.checked)} /> Mark as Top Priority
-                </label>
-
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  Due <input type="date" value={editDue || ""} onChange={(e) => setEditDue(e.target.value || null)} />
-                </label>
-
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  Repeat
-                  <select value={editRepeat} onChange={(e) => setEditRepeat(e.target.value as Repeat)} title={getRepeatFromSource(editing.source) ? "Change frequency" : "Make this a repeating task"}>
-                    <option value="">No repeat</option>
-                    <option value="daily">Daily</option>
-                    <option value="weekdays">Daily (Mon–Fri)</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
-                    <option value="annually">Annually</option>
-                  </select>
-                </label>
-              </div>
-
-              {getRepeatFromSource(editing.source) && (
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                  <input type="checkbox" checked={applyFuture} onChange={(e) => setApplyFuture(e.target.checked)} /> Apply title/priority changes to all <b>future</b> items in this series
-                </label>
-              )}
-
-              <div className="row" style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap", marginTop: 6, minWidth: 0 }}>
-                <button className="btn-soft" onClick={() => deleteTask("one")} disabled={busyEdit} title="Delete just this task">Delete this</button>
-                {getRepeatFromSource(editing.source) && (
-                  <>
-                    <button className="btn-soft" onClick={() => deleteTask("future")} disabled={busyEdit} title="Delete this and all future in series">Delete future in series</button>
-                    <button className="btn-soft" onClick={() => deleteTask("all")} disabled={busyEdit} title="Delete entire series">Delete entire series</button>
-                  </>
-                )}
-                <button className="btn-primary" onClick={saveEdit} disabled={busyEdit || !editTitle.trim()} style={{ borderRadius: 10 }} title={getRepeatFromSource(editing.source) !== editRepeat ? "Saves and updates series from the selected due date" : "Save"}>{busyEdit ? "Saving…" : "Save"}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Choose/Replace Top of Day Prompt */}
-      {chooseTopOpen && (
-        <div role="dialog" aria-modal="true" aria-label="Choose Top of Day" onClick={() => setChooseTopOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 2100 }}>
-          <div onClick={(e) => e.stopPropagation()} className="card" style={{ width: "min(680px, 96vw)", borderRadius: 16, padding: 16, background: "#fff" }}>
-            <h3 style={{ marginTop: 0 }}>Pick a new Top Priority?</h3>
-            <div className="muted" style={{ marginBottom: 8 }}>
-              Well done — you completed today’s top priority! 💪<br />
-              Would you like to make another task your top priority for the rest of the day? No pressure.
-            </div>
-            {chooseCandidates.length === 0 ? (
-              <div className="muted">No other Top tasks available.</div>
-            ) : (
-              <ul className="list" style={{ marginTop: 8 }}>
-                {chooseCandidates.map((t) => (
-                  <li key={t.id} className="item" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {displayTitle(t)}
-                    </div>
-                    <button className="btn-primary" onClick={() => setTopPriorityOfDay(t.id)} style={{ borderRadius: 10 }}>
-                      Make Top of Day
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
-              <button className="btn-soft" onClick={() => setChooseTopOpen(false)}>Not now</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Onboarding Modal */}
-      {obStep !== 0 && (
-        <div role="dialog" aria-modal="true" aria-label="Onboarding" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 3000 }}>
-          <div className="card" style={{ width: "min(520px, 96vw)", borderRadius: 16, padding: 16, background: "#fff" }}>
-            {obStep === 1 && (
-              <div style={{ display: "grid", gap: 10 }}>
-                <h3 style={{ margin: 0 }}>Welcome to BYB 🌈</h3>
-                <div className="muted">What should we call you?</div>
-                <input value={obName} onChange={(e) => setObName(e.target.value)} placeholder="Your name" />
-                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                  <button className="btn-ghost" onClick={obSkip}>Skip</button>
-                  <button className="btn-primary" onClick={obSaveAndNext} disabled={!obName.trim()}>Next</button>
-                </div>
-              </div>
-            )}
-            {obStep === 2 && (
-              <div style={{ display: "grid", gap: 10 }}>
-                <h3 style={{ margin: 0 }}>Nicknames (optional)</h3>
-                <div className="muted">Comma-separated. We’ll rotate them in greetings.</div>
-                <input value={obNicks} onChange={(e) => setObNicks(e.target.value)} placeholder="e.g. Champ, Boss, Legend" />
-                <div style={{ display: "flex", gap: 8, justifyContent: "space-between", alignItems: "center" }}>
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <input type="checkbox" defaultChecked onChange={(e) => localStorage.setItem(LS_ROTATE, e.target.checked ? "1" : "0")} /> Rotate nicknames
-                  </label>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button className="btn-ghost" onClick={obSkip}>Skip</button>
-                    <button className="btn-primary" onClick={obSaveAndNext}>Next</button>
-                  </div>
-                </div>
-              </div>
-            )}
-            {obStep === 3 && (
-              <div style={{ display: "grid", gap: 10 }}>
-                <h3 style={{ margin: 0 }}>Set your Big Goal</h3>
-                <div className="muted">A north star to guide your daily focus.</div>
-                <input value={obGoal} onChange={(e) => setObGoal(e.target.value)} placeholder="e.g. Launch BYB MVP" />
-                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                  <button className="btn-ghost" onClick={() => setObStep(0)}>Skip</button>
-                  <button className="btn-primary" onClick={obSaveAndNext} disabled={!obGoal.trim()}>Finish</button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Toast node */}
       {toast.node}
