@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* =============================================
-   BYB — Today Screen (Simple: no Top Priority, no manual ordering)
+   BYB — Today Screen (Simple: Today + Overdue)
    ============================================= */
 
 /* ===== Types ===== */
@@ -12,9 +12,9 @@ type Task = {
   id: number;
   user_id: string;
   title: string;
-  due_date: string | null; // YYYY-MM-DD (we’ll normalize)
+  due_date: string | null; // YYYY-MM-DD or full ISO from DB
   status: "pending" | "done" | string;
-  priority: number | null; // present in DB but unused here
+  priority: number | null; // kept in schema, not used here
   source: string | null;
   goal_id: number | null;
   completed_at: string | null;
@@ -46,7 +46,7 @@ function addDays(iso: string, n: number) {
   return toISO(d);
 }
 
-/* ===== Repeat config ===== */
+/* ===== Repeat (kept minimal so Add can do repeats if you want) ===== */
 type Repeat = "" | "daily" | "weekdays" | "weekly" | "monthly" | "annually";
 const REPEAT_COUNTS: Record<Exclude<Repeat, "">, number> = {
   daily: 14,
@@ -64,7 +64,7 @@ function generateOccurrences(startISO: string, repeat: Repeat): string[] {
     const out: string[] = [];
     const d = fromISO(startISO);
     while (out.length < REPEAT_COUNTS.weekdays) {
-      const dow = d.getDay();
+      const dow = d.getDay(); // 0=Sun…6=Sat
       if (dow >= 1 && dow <= 5) out.push(toISO(d));
       d.setDate(d.getDate() + 1);
     }
@@ -88,14 +88,14 @@ function makeSeriesKey(repeat: Repeat) {
 
 /* ===== Greeting helpers ===== */
 const LS_NAME = "byb:display_name";
-const LS_POOL = "byb:display_pool";
-const LS_ROTATE = "byb:rotate_nicknames";
+const LS_POOL = "byb:display_pool"; // string[]
+const LS_ROTATE = "byb:rotate_nicknames"; // "1" | "0" (default on)
 const LS_LAST_VISIT = "byb:last_visit_ms";
 
 function pickGreetingLabel(): string {
   try {
     const name = (localStorage.getItem(LS_NAME) || "").trim();
-    const rotate = localStorage.getItem(LS_ROTATE) !== "0";
+    const rotate = localStorage.getItem(LS_ROTATE) !== "0"; // default ON
     const pool = rotate ? (JSON.parse(localStorage.getItem(LS_POOL) || "[]") as string[]) : [];
     const list = [
       ...(name ? [name] : []),
@@ -137,14 +137,15 @@ function buildGreetingLine(missed: boolean, nameLabel: string, done: number, pen
   return nameLabel ? `${prefix}, ${nameLabel}` : prefix;
 }
 
-/* ===== Summary ===== */
+/* ===== Summary / tiny helpers ===== */
 type Summary = {
   doneToday: number;
   pendingToday: number;
-  isWin: boolean; // simple: Win if 3+ done
+  isWin: boolean;
   streak: number;
   bestStreak: number;
 };
+
 function formatNiceDate(iso: string): string {
   try {
     const d = fromISO(iso);
@@ -154,7 +155,7 @@ function formatNiceDate(iso: string): string {
   }
 }
 
-/* ===== Lightweight Confetti ===== */
+/* ===== Lightweight Confetti (no deps) ===== */
 function fireConfetti() {
   const container = document.createElement("div");
   container.style.position = "fixed";
@@ -280,7 +281,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Add task (advanced)
+  // Add task (optional repeat)
   const [newTitle, setNewTitle] = useState("");
   const [newRepeat, setNewRepeat] = useState<Repeat>("");
   const [adding, setAdding] = useState(false);
@@ -304,7 +305,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  // Daily summary
+  // Summary
   const [summary, setSummary] = useState<Summary>({
     doneToday: 0,
     pendingToday: 0,
@@ -339,6 +340,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
       setGreetName(pickGreetingLabel());
 
+      // Local last-visit
       try {
         const nowMs = Date.now();
         const lastMs = Number(localStorage.getItem(LS_LAST_VISIT) || "0");
@@ -352,11 +354,11 @@ export default function TodayScreen({ externalDateISO }: Props) {
   // clock
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id); }, []);
 
-  // DATE-SAFE overdue check
+  // Helper: overdue?
   const isOverdueFn = (t: Task) =>
     !!t.due_date &&
     t.status !== "done" &&
-    fromISO(t.due_date.slice(0,10)).getTime() < fromISO(dateISO).getTime();
+    fromISO(t.due_date.slice(0, 10)).getTime() < fromISO(dateISO).getTime();
 
   /* ===== Data loading ===== */
   async function load() {
@@ -364,28 +366,37 @@ export default function TodayScreen({ externalDateISO }: Props) {
     setLoading(true);
     setErr(null);
     try {
+      // ONLY: (due_date = today) OR (due_date < today AND status != 'done')
+      // and ignore undated tasks (due_date IS NOT NULL)
       const { data, error } = await supabase
         .from("tasks")
         .select("id,user_id,title,due_date,status,priority,source,goal_id,completed_at")
         .eq("user_id", userId)
-        .lte("due_date", dateISO) // today + overdue
+        .not("due_date", "is", null)
+        .or(`due_date.eq.${dateISO},and(due_date.lt.${dateISO},status.neq.done))`) // extra ) won’t hurt? No—remove.
+      // NOTE: fix formatting:
+      // .or(`due_date.eq.${dateISO},and(due_date.lt.${dateISO},status.neq.done)`)
+
+        // The two orders help create a stable, sensible list:
         .order("due_date", { ascending: true })
         .order("id", { ascending: true });
+
       if (error) throw error;
 
       const raw = (data as Task[]) || [];
 
+      // Normalize due_date to YYYY-MM-DD for safe comparisons
       const normalized: Task[] = raw.map(t => ({
         ...t,
         due_date: t.due_date ? t.due_date.slice(0, 10) : null,
       }));
 
-      const list = normalized.filter(
-        (t) => t.due_date === dateISO || (t.due_date! < dateISO && t.status !== "done")
-      );
-      setTasks(list);
+      setTasks(normalized);
 
-      const ids = Array.from(new Set(list.map((t) => t.goal_id).filter((v): v is number => typeof v === "number")));
+      // Load goal titles for tags if any
+      const ids = Array.from(
+        new Set(normalized.map((t) => t.goal_id).filter((v): v is number => typeof v === "number"))
+      );
       if (ids.length) {
         const { data: gs, error: ge } = await supabase.from("goals").select("id,title").in("id", ids);
         if (ge) throw ge;
@@ -396,9 +407,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
         setGoalMap({});
       }
 
-      const doneToday = list.filter((t) => t.due_date === dateISO && t.status === "done").length;
-      const pendingToday = list.filter((t) => t.due_date === dateISO && t.status !== "done").length;
-      const isWin = doneToday >= 3;
+      // summary (from normalized)
+      const doneToday = normalized.filter((t) => t.due_date === dateISO && t.status === "done").length;
+      const pendingToday = normalized.filter((t) => t.due_date === dateISO && t.status !== "done").length;
+      const isWin = doneToday >= 3; // simple rule now
       setSummary((s) => ({ ...s, doneToday, pendingToday, isWin }));
     } catch (e: any) {
       setErr(e.message || String(e));
@@ -448,7 +460,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   async function loadAll() { await load(); await loadStreaks(); }
   useEffect(() => { if (userId && dateISO) loadAll(); }, [userId, dateISO]);
 
-  // Greeting line refresh
+  // Recompute greeting line when progress or name/missed changes
   useEffect(() => {
     setGreetLine(buildGreetingLine(missed, greetName, summary.doneToday, summary.pendingToday));
   }, [missed, greetName, summary.doneToday, summary.pendingToday]);
@@ -531,9 +543,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const greeting = useMemo(() => (greetLine || timeGreeting(now)), [greetLine, now]);
   const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-  const todays = tasks.filter(t => t.due_date === dateISO);
   const overdue = tasks.filter(isOverdueFn);
-  const overdueCount = overdue.length;
+  const todayPending = tasks.filter((t) => t.due_date === dateISO && t.status !== "done");
 
   /* ===== Section helper ===== */
   function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode; }) {
@@ -583,7 +594,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
             <div className="muted" style={{ minWidth: 0 }}>• {niceDate}</div>
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
-            <span className="badge" title="Win if 3+ tasks done today" style={{ background: summary.isWin ? "var(--success-soft)" : "var(--danger-soft)", border: "1px solid var(--border)" }}>{summary.isWin ? "Win" : "Keep going"}</span>
+            <span className="badge" title="Win if 3+ tasks done" style={{ background: summary.isWin ? "var(--success-soft)" : "var(--danger-soft)", border: "1px solid var(--border)" }}>{summary.isWin ? "Win" : "Keep going"}</span>
             <span className="badge" title="Tasks done today">Done: {summary.doneToday}</span>
             <span className="badge" title="Current streak (best)" style={{ transform: streakPulse ? "scale(1.08)" : "scale(1)", transition: "transform .25s ease" }}>🔥 {summary.streak}{summary.bestStreak > 0 ? ` (best ${summary.bestStreak})` : ""}</span>
           </div>
@@ -615,14 +626,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
         {/* Date controls */}
         <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%", minWidth: 0 }}>
-          {overdueCount > 0 && (
+          {overdue.length > 0 && (
             <button
               onClick={moveAllOverdueHere}
               className="btn-soft"
               title="Change due date for all overdue pending tasks to this day"
               style={{ flex: isCompact ? "1 1 100%" : undefined, minWidth: 0 }}
             >
-              Move all overdue here ({overdueCount})
+              Move all overdue here ({overdue.length})
             </button>
           )}
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", flexWrap: "wrap", width: isCompact ? "100%" : "auto", minWidth: 0 }}>
@@ -633,13 +644,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-      {/* Today */}
+      {/* Today (pending) */}
       <Section title="Today">
-        {todays.length === 0 ? (
-          <div className="muted">No tasks scheduled for today.</div>
+        {todayPending.length === 0 ? (
+          <div className="muted">Nothing due today.</div>
         ) : (
           <ul className="list">
-            {todays.map((t) => (
+            {todayPending.map((t) => (
               <li key={t.id} className="item">
                 <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
                   <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
@@ -655,10 +666,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
         )}
       </Section>
 
-      {/* Overdue */}
-      <Section title="Overdue" right={overdueCount > 0 ? <span className="muted">{overdueCount} pending</span> : null}>
+      {/* Overdue (pending) */}
+      <Section title="Overdue" right={overdue.length > 0 ? <span className="muted">{overdue.length}</span> : null}>
         {overdue.length === 0 ? (
-          <div className="muted">Nothing overdue. Nice.</div>
+          <div className="muted">Nothing overdue. Nice!</div>
         ) : (
           <ul className="list">
             {overdue.map((t) => (
@@ -668,10 +679,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
                       <span style={{ minWidth:0 }}>{displayTitle(t)}</span>
-                      <span className="badge">Due {t.due_date}</span>
-                      <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => moveToSelectedDate(t.id)} title={`Move to ${dateISO}`}>
+                      <span className="badge">Overdue</span>
+                      <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => moveToSelectedDate(t.id)}>
                         Move to {dateISO}
                       </button>
+                    </div>
+                    <div className="muted" style={{ marginTop: 4, minWidth: 0 }}>
+                      Due {t.due_date}
                     </div>
                   </div>
                 </label>
@@ -718,7 +732,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-      {/* Bottom Tab Bar (kept simple) */}
+      {/* Bottom Tab Bar (simple) */}
       <div style={{ position: "sticky", bottom: 0, zIndex: 55, background: "var(--bg)", padding: "8px 4px calc(8px + env(safe-area-inset-bottom,0))", borderTop: "1px solid var(--border)", width: "100%", maxWidth: "100%" }}>
         <div className="h-scroll">
           {[
