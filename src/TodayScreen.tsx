@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* =============================================
-   BYB — Today Screen (Top-of-Day + Prioritise, date-safe)
+   BYB — Today Screen (Top-of-Day + Prioritise)
    ============================================= */
 
 /* ===== Types ===== */
@@ -12,7 +12,7 @@ type Task = {
   id: number;
   user_id: string;
   title: string;
-  due_date: string | null; // may be DATE or TIMESTAMP in DB
+  due_date: string | null;
   status: "pending" | "done" | string;
   priority: number | null; // 3 => Top of Day, 2 => Top, 0 => Normal
   source: string | null;
@@ -23,43 +23,58 @@ type GoalLite = { id: number; title: string };
 type Props = { externalDateISO?: string };
 
 /* ===== Date helpers ===== */
-function toISO(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
+function todayISO() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+function toISO(d: Date) {
+  const y = d.getFullYear(),
+    m = String(d.getMonth() + 1).padStart(2, "0"),
+    dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
-function todayISO() { return toISO(new Date()); }
 function fromISO(s: string) {
   const [y, m, d] = s.split("-").map(Number);
   return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
 function addDays(iso: string, n: number) {
-  const d = fromISO(iso); d.setDate(d.getDate() + n); return toISO(d);
+  const d = fromISO(iso);
+  d.setDate(d.getDate() + n);
+  return toISO(d);
 }
-// Treat “today” as [startOfDay, startOfNextDay)
-const dayStartISO = (iso: string) => `${iso}T00:00:00`;
-const nextDayStartISO = (iso: string) => `${addDays(iso, 1)}T00:00:00`;
 
 /* ===== Repeat config ===== */
 type Repeat = "" | "daily" | "weekdays" | "weekly" | "monthly" | "annually";
 const REPEAT_COUNTS: Record<Exclude<Repeat, "">, number> = {
-  daily: 14, weekdays: 20, weekly: 12, monthly: 12, annually: 5,
+  daily: 14,
+  weekdays: 20,
+  weekly: 12,
+  monthly: 12,
+  annually: 5
 };
 const REPEAT_PREFIX = "today_repeat_";
+
 function generateOccurrences(startISO: string, repeat: Repeat): string[] {
   if (!repeat) return [startISO];
+
   if (repeat === "weekdays") {
+    const count = REPEAT_COUNTS.weekdays;
     const out: string[] = [];
     const d = fromISO(startISO);
-    while (out.length < REPEAT_COUNTS.weekdays) {
-      const dow = d.getDay(); if (dow >= 1 && dow <= 5) out.push(toISO(d));
+    while (out.length < count) {
+      const dow = d.getDay(); // Sun=0 .. Sat=6
+      if (dow >= 1 && dow <= 5) out.push(toISO(d));
       d.setDate(d.getDate() + 1);
     }
     return out;
   }
+
+  const count = REPEAT_COUNTS[repeat];
   const out: string[] = [];
-  for (let i = 0; i < REPEAT_COUNTS[repeat]; i++) {
+  for (let i = 0; i < count; i++) {
     const d = fromISO(startISO);
     if (repeat === "daily") d.setDate(d.getDate() + i);
     else if (repeat === "weekly") d.setDate(d.getDate() + 7 * i);
@@ -69,33 +84,45 @@ function generateOccurrences(startISO: string, repeat: Repeat): string[] {
   }
   return out;
 }
-function makeSeriesKey(repeat: Repeat) { return repeat ? `${REPEAT_PREFIX}${repeat}` : "manual"; }
+function makeSeriesKey(repeat: Repeat) {
+  return repeat ? `${REPEAT_PREFIX}${repeat}` : "manual";
+}
 
 /* ===== Greeting helpers ===== */
 const LS_NAME = "byb:display_name";
-const LS_POOL = "byb:display_pool";
+const LS_POOL = "byb:display_pool"; // string[]
 const LS_ROTATE = "byb:rotate_nicknames"; // "1" | "0" (default on)
 const LS_LAST_VISIT = "byb:last_visit_ms";
 
 function pickGreetingLabel(): string {
   try {
     const name = (localStorage.getItem(LS_NAME) || "").trim();
-    const rotate = localStorage.getItem(LS_ROTATE) !== "0";
+    const rotate = localStorage.getItem(LS_ROTATE) !== "0"; // default ON
     const pool = rotate ? (JSON.parse(localStorage.getItem(LS_POOL) || "[]") as string[]) : [];
-    const list = [...(name ? [name] : []), ...(Array.isArray(pool) ? pool.filter(Boolean) : [])];
+    const list = [
+      ...(name ? [name] : []),
+      ...(Array.isArray(pool) ? pool.filter(Boolean) : [])
+    ];
     if (list.length === 0) return "";
     return list[Math.floor(Math.random() * list.length)];
-  } catch { return ""; }
+  } catch {
+    return "";
+  }
 }
 
 const POSITIVE_GREETS = [
-  "Great to see you", "Let’s make today a great day",
-  "Let’s smash some goals today", "Back at it — nice!"
+  "Great to see you",
+  "Let’s make today a great day",
+  "Let’s smash some goals today",
+  "Back at it — nice!"
 ];
 const PROGRESS_GREETS = [
-  "You’re smashing today", "You’re crushing this",
-  "Momentum looks great", "Lovely progress"
+  "You’re smashing today",
+  "You’re crushing this",
+  "Momentum looks great",
+  "Lovely progress"
 ];
+
 function timeGreeting(date = new Date()): string {
   const h = date.getHours();
   if (h < 5) return "Up late";
@@ -114,18 +141,25 @@ function buildGreetingLine(missed: boolean, nameLabel: string, done: number, pen
 
 /* ===== Summary ===== */
 type Summary = {
-  doneToday: number; pendingToday: number;
-  topDone: number; topTotal: number;
-  isWin: boolean; streak: number; bestStreak: number;
+  doneToday: number;
+  pendingToday: number;
+  topDone: number;
+  topTotal: number;
+  isWin: boolean;
+  streak: number;
+  bestStreak: number;
 };
+
 function formatNiceDate(iso: string): string {
   try {
     const d = fromISO(iso);
     return d.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" });
-  } catch { return iso; }
+  } catch {
+    return iso;
+  }
 }
 
-/* ===== Confetti + Toast ===== */
+/* ===== Confetti ===== */
 function fireConfetti() {
   const container = document.createElement("div");
   container.style.position = "fixed";
@@ -160,6 +194,7 @@ function fireConfetti() {
   setTimeout(() => container.remove(), 2200);
 }
 
+/* ===== Encouragements ===== */
 const ALFRED_LINES = [
   "Lovely momentum. Keep it rolling.",
   "One pebble at a time becomes a mountain.",
@@ -169,9 +204,13 @@ const ALFRED_LINES = [
 ];
 function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)] as T; }
 
+/* ===== Tiny toast hook ===== */
 function useToast() {
   const [msg, setMsg] = useState<string | null>(null);
-  function show(m: string) { setMsg(m); setTimeout(() => setMsg(null), 2500); }
+  function show(m: string) {
+    setMsg(m);
+    setTimeout(() => setMsg(null), 2500);
+  }
   const node = (
     <div aria-live="polite" style={{ position: "fixed", left: 0, right: 0, bottom: "calc(16px + env(safe-area-inset-bottom,0))", display: "flex", justifyContent: "center", pointerEvents: "none", zIndex: 3500 }}>
       {msg && (
@@ -274,7 +313,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
   // Daily summary
   const [summary, setSummary] = useState<Summary>({
-    doneToday: 0, pendingToday: 0, topDone: 0, topTotal: 0, isWin: false, streak: 0, bestStreak: 0
+    doneToday: 0,
+    pendingToday: 0,
+    topDone: 0,
+    topTotal: 0,
+    isWin: false,
+    streak: 0,
+    bestStreak: 0
   });
 
   // streak micro animation
@@ -294,7 +339,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [chooseTopOpen, setChooseTopOpen] = useState(false);
   const [chooseCandidates, setChooseCandidates] = useState<Task[]>([]);
 
-  // Prioritisation modal state
+  // Prioritisation modal
   const [prioritiseOpen, setPrioritiseOpen] = useState(false);
   const [prioDraft, setPrioDraft] = useState<Task[]>([]);
 
@@ -318,17 +363,18 @@ export default function TodayScreen({ externalDateISO }: Props) {
         const missedNow = lastMs > 0 ? (nowMs - lastMs) > 86400000 : false;
         setMissed(missedNow);
         localStorage.setItem(LS_LAST_VISIT, String(nowMs));
-      } catch { /* ignore */ }
+      } catch {}
     });
   }, []);
 
   // clock
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id); }, []);
 
-  // helper (DATE-SAFE overdue check)
+  // DATE-SAFE overdue check
   const isOverdueFn = (t: Task) =>
-    !!t.due_date && t.status !== "done" &&
-    fromISO(t.due_date.slice(0,10)).getTime() < fromISO(dateISO).getTime();
+    !!t.due_date &&
+    t.status !== "done" &&
+    fromISO(t.due_date).getTime() < fromISO(dateISO).getTime();
 
   /* ===== Data loading ===== */
   async function load() {
@@ -340,15 +386,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
         .from("tasks")
         .select("id,user_id,title,due_date,status,priority,source,goal_id,completed_at")
         .eq("user_id", userId)
-        // include *all* of today (up to the start of tomorrow) + anything before (overdue)
-        .lt("due_date", nextDayStartISO(dateISO))
+        .lte("due_date", dateISO) // today + overdue
         .order("priority", { ascending: false })
         .order("id", { ascending: true });
       if (error) throw error;
 
       const raw = (data as Task[]) || [];
 
-      // Normalize due_date to YYYY-MM-DD for UI logic
+      // normalize due_date to YYYY-MM-DD
       const normalized: Task[] = raw.map(t => ({
         ...t,
         due_date: t.due_date ? t.due_date.slice(0, 10) : null,
@@ -371,7 +416,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         setGoalMap({});
       }
 
-      // summary
+      // summary (from list)
       const doneToday = list.filter((t) => t.due_date === dateISO && t.status === "done").length;
       const pendingToday = list.filter((t) => t.due_date === dateISO && t.status !== "done").length;
       const topToday = list.filter((t) => t.due_date === dateISO && (t.priority ?? 0) >= 2);
@@ -380,11 +425,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
       const isWin = topDone >= 1 || doneToday >= 3;
       setSummary((s) => ({ ...s, doneToday, pendingToday, topDone, topTotal, isWin }));
 
-      // top of day (for this date)
       setTopOfDay(topToday.find(t => (t.priority ?? 0) >= 3) || null);
     } catch (e: any) {
       setErr(e.message || String(e));
-      setTasks([]); setGoalMap({}); setTopOfDay(null);
+      setTasks([]);
+      setGoalMap({});
+      setTopOfDay(null);
     } finally { setLoading(false); }
   }
 
@@ -429,7 +475,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   async function loadAll() { await load(); await loadStreaks(); }
   useEffect(() => { if (userId && dateISO) loadAll(); }, [userId, dateISO]);
 
-  // Recompute greeting line when progress or name/missed changes
+  // Recompute greeting line
   useEffect(() => {
     setGreetLine(buildGreetingLine(missed, greetName, summary.doneToday, summary.pendingToday));
   }, [missed, greetName, summary.doneToday, summary.pendingToday]);
@@ -459,7 +505,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         // If Top-of-Day completed, offer to pick another
         if ((t.priority ?? 0) >= 3 && t.due_date === dateISO) {
           const cands = tasks
-            .filter(x => x.id !== t.id && (x.priority ?? 0) >= 2 && x.status !== "done");
+            .filter(x => x.id !== t.id && x.due_date === dateISO && (x.priority ?? 0) >= 2 && x.status !== "done");
           if (cands.length > 0) {
             setChooseCandidates(cands);
             setChooseTopOpen(true);
@@ -471,7 +517,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
   async function moveToSelectedDate(taskId: number) {
     try {
-      const { error } = await supabase.from("tasks").update({ due_date: dayStartISO(dateISO) }).eq("id", taskId);
+      const { error } = await supabase.from("tasks").update({ due_date: dateISO }).eq("id", taskId);
       if (error) throw error; await loadAll();
     } catch (e: any) { setErr(e.message || String(e)); }
   }
@@ -480,7 +526,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     try {
       const overdueIds = tasks.filter(isOverdueFn).map((t) => t.id);
       if (overdueIds.length === 0) return;
-      const { error } = await supabase.from("tasks").update({ due_date: dayStartISO(dateISO) }).in("id", overdueIds);
+      const { error } = await supabase.from("tasks").update({ due_date: dateISO }).in("id", overdueIds);
       if (error) throw error; await loadAll();
     } catch (e: any) { setErr(e.message || String(e)); }
   }
@@ -517,24 +563,21 @@ export default function TodayScreen({ externalDateISO }: Props) {
     } catch (e: any) { setErr(e.message || String(e)); } finally { setSavingQuick(false); }
   }
 
-  // Promote/demote Top of Day (single for this date) — date-safe and can accept overdue items
+  // Promote/demote Top of Day (single for this date) — ALSO move it to today.
   async function setTopPriorityOfDay(id: number | null) {
     if (!userId) return;
     setErr(null);
     try {
-      // Demote any existing Top-of-Day in *today window*
+      // Demote any existing Top-of-Day for this date
       await supabase
         .from("tasks")
         .update({ priority: 2 })
         .eq("user_id", userId)
-        .gte("due_date", dayStartISO(dateISO))
-        .lt("due_date", nextDayStartISO(dateISO))
+        .eq("due_date", dateISO)
         .eq("priority", 3);
 
       if (id != null) {
-        // Ensure the chosen item is due today, then promote
-        await supabase.from("tasks").update({ due_date: dayStartISO(dateISO) }).eq("id", id);
-        await supabase.from("tasks").update({ priority: 3 }).eq("id", id);
+        await supabase.from("tasks").update({ priority: 3, due_date: dateISO }).eq("id", id);
       }
 
       await loadAll();
@@ -545,25 +588,33 @@ export default function TodayScreen({ externalDateISO }: Props) {
   }
 
   function openChooseTop() {
-    // offer any top(2+) pending item we can see (today + overdue)
-    const cands = tasks.filter(t => (t.priority ?? 0) >= 2 && t.status !== "done");
+    const cands = tasks.filter(t =>
+      (t.priority ?? 0) >= 0 &&
+      t.status !== "done"
+    );
     setChooseCandidates(cands);
     setChooseTopOpen(true);
   }
 
   /* ===== Prioritisation helpers ===== */
-
-  // Open modal with ANY pending visible task (today + overdue), sorted by priority then id
+  // Build from ALL open tasks on the screen (today + overdue), not just today
   function openPrioritise() {
-    const pendingVisible = tasks.filter(t => t.status !== "done");
-    const sorted = [...pendingVisible].sort((a, b) => {
-      const pa = a.priority ?? 0; const pb = b.priority ?? 0;
-      if (pb !== pa) return pb - pa; return a.id - b.id;
+    const openAny = tasks.filter(t => t.status !== "done"); // 'tasks' already = today + overdue
+    const sorted = [...openAny].sort((a, b) => {
+      const pa = a.priority ?? 0;
+      const pb = b.priority ?? 0;
+      if (pb !== pa) return pb - pa; // 3,2,0 descending
+      // Put today before overdue (nice-to-have)
+      const ad = a.due_date === dateISO ? 0 : 1;
+      const bd = b.due_date === dateISO ? 0 : 1;
+      if (ad !== bd) return ad - bd;
+      return a.id - b.id;
     });
     setPrioDraft(sorted);
     setPrioritiseOpen(true);
   }
 
+  // Move helper (index + dir = -1 up, +1 down)
   function movePrioTask(index: number, dir: -1 | 1) {
     setPrioDraft(prev => {
       const next = [...prev];
@@ -576,35 +627,29 @@ export default function TodayScreen({ externalDateISO }: Props) {
     });
   }
 
-  // Save: move chosen tasks *into today*, demote rest-in-today, then set 3/2
+  // Save: #1 => priority 3 + today, rest => priority 2 + today, everyone else (open today/overdue) => 0
   async function savePrioritisation() {
     if (!userId) return;
     try {
-      const ids = prioDraft.map(t => t.id);
-
-      // 0) Move everything you’re prioritising into *today* so it shows up
-      if (ids.length > 0) {
-        await supabase
-          .from("tasks")
-          .update({ due_date: dayStartISO(dateISO) })
-          .in("id", ids);
-      }
-
-      // 1) Demote everything pending *in today window* to 0
+      // Demote ALL open (today + overdue) tasks on-screen to 0
       await supabase
         .from("tasks")
         .update({ priority: 0 })
         .eq("user_id", userId)
-        .gte("due_date", dayStartISO(dateISO))
-        .lt("due_date", nextDayStartISO(dateISO))
+        .lte("due_date", dateISO)
         .neq("status", "done");
 
-      // 2) Promote draft items
+      const ids = prioDraft.map(t => t.id);
       if (ids.length > 0) {
-        const [firstId, ...restIds] = ids;
-        await supabase.from("tasks").update({ priority: 3 }).eq("id", firstId);
+        const firstId = ids[0];
+        const restIds = ids.slice(1);
+
+        // First -> 3 (Top of Day) + move to today
+        await supabase.from("tasks").update({ priority: 3, due_date: dateISO }).eq("id", firstId);
+
+        // Rest -> 2 (Top Priorities) + move to today
         if (restIds.length > 0) {
-          await supabase.from("tasks").update({ priority: 2 }).in("id", restIds);
+          await supabase.from("tasks").update({ priority: 2, due_date: dateISO }).in("id", restIds);
         }
       }
 
@@ -626,10 +671,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const overdueCount = tasks.filter(isOverdueFn).length;
 
   const pendingToday = useMemo(
-    () => tasks.filter(t => t.status !== "done"), // visible list (today + overdue)
-    [tasks]
+    () => tasks.filter(t => t.due_date === dateISO && t.status !== "done"),
+    [tasks, dateISO]
   );
-  const showPrioritiseButton = !topOfDay && pendingToday.length > 0;
+  const showPrioritiseButton = !topOfDay && (pendingToday.length > 0 || overdueCount > 0);
 
   /* ===== Section helper ===== */
   function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode; }) {
@@ -745,20 +790,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 Prioritise Today’s Tasks
               </button>
             )}
-            {!topOfDay && !showPrioritiseButton && (
-              <button className="btn-soft" onClick={openChooseTop}>Choose</button>
-            )}
-            {topOfDay && (
-              <>
-                <span className="muted" style={{ display:"block", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth: "52vw" }}>
-                  {displayTitle(topOfDay)}
-                </span>
-                <button className="btn-soft" onClick={() => setTopPriorityOfDay(null)}>Clear</button>
-              </>
-            )}
           </div>
         </div>
-        {!topOfDay && <div className="muted" style={{ marginTop: 6 }}>Use <b>Prioritise</b> — the first item you confirm becomes Top of Day.</div>}
+        {!topOfDay && <div className="muted" style={{ marginTop: 6 }}>Use <b>Prioritise</b> — the first item you confirm becomes Top of Day (and moves to today).</div>}
+        {topOfDay && (
+          <div className="muted" style={{ marginTop: 6, wordBreak: "break-word" }}>
+            {displayTitle(topOfDay)}
+          </div>
+        )}
       </div>
 
       {/* Top Priorities */}
@@ -771,7 +810,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         }
       >
         {top.length === 0 ? (
-          <div className="muted">Nothing marked top priority for this day.</div>
+          <div className="muted">Nothing marked top priority (today or overdue).</div>
         ) : (
           <ul className="list">
             {top.map((t) => {
@@ -783,7 +822,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                     <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 600, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
-                        <span style={{ minWidth:0, overflow:"hidden", textOverflow:"ellipsis" }}>{displayTitle(t)}</span>
+                        <span style={{ minWidth:0 }}>{displayTitle(t)}</span>
                         {isTopOfDay && <span className="badge" title="Today’s Top Priority">Top of Day</span>}
                         {overdue && <span className="badge">Overdue</span>}
                         <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -822,7 +861,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                     <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
-                        <span style={{ minWidth:0, overflow:"hidden", textOverflow:"ellipsis" }}>{displayTitle(t)}</span>
+                        <span style={{ minWidth:0 }}>{displayTitle(t)}</span>
                         {overdue && <span className="badge">Overdue</span>}
                         {t.status !== "done" && (
                           <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => setTopPriorityOfDay(t.id)} title="Make this Today’s Top Priority">
@@ -885,7 +924,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-      {/* Bottom Tab Bar (legacy demo bar) */}
+      {/* Bottom Tab Bar */}
       <div style={{ position: "sticky", bottom: 0, zIndex: 55, background: "var(--bg)", padding: "8px 4px calc(8px + env(safe-area-inset-bottom,0))", borderTop: "1px solid var(--border)", width: "100%", maxWidth: "100%" }}>
         <div className="h-scroll">
           {[
@@ -910,12 +949,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
               Would you like to make another task your top priority for the rest of the day? No pressure.
             </div>
             {chooseCandidates.length === 0 ? (
-              <div className="muted">No other Top tasks available.</div>
+              <div className="muted">No other tasks available.</div>
             ) : (
               <ul className="list" style={{ marginTop: 8 }}>
                 {chooseCandidates.map((t) => (
                   <li key={t.id} className="item" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <div style={{ flex: 1, minWidth: 0, wordBreak: "break-word" }}>
                       {displayTitle(t)}
                     </div>
                     <button className="btn-primary" onClick={() => setTopPriorityOfDay(t.id)} style={{ borderRadius: 10 }}>
@@ -932,7 +971,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* Prioritisation Modal — arrows LEFT, text wraps */}
+      {/* Prioritisation Modal — arrows left, text wraps */}
       {prioritiseOpen && (
         <div
           role="dialog"
@@ -947,23 +986,22 @@ export default function TodayScreen({ externalDateISO }: Props) {
           >
             <div className="card" style={{ borderRadius: 0 }}>
               <h3 style={{ margin: 0 }}>Prioritise Today’s Tasks</h3>
-              <div className="muted">Use the ↑ / ↓ buttons. <b>#1 becomes Today’s Top Priority</b> when you confirm.</div>
+              <div className="muted">Use the ↑ / ↓ buttons. <b>#1 becomes Today’s Top Priority</b> and moves to today when you confirm.</div>
             </div>
 
             <div style={{ overflow: "auto", padding: 12 }}>
               {prioDraft.length === 0 ? (
-                <div className="card muted">No pending tasks.</div>
+                <div className="card muted">No open tasks (today/overdue).</div>
               ) : (
                 <ul className="list">
                   {prioDraft.map((t, i) => (
                     <li key={t.id} className="item" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      {/* Controls on LEFT so they're always visible on small screens */}
                       <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                         <button className="btn-soft" onClick={() => movePrioTask(i, -1)} disabled={i === 0} title="Move up">↑</button>
                         <button className="btn-soft" onClick={() => movePrioTask(i, +1)} disabled={i === prioDraft.length - 1} title="Move down">↓</button>
                       </div>
                       <div className="badge" aria-hidden style={{ minWidth: 28, justifyContent: "center", textAlign: "center" }}>{i + 1}</div>
-                      <div style={{ flex: 1, minWidth: 0, whiteSpace: "normal", overflowWrap: "anywhere", wordBreak: "break-word" }}>
+                      <div style={{ flex: 1, minWidth: 0, wordBreak: "break-word", whiteSpace: "normal" }}>
                         {displayTitle(t)}
                       </div>
                     </li>
