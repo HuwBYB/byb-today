@@ -422,14 +422,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
       // summary (from list)
       const doneToday = list.filter((t) => t.due_date === dateISO && t.status === "done").length;
       const pendingToday = list.filter((t) => t.due_date === dateISO && t.status !== "done").length;
-      const topToday = list.filter((t) => t.due_date === dateISO && (t.priority ?? 0) >= 2);
+      const topToday = list.filter((t) => (t.priority ?? 0) >= 2 && t.due_date === dateISO);
       const topDone = topToday.filter((t) => t.status === "done").length;
       const topTotal = topToday.length;
       const isWin = topDone >= 1 || doneToday >= 3;
       setSummary((s) => ({ ...s, doneToday, pendingToday, topDone, topTotal, isWin }));
 
-      // top of day for this date
-      setTopOfDay(topToday.find(t => (t.priority ?? 0) >= 3) || null);
+      // 🔧 FIX 1: recognise any priority=3 item as Top-of-Day (no strict date gate)
+      setTopOfDay(list.find(t => (t.priority ?? 0) >= 3) ?? null);
     } catch (e: any) {
       setErr(e.message || String(e));
       setTasks([]);
@@ -479,7 +479,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   async function loadAll() { await load(); await loadStreaks(); }
   useEffect(() => { if (userId && dateISO) loadAll(); }, [userId, dateISO]);
 
-  // Recompute greeting line when progress or name/missed changes
+  // Recompute greeting line
   useEffect(() => {
     setGreetLine(buildGreetingLine(missed, greetName, summary.doneToday, summary.pendingToday));
   }, [missed, greetName, summary.doneToday, summary.pendingToday]);
@@ -506,8 +506,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
         fireConfetti();
         toast.show(`Alfred: ${pick(ALFRED_LINES)}`);
 
-        // If Top-of-Day completed, offer to pick another from today's remaining top tasks
-        if ((t.priority ?? 0) >= 3 && t.due_date === dateISO) {
+        // If Top-of-Day completed, offer to pick another
+        if ((t.priority ?? 0) >= 3) {
           const cands = tasks
             .filter(x => x.id !== t.id && (x.priority ?? 0) >= 2 && x.status !== "done");
           if (cands.length > 0) {
@@ -592,21 +592,45 @@ export default function TodayScreen({ externalDateISO }: Props) {
   }
 
   /* ===== Prioritisation helpers ===== */
-  // Build from ALL open tasks (today + overdue), not just today
-  function openPrioritise() {
-    const openAny = tasks.filter(t => t.status !== "done"); // 'tasks' already = today + overdue
-    const sorted = [...openAny].sort((a, b) => {
-      const pa = a.priority ?? 0;
-      const pb = b.priority ?? 0;
-      if (pb !== pa) return pb - pa;   // 3,2,0 descending
-      // today before overdue (nice-to-have)
-      const ad = a.due_date === dateISO ? 0 : 1;
-      const bd = b.due_date === dateISO ? 0 : 1;
-      if (ad !== bd) return ad - bd;
-      return a.id - b.id;
-    });
-    setPrioDraft(sorted);
-    setPrioritiseOpen(true);
+  // 🔧 FIX 3: Build list from ALL open tasks (today + overdue + future)
+  async function openPrioritise() {
+    if (!userId) return;
+    setErr(null);
+    try {
+      const { data, error } = await supabase
+        .from("tasks")
+        .select("id,user_id,title,due_date,status,priority,source,goal_id,completed_at")
+        .eq("user_id", userId)
+        .neq("status", "done");
+      if (error) throw error;
+
+      const allOpen: Task[] = (data as Task[]).map(t => ({
+        ...t,
+        due_date: t.due_date ? t.due_date.slice(0,10) : null,
+      }));
+
+      const sorted = [...allOpen].sort((a, b) => {
+        const pa = a.priority ?? 0;
+        const pb = b.priority ?? 0;
+        if (pb !== pa) return pb - pa;
+
+        const rank = (t: Task) => {
+          if (!t.due_date) return 2;                            // undated after today/overdue
+          if (t.due_date === dateISO) return 0;                 // today first
+          if (fromISO(t.due_date) < fromISO(dateISO)) return 1; // overdue next
+          return 3;                                             // future last
+        };
+        const ra = rank(a), rb = rank(b);
+        if (ra !== rb) return ra - rb;
+
+        return a.id - b.id;
+      });
+
+      setPrioDraft(sorted);
+      setPrioritiseOpen(true);
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    }
   }
 
   // Move helper (index + dir = -1 up, +1 down)
@@ -622,30 +646,39 @@ export default function TodayScreen({ externalDateISO }: Props) {
     });
   }
 
-  // Save: #1 => priority 3 + today, rest => priority 2 + today, everyone else (open today/overdue) => 0
+  // 🔧 FIX 2: Save atomically, touching ONLY the tasks the user re-ordered
   async function savePrioritisation() {
     if (!userId) return;
     try {
-      // Demote ALL open (today + overdue) tasks on-screen to 0
+      const ids = prioDraft.map(t => t.id);
+      if (ids.length === 0) {
+        setPrioritiseOpen(false);
+        return;
+      }
+
+      const firstId = ids[0];
+      const restIds = ids.slice(1);
+
+      // Demote only the tasks in the draft (avoid clobbering other rows)
       await supabase
         .from("tasks")
         .update({ priority: 0 })
         .eq("user_id", userId)
-        .lte("due_date", dateISO)
+        .in("id", ids)
         .neq("status", "done");
 
-      const ids = prioDraft.map(t => t.id);
-      if (ids.length > 0) {
-        const firstId = ids[0];
-        const restIds = ids.slice(1);
+      // First -> 3 (Top-of-Day) + move to today
+      await supabase
+        .from("tasks")
+        .update({ priority: 3, due_date: dateISO })
+        .eq("id", firstId);
 
-        // First -> 3 (Top of Day) + move to today
-        await supabase.from("tasks").update({ priority: 3, due_date: dateISO }).eq("id", firstId);
-
-        // Rest -> 2 (Top Priorities) + move to today
-        if (restIds.length > 0) {
-          await supabase.from("tasks").update({ priority: 2, due_date: dateISO }).in("id", restIds);
-        }
+      // Rest -> 2 + move to today
+      if (restIds.length > 0) {
+        await supabase
+          .from("tasks")
+          .update({ priority: 2, due_date: dateISO })
+          .in("id", restIds);
       }
 
       setPrioritiseOpen(false);
@@ -813,7 +846,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
           <ul className="list">
             {top.map((t) => {
               const overdue = isOverdueFn(t);
-              const isTopOfDay = (t.priority ?? 0) >= 3 && t.due_date === dateISO;
+              // 🔧 FIX 1 in UI: priority 3 is Top-of-Day (no date gate here)
+              const isTopOfDay = (t.priority ?? 0) >= 3;
               return (
                 <li key={t.id} className="item">
                   <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
@@ -989,7 +1023,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
             <div style={{ overflow: "auto", padding: 12 }}>
               {prioDraft.length === 0 ? (
-                <div className="card muted">No open tasks (today/overdue).</div>
+                <div className="card muted">No open tasks (any date).</div>
               ) : (
                 <ul className="list">
                   {prioDraft.map((t, i) => (
