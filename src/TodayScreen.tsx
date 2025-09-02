@@ -587,16 +587,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 
-  function openChooseTop() {
-    const cands = tasks.filter(t =>
-      (t.priority ?? 0) >= 0 &&
-      t.status !== "done"
-    );
-    setChooseCandidates(cands);
-    setChooseTopOpen(true);
-  }
-
-  /* ===== Prioritisation helpers ===== */
+    /* ===== Prioritisation helpers ===== */
   // Build from ALL open tasks on the screen (today + overdue), not just today
   function openPrioritise() {
     const openAny = tasks.filter(t => t.status !== "done"); // 'tasks' already = today + overdue
@@ -1025,3 +1016,4 @@ export default function TodayScreen({ externalDateISO }: Props) {
     </div>
   );
 }
+
