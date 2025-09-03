@@ -163,11 +163,11 @@ export default function App() {
               style={{
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "space-between",
-                gap: 8
+                gap: 12,
+                padding: 12,
               }}
             >
-              {/* Left: date pill (opens native date picker) */}
+              {/* Left: date pill (fixed left, no wrap) */}
               <button
                 onClick={openPicker}
                 title="Change date"
@@ -180,13 +180,30 @@ export default function App() {
                   border: "1px solid var(--border)",
                   background: "#fff",
                   cursor: "pointer",
-                  flex: "0 1 auto"
+                  flex: "0 0 auto",
+                  maxWidth: "60vw",
                 }}
               >
-                <span className="muted">{formatDMYFromISO(selectedISO)}</span>
+                <span className="muted" style={{ whiteSpace: "nowrap", lineHeight: 1 }}>
+                  {formatDMYFromISO(selectedISO)}
+                </span>
               </button>
 
-              {/* Hidden input powers the picker and state */}
+              {/* Flex spacer pushes Today to the far right */}
+              <div style={{ flex: 1 }} />
+
+              {/* Right: Today button (fixed right) */}
+              <div className="header-actions" style={{ display: "flex", gap: 8, flex: "0 0 auto" }}>
+                <button
+                  className="btn-soft"
+                  onClick={() => { setExternalDateISO(undefined); setTab("today"); }}
+                  style={{ padding: "10px 14px", borderRadius: 12, whiteSpace: "nowrap" }}
+                >
+                  Today
+                </button>
+              </div>
+
+              {/* Hidden input powers the native picker and state (kept at end of header for accessibility) */}
               <input
                 ref={dateInputRef}
                 type="date"
@@ -195,13 +212,6 @@ export default function App() {
                 style={{ position: "absolute", opacity: 0, width: 0, height: 0, pointerEvents: "none" }}
                 aria-hidden
               />
-
-              {/* Right: Today button (sign out removed) */}
-              <div className="header-actions" style={{ display: "flex", gap: 8 }}>
-                <button className="btn-soft" onClick={() => { setExternalDateISO(undefined); setTab("today"); }}>
-                  Today
-                </button>
-              </div>
             </div>
 
             {/* Active route */}
