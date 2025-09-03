@@ -169,9 +169,14 @@ export default function App() {
             {/* Top header */}
             <div
               className="card header"
-              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8
+              }}
             >
-              {/* Clickable pill that shows the date and opens the native picker */}
+              {/* Left: date pill (opens native date picker) */}
               <button
                 onClick={openPicker}
                 title="Change date"
@@ -200,9 +205,9 @@ export default function App() {
                 aria-hidden
               />
 
+              {/* Right: Today button (sign out removed) */}
               <div className="header-actions" style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => setExternalDateISO(undefined)}>Today</button>
-                <button onClick={() => supabase.auth.signOut()}>Sign out</button>
+                <button className="btn-soft" onClick={() => setExternalDateISO(undefined)}>Today</button>
               </div>
             </div>
 
