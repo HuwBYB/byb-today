@@ -730,23 +730,11 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-      {/* Bottom Tab Bar */}
-      <div style={{ position: "sticky", bottom: 0, zIndex: 55, background: "var(--bg)", padding: "8px 4px calc(8px + env(safe-area-inset-bottom,0))", borderTop: "1px solid var(--border)", width: "100%", maxWidth: "100%" }}>
-        <div className="h-scroll">
-          {[
-            { key: "today", label: "Today" },
-            { key: "calendar", label: "Calendar" },
-            { key: "goals", label: "Goals" },
-            { key: "vision", label: "Vision" },
-            { key: "gratitude", label: "Gratitude" }
-          ].map((t) => (
-            <button key={t.key} className="btn-soft" style={{ borderRadius: 999, padding: "10px 14px", flex: "0 0 auto" }}>{t.label}</button>
-          ))}
-        </div>
-      </div>
+     
 
       {/* Toast node */}
       {toast.node}
     </div>
   );
 }
+
