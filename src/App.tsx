@@ -1,5 +1,5 @@
 // src/App.tsx
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AuthGate from "./AuthGate";
 import { supabase } from "./lib/supabaseClient";
 
@@ -109,15 +109,6 @@ export default function App() {
   }
   async function handleOnboardingDone() { if (userId) await loadProfile(userId); }
 
-  /* ----- bottom bar ----- */
-  const bottomTabs = useMemo(
-    () => [
-      { key: "today", label: "Today", icon: "✅" },
-      { key: "menu",  label: "Menu",  icon: "🧭" },
-    ] as const,
-    []
-  );
-
   /* ----- routing ----- */
   function renderTab() {
     switch (tab) {
@@ -156,8 +147,8 @@ export default function App() {
         style={{
           display: "grid",
           gap: 12,
-          // keep content above the fixed bottom nav
-          paddingBottom: "calc(80px + env(safe-area-inset-bottom, 0))",
+          // no fixed bottom nav → no extra padding needed
+          paddingBottom: "env(safe-area-inset-bottom, 0)",
         }}
       >
         {profileLoading ? (
@@ -207,60 +198,14 @@ export default function App() {
 
               {/* Right: Today button (sign out removed) */}
               <div className="header-actions" style={{ display: "flex", gap: 8 }}>
-                <button className="btn-soft" onClick={() => setExternalDateISO(undefined)}>Today</button>
+                <button className="btn-soft" onClick={() => { setExternalDateISO(undefined); setTab("today"); }}>
+                  Today
+                </button>
               </div>
             </div>
 
             {/* Active route */}
             <div>{renderTab()}</div>
-
-            {/* Bottom bar (two buttons, fixed to viewport bottom) */}
-            <nav
-              className="tabbar"
-              aria-label="Primary"
-              style={{
-                position: "fixed",
-                left: 0,
-                right: 0,
-                bottom: 0,
-                zIndex: 1000,
-                background: "var(--bg)",
-                borderTop: "1px solid var(--border)",
-              }}
-            >
-              <div
-                className="tabbar-inner"
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 8,
-                  padding: "8px 8px calc(8px + env(safe-area-inset-bottom,0))",
-                  maxWidth: "100vw",
-                }}
-              >
-                {bottomTabs.map((t) => (
-                  <button
-                    key={t.key}
-                    className="tab-btn btn-soft"
-                    data-active={tab === (t.key as Tab)}
-                    onClick={() => setTab(t.key as Tab)}
-                    title={t.label}
-                    style={{
-                      borderRadius: 999,
-                      padding: "10px 14px",
-                      display: "flex",
-                      gap: 8,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: tab === (t.key as Tab) ? 700 : 500,
-                    }}
-                  >
-                    <span className="icon" aria-hidden>{t.icon}</span>
-                    <span className="label">{t.label}</span>
-                  </button>
-                ))}
-              </div>
-            </nav>
           </>
         )}
       </div>
