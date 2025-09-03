@@ -45,6 +45,7 @@ function addDays(iso: string, n: number) {
   d.setDate(d.getDate() + n);
   return toISO(d);
 }
+const dateOnly = (s?: string | null) => (s ? s.slice(0, 10) : null);
 
 /* ===== (Optional) Repeat helpers kept for Add ===== */
 type Repeat = "" | "daily" | "weekdays" | "weekly" | "monthly" | "annually";
@@ -368,9 +369,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
       const normalized: Task[] = raw.map(t => ({
         ...t,
         due_date: t.due_date ? t.due_date.slice(0, 10) : null,
+        completed_at: t.completed_at, // keep full ISO; we'll slice when comparing
       }));
 
-      // STRICT client-side filter: only (due today) OR (overdue & still open)
+      // STRICT client-side filter for visible lists: only (due today) OR (overdue & still open)
       const list = normalized.filter(t =>
         t.due_date !== null &&
         (
@@ -404,9 +406,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
         setGoalMap({});
       }
 
-      // Summary
-      const doneToday = list.filter(t => t.due_date === dateISO && t.status === "done").length;
-      const pendingToday = list.filter(t => t.due_date === dateISO && t.status !== "done").length;
+      // ===== Summary counts =====
+      // 1) doneToday counts ANY task completed on the selected day (by completed_at),
+      //    even if it was originally overdue. This fixes the old glitch.
+      const doneToday = normalized.filter(t => t.status === "done" && dateOnly(t.completed_at) === dateISO).length;
+
+      // 2) pendingToday is tasks due today and not done (regardless of when they were created)
+      const pendingToday = normalized.filter(t => t.due_date === dateISO && t.status !== "done").length;
+
       const isWin = doneToday >= 3;
       setSummary(s => ({ ...s, doneToday, pendingToday, isWin }));
     } catch (e: any) {
