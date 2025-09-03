@@ -28,7 +28,6 @@ type ProfileRow = {
   onboarding_done: boolean | null;
 };
 
-/* LocalStorage fallback */
 const LS_DONE = "byb:onboarding_done";
 
 /* Tabs (route keys) */
@@ -46,7 +45,6 @@ function todayISO() {
   return `${y}-${m}-${dd}`;
 }
 function formatDMYFromISO(iso: string) {
-  // iso = YYYY-MM-DD → DD/MM/YYYY
   const [y, m, d] = iso.split("-");
   if (!y || !m || !d) return iso;
   return `${d}/${m}/${y}`;
@@ -147,8 +145,8 @@ export default function App() {
         style={{
           display: "grid",
           gap: 12,
-          // no fixed bottom nav → no extra padding needed
-          paddingBottom: "env(safe-area-inset-bottom, 0)",
+          // leave space so content doesn't sit under the bottom Menu button
+          paddingBottom: "calc(84px + env(safe-area-inset-bottom, 0))",
         }}
       >
         {profileLoading ? (
@@ -157,7 +155,7 @@ export default function App() {
           <OnboardingScreen onDone={handleOnboardingDone} />
         ) : (
           <>
-            {/* Top header */}
+            {/* Top header: date left, Today right */}
             <div
               className="card header"
               style={{
@@ -167,7 +165,7 @@ export default function App() {
                 padding: 12,
               }}
             >
-              {/* Left: date pill (fixed left, no wrap) */}
+              {/* Left: date pill (no wrap) */}
               <button
                 onClick={openPicker}
                 title="Change date"
@@ -189,10 +187,10 @@ export default function App() {
                 </span>
               </button>
 
-              {/* Flex spacer pushes Today to the far right */}
+              {/* spacer pushes Today to far right */}
               <div style={{ flex: 1 }} />
 
-              {/* Right: Today button (fixed right) */}
+              {/* Right: Today button */}
               <div className="header-actions" style={{ display: "flex", gap: 8, flex: "0 0 auto" }}>
                 <button
                   className="btn-soft"
@@ -203,7 +201,7 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Hidden input powers the native picker and state (kept at end of header for accessibility) */}
+              {/* Hidden date input (native picker) */}
               <input
                 ref={dateInputRef}
                 type="date"
@@ -216,6 +214,43 @@ export default function App() {
 
             {/* Active route */}
             <div>{renderTab()}</div>
+
+            {/* Bottom: single Menu button (centered, fixed) */}
+            <nav
+              aria-label="Menu"
+              style={{
+                position: "fixed",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                zIndex: 1000,
+                background: "transparent",
+                pointerEvents: "none", // so only the button is interactive
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  padding: "8px 8px calc(12px + env(safe-area-inset-bottom,0))",
+                }}
+              >
+                <button
+                  onClick={() => setTab("menu")}
+                  className="btn-soft"
+                  style={{
+                    pointerEvents: "auto",
+                    borderRadius: 999,
+                    padding: "12px 18px",
+                    boxShadow: "0 8px 24px rgba(0,0,0,.08)",
+                    fontWeight: 700,
+                  }}
+                  title="Open Menu"
+                >
+                  🧭 Menu
+                </button>
+              </div>
+            </nav>
           </>
         )}
       </div>
