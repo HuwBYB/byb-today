@@ -1,6 +1,7 @@
 // src/MenuScreen.tsx
 type MenuItem = {
   key:
+    | "today"
     | "calendar"
     | "goals"
     | "vision"
@@ -19,6 +20,7 @@ type MenuItem = {
 };
 
 const ITEMS: MenuItem[] = [
+  { key: "today",        label: "Today Page",      icon: "✅" },
   { key: "calendar",     label: "Calendar",        icon: "🗓️" },
   { key: "goals",        label: "Goals",           icon: "🎯" },
   { key: "vision",       label: "Vision Board",    icon: "🌈" },
@@ -40,20 +42,30 @@ export default function MenuScreen({
 }) {
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      <div className="card" style={{ borderLeft: "6px solid #eef2ff" }}>
-        <h2 style={{ margin: 0, fontSize: 18 }}>Menu</h2>
-        <div className="muted">Everything in one place.</div>
+      {/* Today Page card right at the top */}
+      <div
+        className="card"
+        style={{
+          borderLeft: "6px solid #eef2ff",
+          padding: "16px",
+          cursor: "pointer",
+        }}
+        onClick={() => onOpenTab("today")}
+      >
+        <h2 style={{ margin: 0, fontSize: 18 }}>Today Page</h2>
+        <div className="muted">Jump straight back to your main view.</div>
       </div>
 
+      {/* Rest of the menu */}
       <div className="card" style={{ padding: 12 }}>
         <div
           style={{
             display: "grid",
             gap: 12,
-            gridTemplateColumns: "repeat(2, minmax(0, 1fr))", // <-- fixed two columns
+            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
           }}
         >
-          {ITEMS.map((it) => (
+          {ITEMS.filter((it) => it.key !== "today").map((it) => (
             <button
               key={it.key}
               onClick={() => onOpenTab(it.key)}
