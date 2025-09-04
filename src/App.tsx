@@ -140,7 +140,7 @@ export default function App() {
           position: "sticky",
           top: "env(safe-area-inset-top, 0)",
           zIndex: 1000,
-          background: "rgba(202, 234, 248, 1)", // pale blue fallback behind image
+          background: "#D7F0FA", // pale blue fallback behind image
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
