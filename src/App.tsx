@@ -44,11 +44,6 @@ function todayISO() {
   const dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
-function formatDMYFromISO(iso: string) {
-  const [y, m, d] = iso.split("-");
-  if (!y || !m || !d) return iso;
-  return `${d}/${m}/${y}`;
-}
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("today");
@@ -128,25 +123,66 @@ export default function App() {
     }
   }
 
-  // Selected date used by the header (fallback to today if none picked)
-  const selectedISO = externalDateISO ?? todayISO();
+  // Optional: keep a hidden date input for other screens that might read externalDateISO later.
   const dateInputRef = useRef<HTMLInputElement>(null);
-  const openPicker = () => {
-    const el = dateInputRef.current;
-    // @ts-ignore showPicker is supported in modern Chromium
-    if (el?.showPicker) el.showPicker();
-    else el?.click();
-  };
+  const selectedISO = externalDateISO ?? todayISO();
 
   return (
     <AuthGate>
+      {/* Sticky banner — always visible, opens the Menu */}
+      <div
+        role="button"
+        aria-label="Open menu"
+        onClick={() => setTab("menu")}
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setTab("menu"); }}
+        style={{
+          position: "sticky",
+          top: "env(safe-area-inset-top, 0)",
+          zIndex: 1000,
+          background: "rgba(202, 234, 248, 1)", // pale blue fallback behind image
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "8px 12px",
+          borderBottom: "1px solid var(--border)",
+          cursor: "pointer",
+        }}
+      >
+        {/* The banner asset lives in /public as BannerMenu */}
+        <img
+          src="/BannerMenu"
+          alt="Best You Blueprint — open menu"
+          style={{
+            height: 56,          // nice, compact top bar
+            width: "auto",
+            maxWidth: "100%",
+            objectFit: "contain",
+          }}
+        />
+      </div>
+
+      {/* Hidden date input (kept for future use; not visible) */}
+      <input
+        ref={dateInputRef}
+        type="date"
+        value={selectedISO}
+        onChange={(e) => setExternalDateISO(e.target.value || undefined)}
+        style={{ position: "absolute", opacity: 0, width: 0, height: 0, pointerEvents: "none" }}
+        aria-hidden
+      />
+
+      {/* App body */}
       <div
         className="app-shell"
         style={{
           display: "grid",
           gap: 12,
-          // leave space so content doesn't sit under the bottom Menu button
-          paddingBottom: "calc(84px + env(safe-area-inset-bottom, 0))",
+          padding: "12px",
+          // small top pad so content never hugs the banner edge on scroll bounce
+          paddingTop: 12,
+          // no bottom nav anymore
+          paddingBottom: "calc(12px + env(safe-area-inset-bottom, 0))",
         }}
       >
         {profileLoading ? (
@@ -154,104 +190,7 @@ export default function App() {
         ) : showOnboarding() ? (
           <OnboardingScreen onDone={handleOnboardingDone} />
         ) : (
-          <>
-            {/* Top header: date left, Today right */}
-            <div
-              className="card header"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: 12,
-              }}
-            >
-              {/* Left: date pill (no wrap) */}
-              <button
-                onClick={openPicker}
-                title="Change date"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  border: "1px solid var(--border)",
-                  background: "#fff",
-                  cursor: "pointer",
-                  flex: "0 0 auto",
-                  maxWidth: "60vw",
-                }}
-              >
-                <span className="muted" style={{ whiteSpace: "nowrap", lineHeight: 1 }}>
-                  {formatDMYFromISO(selectedISO)}
-                </span>
-              </button>
-
-              {/* spacer pushes Today to far right */}
-              <div style={{ flex: 1 }} />
-
-              {/* Right: Today button */}
-              <div className="header-actions" style={{ display: "flex", gap: 8, flex: "0 0 auto" }}>
-                <button
-                  className="btn-soft"
-                  onClick={() => { setExternalDateISO(undefined); setTab("today"); }}
-                  style={{ padding: "10px 14px", borderRadius: 12, whiteSpace: "nowrap" }}
-                >
-                  Today
-                </button>
-              </div>
-
-              {/* Hidden date input (native picker) */}
-              <input
-                ref={dateInputRef}
-                type="date"
-                value={selectedISO}
-                onChange={(e) => setExternalDateISO(e.target.value || undefined)}
-                style={{ position: "absolute", opacity: 0, width: 0, height: 0, pointerEvents: "none" }}
-                aria-hidden
-              />
-            </div>
-
-            {/* Active route */}
-            <div>{renderTab()}</div>
-
-            {/* Bottom: single Menu button (centered, fixed) */}
-            <nav
-              aria-label="Menu"
-              style={{
-                position: "fixed",
-                left: 0,
-                right: 0,
-                bottom: 0,
-                zIndex: 1000,
-                background: "transparent",
-                pointerEvents: "none", // so only the button is interactive
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "center",
-                  padding: "8px 8px calc(12px + env(safe-area-inset-bottom,0))",
-                }}
-              >
-                <button
-                  onClick={() => setTab("menu")}
-                  className="btn-soft"
-                  style={{
-                    pointerEvents: "auto",
-                    borderRadius: 999,
-                    padding: "12px 18px",
-                    boxShadow: "0 8px 24px rgba(0,0,0,.08)",
-                    fontWeight: 700,
-                  }}
-                  title="Open Menu"
-                >
-                  🧭 Menu
-                </button>
-              </div>
-            </nav>
-          </>
+          <div>{renderTab()}</div>
         )}
       </div>
     </AuthGate>
