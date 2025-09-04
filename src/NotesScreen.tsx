@@ -95,10 +95,10 @@ function Modal({
 function NotesHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
-      <p><em>Notes keeps ideas, meetings, drafts, and plans in one place — with fast search so you can act on them.</em></p>
+      <p><em>Notes / Journal keeps ideas, meetings, drafts, and reflections in one place — with fast search so you can act on them.</em></p>
 
       <h4 style={{ margin: 0 }}>Quick capture</h4>
-      <p>Use the bar at the top to dump thoughts to your Inbox — no friction.</p>
+      <p>Use the bar at the top of the sidebar to dump thoughts or journal entries to your Inbox/Journal — no friction.</p>
 
       <h4 style={{ margin: 0 }}>Search like a pro</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
@@ -114,6 +114,10 @@ function NotesHelpContent() {
         <li><b>/</b> focus search, <b>n</b> new note</li>
         <li><b>Ctrl/Cmd + Enter</b> save & close</li>
       </ul>
+
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e5e7eb" }}>
+        <strong>Coming soon (V2): Meeting Mode.</strong> Start/stop live audio capture, transcribe with on-device Whisper, and auto-summarise action items.
+      </div>
     </div>
   );
 }
@@ -129,7 +133,7 @@ export default function NotesScreen() {
   // quick capture
   const [qcText, setQcText] = useState("");
   const [qcPinned, setQcPinned] = useState(false);
-  const [qcFolder, setQcFolder] = useState<string>("Inbox");
+  const [qcFolder, setQcFolder] = useState<string>("Journal");
 
   // active note draft
   const [title, setTitle] = useState("");
@@ -424,7 +428,7 @@ export default function NotesScreen() {
     if (id) {
       setQcText("");
       setQcPinned(false);
-      setQcFolder("Inbox");
+      setQcFolder("Journal");
     }
   }
 
@@ -466,7 +470,8 @@ export default function NotesScreen() {
             >?</span>
           )}
         </button>
-        <h1 style={{ margin: 0 }}>Notes</h1>
+        <h1 style={{ margin: 0 }}>Notes / Journal</h1>
+        <div className="muted" style={{ marginTop: 4 }}>Capture ideas, plan work, and reflect daily.</div>
       </div>
 
       <div className="container">
@@ -478,7 +483,7 @@ export default function NotesScreen() {
               <div className="section-title">Quick capture</div>
               <textarea
                 rows={3}
-                placeholder="Jot it down… (hashtags like #idea work too)"
+                placeholder="New journal entry or note… (hashtags like #idea work too)"
                 value={qcText}
                 onChange={(e)=>setQcText(e.target.value)}
               />
@@ -489,7 +494,7 @@ export default function NotesScreen() {
                 </label>
                 <label style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
                   Folder
-                  <input value={qcFolder} onChange={e=>setQcFolder(e.target.value)} style={{ width:140 }} placeholder="Inbox" />
+                  <input value={qcFolder} onChange={e=>setQcFolder(e.target.value)} style={{ width:140 }} placeholder="Journal" />
                 </label>
                 <button className="btn-primary" onClick={quickCapture} style={{ borderRadius:8 }}>Add</button>
               </div>
@@ -602,14 +607,14 @@ export default function NotesScreen() {
                 <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
                   <input
                     type="text"
-                    placeholder="Title"
+                    placeholder="Title (or leave blank for journal-style)"
                     value={title}
                     onChange={e=>setTitle(e.target.value)}
                     style={{ flex:"1 1 240px", minWidth:0 }}
                   />
                   <input
                     type="text"
-                    placeholder="Folder (e.g., Work, Personal)"
+                    placeholder="Folder (e.g., Journal, Work, Personal)"
                     value={folder}
                     onChange={e=>setFolder(e.target.value)}
                     style={{ width:220, minWidth:0 }}
@@ -618,7 +623,7 @@ export default function NotesScreen() {
 
                 <textarea
                   rows={16}
-                  placeholder="Write your note… Use [[Wiki Links]] to connect notes. Inline #tags are automatically collected."
+                  placeholder="Write your note or journal entry… Use [[Wiki Links]] to connect notes. Inline #tags are automatically collected."
                   value={content}
                   onChange={e=>setContent(e.target.value)}
                   style={{ width:"100%", minHeight:260 }}
@@ -693,7 +698,7 @@ export default function NotesScreen() {
       </div>
 
       {/* Help modal */}
-      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Notes — Help">
+      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Notes / Journal — Help">
         <div style={{ display: "flex", gap: 16 }}>
           {imgOk && <img src={NOTES_ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
           <div style={{ flex: 1 }}>
