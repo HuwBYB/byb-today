@@ -1,3 +1,4 @@
+// src/BigGoalWizard.tsx
 import { useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
@@ -93,8 +94,9 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         .single();
       if (gerr) throw gerr;
 
-      // 2) seed tasks (Top Priorities) — monthly, weekly, daily + milestones
-      const start = fromISO(startDate), end = fromISO(targetDate);
+      // 2) seed tasks — ONLY FIRST HALF (up to halfway date inclusive)
+      const start = fromISO(startDate);
+      const end   = fromISO(targetDate);
       if (end < start) throw new Error("Target date is before start date.");
 
       const tasks: any[] = [];
@@ -127,10 +129,15 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         });
       }
 
-      // Monthly — start next month, same DOM
+      // helper clamp for first half
+      const halfISO = computedHalfDate || targetDate;
+      const half = fromISO(halfISO);
+      const withinFirstHalf = (d: Date) => d <= half;
+
+      // Monthly — first half only
       if (monthlyCommit.trim()) {
         let d = addMonthsClamped(start, 1, start.getDate());
-        while (d <= end) {
+        while (withinFirstHalf(d)) {
           tasks.push({
             user_id:userId,
             goal_id: goal.id,
@@ -145,10 +152,10 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         }
       }
 
-      // Weekly — start next week (same weekday)
+      // Weekly — first half only
       if (weeklyCommit.trim()) {
         let d = new Date(start); d.setDate(d.getDate() + 7);
-        while (d <= end) {
+        while (withinFirstHalf(d)) {
           tasks.push({
             user_id:userId,
             goal_id: goal.id,
@@ -163,10 +170,10 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         }
       }
 
-      // Daily — from today (or future start) through end
+      // Daily — first half only
       if (dailyCommit.trim()) {
         let d = clampDay(new Date(Math.max(Date.now(), start.getTime())));
-        while (d <= end) {
+        while (withinFirstHalf(d)) {
           tasks.push({
             user_id:userId,
             goal_id: goal.id,
@@ -190,7 +197,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
 
       onCreated?.();
       onClose?.();
-      alert(`Big goal created! Seeded ${tasks.length} item(s).`);
+      alert(`Big goal created! Seeded ${tasks.length} item(s) for the first half.`);
     } catch (e:any) {
       setErr(e.message || String(e));
     } finally {
@@ -255,7 +262,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         <label>
           <div className="muted">Daily commitment (optional)</div>
           <input value={dailyCommit} onChange={e=>setDailyCommit(e.target.value)} placeholder="e.g., Call or email 15 people" />
-          <div className="muted" style={{ marginTop:6 }}>Seeds every day from today (or future start) through target date.</div>
+          <div className="muted" style={{ marginTop:6 }}>Seeds each day up to the halfway milestone.</div>
         </label>
 
         {err && <div style={{ color: "red" }}>{err}</div>}
