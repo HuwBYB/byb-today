@@ -1,5 +1,5 @@
 // src/BigGoalWizard.tsx
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* -------- categories + colours (match DB constraint) --------
@@ -12,7 +12,7 @@ const CATS = [
   { key: "financial", label: "Finance",   color: "#f59e0b" }, // amber (stored as 'financial')
   { key: "other",     label: "Other",     color: "#6b7280" }, // gray
 ] as const;
-type AllowedCategory = typeof CATS[number]["key"]; // 'personal'|'health'|'career'|'financial'|'other'
+type AllowedCategory = typeof CATS[number]["key"];
 const colorOf = (k: AllowedCategory) => CATS.find(c => c.key === k)?.color || "#6b7280";
 
 /* -------- date helpers (local) -------- */
@@ -36,22 +36,40 @@ function addMonthsClamped(base: Date, months: number, anchorDay?: number) {
   return new Date(first.getFullYear(), first.getMonth(), Math.min(anchor, ld));
 }
 
-/* -------- props (optional so parent can pass or not) -------- */
+/* -------- props -------- */
 export type BigGoalWizardProps = {
   onClose?: () => void;
   onCreated?: () => void;
 };
 
+/* -------- steps -------- */
+type StepKey =
+  | "title"
+  | "category"
+  | "dates"
+  | "halfway"
+  | "monthly"
+  | "weekly"
+  | "daily"
+  | "review";
+
+const STEP_ORDER: StepKey[] = ["title","category","dates","halfway","monthly","weekly","daily","review"];
+
 export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps) {
   const todayISO = useMemo(() => toISO(new Date()), []);
+  const [step, setStep] = useState<StepKey>("title");
+
+  // form state
   const [title, setTitle] = useState("");
-  const [category, setCategory] = useState<AllowedCategory>("other"); // matches DB
+  const [category, setCategory] = useState<AllowedCategory>("other");
   const [startDate, setStartDate] = useState(todayISO);
   const [targetDate, setTargetDate] = useState("");
   const [halfwayNote, setHalfwayNote] = useState("");
   const [monthlyCommit, setMonthlyCommit] = useState("");
   const [weeklyCommit, setWeeklyCommit] = useState("");
   const [dailyCommit, setDailyCommit] = useState("");
+
+  // ux / system
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -64,6 +82,45 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
     if (b < a) return "";
     return toISO(new Date((a.getTime() + b.getTime()) / 2));
   }, [startDate, targetDate]);
+
+  const stepIndex = STEP_ORDER.indexOf(step);
+  const progressPct = ((stepIndex + 1) / STEP_ORDER.length) * 100;
+
+  function goNext() {
+    setErr(null);
+    const idx = STEP_ORDER.indexOf(step);
+    const next = STEP_ORDER[idx + 1];
+    if (!next) return;
+    // light validation on required steps
+    if (step === "title" && !title.trim()) { setErr("Give your goal a name you’re proud of."); return; }
+    if (step === "dates") {
+      if (!targetDate) { setErr("Pick your target date."); return; }
+      const a = fromISO(startDate), b = fromISO(targetDate);
+      if (b < a) { setErr("Target must be after the start."); return; }
+    }
+    setStep(next);
+  }
+  function goBack() {
+    setErr(null);
+    const idx = STEP_ORDER.indexOf(step);
+    const prev = STEP_ORDER[idx - 1];
+    if (prev) setStep(prev);
+  }
+
+  // Enter-to-advance on simple steps
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Enter") {
+        if (["title","halfway","monthly","weekly","daily"].includes(step)) {
+          e.preventDefault();
+          goNext();
+        }
+      }
+      if (e.key === "Escape") onClose?.();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [step, title, halfwayNote, monthlyCommit, weeklyCommit, dailyCommit]);
 
   async function create() {
     setErr(null);
@@ -197,7 +254,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
 
       onCreated?.();
       onClose?.();
-      alert(`Big goal created! Seeded ${tasks.length} item(s) for the first half.`);
+      alert(`🔥 Big goal created! Seeded ${tasks.length} item(s) for the first half.`);
     } catch (e:any) {
       setErr(e.message || String(e));
     } finally {
@@ -205,73 +262,304 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
     }
   }
 
-  return (
-    <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 16, background: "#fff" }}>
-      <h2 style={{ fontSize: 18, marginBottom: 8 }}>Create a Big Goal (guided)</h2>
+  /* ---------------------- UI Building Blocks ---------------------- */
 
-      <div style={{ display: "grid", gap: 10 }}>
-        {/* title */}
-        <label>
-          <div className="muted">Big goal title</div>
-          <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g., Get 30 new customers" />
-        </label>
+  const Header = (
+    <div style={{ display:"grid", gap:8 }}>
+      <div style={{ height: 8, background: "#eef2ff", borderRadius: 999, overflow: "hidden" }}>
+        <div style={{ width: `${progressPct}%`, height: "100%", background: "#6d28d9", transition: "width 300ms ease" }} />
+      </div>
+      <div className="muted" style={{ display:"flex", justifyContent:"space-between", fontSize: 12 }}>
+        <span>Step {stepIndex + 1} of {STEP_ORDER.length}</span>
+        <span>{Math.round(progressPct)}%</span>
+      </div>
+    </div>
+  );
 
-        {/* category */}
-        <label>
-          <div className="muted">Category</div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <select value={category} onChange={e=>setCategory(e.target.value as AllowedCategory)}>
-              {CATS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
-            </select>
-            <span title="Category color" style={{ display:"inline-block", width:18, height:18, borderRadius:999, background:colorOf(category), border:"1px solid #ccc" }} />
+  function Nav({ showSkip }: { showSkip?: boolean }) {
+    return (
+      <div style={{ display:"flex", gap:8, marginTop:16 }}>
+        <button onClick={goBack} disabled={step === "title" || busy}>Back</button>
+        <div style={{ flex: 1 }} />
+        {showSkip && <button onClick={goNext} disabled={busy}>Skip</button>}
+        {step !== "review" ? (
+          <button className="btn-primary" onClick={goNext} disabled={busy} style={{ borderRadius:8 }}>
+            Next →
+          </button>
+        ) : (
+          <button className="btn-primary" onClick={create} disabled={busy} style={{ borderRadius:8 }}>
+            {busy ? "Creating…" : "Create Big Goal"}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+    return (
+      <div
+        className="card"
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 16,
+          padding: 16,
+          background: "#fff",
+          boxShadow: "0 10px 30px rgba(109,40,217,0.06)",
+          animation: "fadeIn 220ms ease",
+        }}
+      >
+        <h2 style={{ margin: 0, fontSize: 20 }}>{title}</h2>
+        {subtitle && <div className="muted" style={{ marginTop: 4 }}>{subtitle}</div>}
+        <div style={{ marginTop: 12 }}>{children}</div>
+      </div>
+    );
+  }
+
+  /* ----------------------------- Steps ----------------------------- */
+
+  function StepTitle() {
+    return (
+      <Card
+        title="Name your Big Goal"
+        subtitle="Make it inspiring and specific — this is your North Star."
+      >
+        <input
+          autoFocus
+          value={title}
+          onChange={e=>setTitle(e.target.value)}
+          placeholder="e.g., Grow revenue to £25k/mo"
+          style={{ width:"100%" }}
+        />
+        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+          Tip: Start with a verb — “grow”, “launch”, “run”, “write”.
+        </div>
+        <Nav />
+      </Card>
+    );
+  }
+
+  function StepCategory() {
+    return (
+      <Card
+        title="Which area of life?"
+        subtitle="Helps keep your goals balanced."
+      >
+        <div style={{ display:"grid", gap:8 }}>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(120px,1fr))", gap:8 }}>
+            {CATS.map(c => (
+              <button
+                key={c.key}
+                onClick={() => setCategory(c.key)}
+                className="btn-soft"
+                style={{
+                  padding:12,
+                  borderRadius:12,
+                  border: category === c.key ? `2px solid ${c.color}` : "1px solid var(--border)",
+                  boxShadow: category === c.key ? "0 0 0 4px rgba(0,0,0,0.03)" : "none",
+                  display:"flex",
+                  alignItems:"center",
+                  gap:8,
+                  justifyContent:"center",
+                  fontWeight: category === c.key ? 700 : 500,
+                }}
+              >
+                <span style={{ width:12, height:12, borderRadius:999, background:c.color }} />
+                {c.label}
+              </button>
+            ))}
           </div>
-        </label>
+          <Nav />
+        </div>
+      </Card>
+    );
+  }
 
-        {/* dates */}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <label style={{ flex: 1, minWidth: 220 }}>
+  function StepDates() {
+    return (
+      <Card
+        title="When will you start and finish?"
+        subtitle="Set your start and target dates. We’ll calculate the halfway point."
+      >
+        <div style={{ display:"grid", gap:12 }}>
+          <label>
             <div className="muted">Start date</div>
             <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} />
           </label>
-          <label style={{ flex: 1, minWidth: 220 }}>
+          <label>
             <div className="muted">Target date</div>
             <input type="date" value={targetDate} onChange={e=>setTargetDate(e.target.value)} />
           </label>
+
+          {targetDate && computedHalfDate && (
+            <div
+              style={{
+                marginTop:6,
+                padding:10,
+                borderRadius:10,
+                border:"1px dashed #c084fc",
+                background:"#faf5ff",
+                color:"#4c1d95"
+              }}
+            >
+              Halfway milestone: <b>{computedHalfDate}</b>
+            </div>
+          )}
+          {err && <div style={{ color:"crimson" }}>{err}</div>}
+          <Nav />
         </div>
+      </Card>
+    );
+  }
 
-        {/* halfway note */}
-        <label>
-          <div className="muted">How will you know you’re halfway?</div>
-          <input value={halfwayNote} onChange={e=>setHalfwayNote(e.target.value)} placeholder="e.g., 15 customers or £X MRR" />
-          {computedHalfDate && <div className="muted" style={{ marginTop:6 }}>Halfway milestone: <b>{computedHalfDate}</b></div>}
-        </label>
-
-        {/* commitments — ORDER: Monthly → Weekly → Daily */}
-        <label>
-          <div className="muted">Monthly commitment (optional)</div>
-          <input value={monthlyCommit} onChange={e=>setMonthlyCommit(e.target.value)} placeholder="e.g., At least 2 new customers" />
-          <div className="muted" style={{ marginTop:6 }}>Starts next month on same day-of-month.</div>
-        </label>
-
-        <label>
-          <div className="muted">Weekly commitment (optional)</div>
-          <input value={weeklyCommit} onChange={e=>setWeeklyCommit(e.target.value)} placeholder="e.g., 5 new prospects" />
-          <div className="muted" style={{ marginTop:6 }}>Starts next week on same weekday.</div>
-        </label>
-
-        <label>
-          <div className="muted">Daily commitment (optional)</div>
-          <input value={dailyCommit} onChange={e=>setDailyCommit(e.target.value)} placeholder="e.g., Call or email 15 people" />
-          <div className="muted" style={{ marginTop:6 }}>Seeds each day up to the halfway milestone.</div>
-        </label>
-
-        {err && <div style={{ color: "red" }}>{err}</div>}
-
-        <div style={{ display:"flex", gap:8, marginTop:8 }}>
-          <button onClick={create} disabled={busy} className="btn-primary" style={{ borderRadius:8 }}>{busy?"Creating…":"Create Big Goal"}</button>
-          <button onClick={onClose} disabled={busy}>Cancel</button>
+  function StepHalfway() {
+    return (
+      <Card
+        title="How will you know you’re halfway?"
+        subtitle="Describe the checkpoint that proves you’re on track."
+      >
+        <input
+          value={halfwayNote}
+          onChange={e=>setHalfwayNote(e.target.value)}
+          placeholder="e.g., 50% of users onboarded, £12.5k MRR, 15 clients…"
+          style={{ width:"100%" }}
+        />
+        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+          This appears on your midpoint review task to refocus your plan.
         </div>
+        <Nav showSkip />
+      </Card>
+    );
+  }
+
+  function StepMonthly() {
+    return (
+      <Card
+        title="Monthly commitment"
+        subtitle="What will you do each month to move the needle?"
+      >
+        <input
+          value={monthlyCommit}
+          onChange={e=>setMonthlyCommit(e.target.value)}
+          placeholder="e.g., Close 2 new customers"
+          style={{ width:"100%" }}
+        />
+        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+          We’ll schedule these each month in the first half (from your start).
+        </div>
+        <Nav showSkip />
+      </Card>
+    );
+  }
+
+  function StepWeekly() {
+    return (
+      <Card
+        title="Weekly commitment"
+        subtitle="Small, repeatable actions build momentum."
+      >
+        <input
+          value={weeklyCommit}
+          onChange={e=>setWeeklyCommit(e.target.value)}
+          placeholder="e.g., Book 5 prospect calls"
+          style={{ width:"100%" }}
+        />
+        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+          We’ll schedule these weekly in the first half.
+        </div>
+        <Nav showSkip />
+      </Card>
+    );
+  }
+
+  function StepDaily() {
+    return (
+      <Card
+        title="Daily commitment"
+        subtitle="Tiny daily actions create outsized results."
+      >
+        <input
+          value={dailyCommit}
+          onChange={e=>setDailyCommit(e.target.value)}
+          placeholder="e.g., Reach out to 15 people"
+          style={{ width:"100%" }}
+        />
+        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+          We’ll seed daily tasks up to the halfway date.
+        </div>
+        <Nav showSkip />
+      </Card>
+    );
+  }
+
+  function StepReview() {
+    return (
+      <Card
+        title="Review & launch 🚀"
+        subtitle="Here’s your plan for the first half. Ready to make it real?"
+      >
+        <div style={{ display:"grid", gap:10 }}>
+          <Row label="Goal" value={title || "—"} />
+          <Row label="Category" value={CATS.find(c=>c.key===category)?.label || "—"} dotColor={catColor} />
+          <Row label="Start → Target" value={`${startDate || "—"}  →  ${targetDate || "—"}`} />
+          <Row label="Halfway date" value={computedHalfDate || "—"} />
+          <Row label="Halfway checkpoint" value={halfwayNote || "—"} />
+          <Row label="Monthly" value={monthlyCommit || "—"} />
+          <Row label="Weekly" value={weeklyCommit || "—"} />
+          <Row label="Daily" value={dailyCommit || "—"} />
+        </div>
+        {err && <div style={{ color:"crimson", marginTop:8 }}>{err}</div>}
+        <div style={{ display:"flex", gap:8, marginTop:16 }}>
+          <button onClick={goBack} disabled={busy}>Back</button>
+          <div style={{ flex:1 }} />
+          <button className="btn-primary" onClick={create} disabled={busy} style={{ borderRadius:8 }}>
+            {busy ? "Creating…" : "Create Big Goal"}
+          </button>
+        </div>
+      </Card>
+    );
+  }
+
+  function Row({ label, value, dotColor }: { label: string; value: string; dotColor?: string }) {
+    return (
+      <div style={{ display:"flex", gap:8, alignItems:"center", border:"1px solid #f1f5f9", padding:"8px 10px", borderRadius:8 }}>
+        <div style={{ width:120, color:"#64748b", fontSize:12, textTransform:"uppercase" }}>{label}</div>
+        {dotColor && <span style={{ width:10, height:10, borderRadius:999, background:dotColor, marginRight:4 }} />}
+        <div style={{ fontWeight:600 }}>{value}</div>
       </div>
+    );
+  }
+
+  /* --------------------------- Render --------------------------- */
+
+  return (
+    <div style={{ border: "1px solid #ddd", borderRadius: 16, padding: 16, background: "#fff" }}>
+      {Header}
+
+      <div style={{ marginTop: 12 }}>
+        {step === "title"   && <StepTitle />}
+        {step === "category"&& <StepCategory />}
+        {step === "dates"   && <StepDates />}
+        {step === "halfway" && <StepHalfway />}
+        {step === "monthly" && <StepMonthly />}
+        {step === "weekly"  && <StepWeekly />}
+        {step === "daily"   && <StepDaily />}
+        {step === "review"  && <StepReview />}
+      </div>
+
+      {/* subtle keyframe for card entrance */}
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .btn-primary {
+          background:#6d28d9; border:1px solid #5b21b6; color:#fff; padding:10px 14px; font-weight:700;
+        }
+        .btn-soft {
+          background:#fff; border:1px solid #e5e7eb;
+        }
+        .muted { color:#6b7280; }
+      `}</style>
     </div>
   );
 }
