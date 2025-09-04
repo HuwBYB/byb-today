@@ -1192,10 +1192,36 @@ export default function ExerciseDiaryScreen() {
                   (s.name || "") ||
                   (s.notes?.startsWith("Session: ") ? s.notes.split("\n")[0].replace(/^Session:\s*/, "") : "");
                 const label = derived ? `${s.session_date} — ${derived}` : s.session_date;
+
+                const isActive = session?.id === s.id;
+
                 return (
-                  <li key={s.id} className="item">
-                    <button onClick={() => openRecentSession(s)} style={{ textAlign: "left", width: "100%" }}>
-                      <div style={{ fontWeight: 600 }}>{label}</div>
+                  <li
+                    key={s.id}
+                    className="item"
+                    style={{
+                      borderRadius: 8,
+                      padding: 4,
+                      background: isActive ? "#e0f2fe" : "#fff",
+                      border: isActive ? "1px solid #bae6fd" : "1px solid var(--border)"
+                    }}
+                  >
+                    <button
+                      onClick={() => openRecentSession(s)}
+                      aria-selected={isActive}
+                      style={{
+                        textAlign: "left",
+                        width: "100%",
+                        fontWeight: isActive ? 700 : 500,
+                        color: isActive ? "#0369a1" : "inherit",
+                        background: "transparent",
+                        border: 0,
+                        padding: 0,
+                        cursor: "pointer"
+                      }}
+                      title={label}
+                    >
+                      <div>{label}</div>
                       {s.notes && (
                         <div
                           className="muted"
