@@ -27,77 +27,10 @@ function addDays(iso: string, delta: number) {
   return toISO(d);
 }
 
-/* ---------- Public path helper ---------- */
-function publicPath(p: string) {
-  // @ts-ignore
-  const base =
-    (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
-    (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
-    "";
-  const withSlash = p.startsWith("/") ? p : `/${p}`;
-  return `${base.replace(/\/$/, "")}${withSlash}`;
-}
-const GRAT_ALFRED_SRC = publicPath("/alfred/Gratitude_Alfred.png");
-
-/* ---------- Modal ---------- */
-function Modal({
-  open, onClose, title, children,
-}: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
-  const closeRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    if (open) window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-  useEffect(() => { if (open && closeRef.current) closeRef.current.focus(); }, [open]);
-  if (!open) return null;
-  return (
-    <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 2000,
-               display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 760, width: "100%", background: "#fff", borderRadius: 12,
-                 boxShadow: "0 10px 30px rgba(0,0,0,0.2)", padding: 20 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
-          <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
-          <button ref={closeRef} onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>✕</button>
-        </div>
-        <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
-      </div>
-    </div>
-  );
-}
-
-/* ---------- Help content ---------- */
-function GratitudeHelpContent() {
-  return (
-    <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
-      <h4 style={{ margin: 0 }}>Why this matters</h4>
-      <p><em>A short list of things you’re grateful for nudges your brain toward what’s working.</em></p>
-
-      <h4 style={{ margin: 0 }}>How to use</h4>
-      <ol style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Tap <b>Today</b>, or pick a date.</li>
-        <li>Fill any of the 1–8 prompts with a short sentence.</li>
-        <li>Tiny, honest entries beat perfect ones.</li>
-      </ol>
-
-      <h4 style={{ margin: 0 }}>Alfred’s tip</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Include one thing you’re grateful to <b>yourself</b> for — it builds self-respect.</li>
-      </ul>
-
-      <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-        Your entries save on blur. If offline, they’re cached locally and auto-retried.
-      </p>
-    </div>
-  );
-}
-
 /* ---------- Constants ---------- */
 type Idx = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 const INDEXES: Idx[] = [1,2,3,4,5,6,7,8];
-const SIMPLE_PLACEHOLDER = "Today I’m grateful for…";
+const SIMPLE_PLACEHOLDER = "Something I'm grateful for";
 const PROMPTS = [
   "A person who helped me this week",
   "A small win from today",
@@ -128,12 +61,11 @@ export default function GratitudeScreen() {
   const [streak, setStreak] = useState(0);
   const [resurface, setResurface] = useState<EntryRow | null>(null);
 
-  // Alfred modal
-  const [showHelp, setShowHelp] = useState(false);
-  const [imgOk, setImgOk] = useState(true);
-
   // per-field local unsynced state
   const [unsynced, setUnsynced] = useState<UnsyncedMap>({});
+
+  // NEW: toggle placeholders (default = simple line)
+  const [usePrompts, setUsePrompts] = useState(false);
 
   // mounted guard
   const alive = useRef(true);
@@ -334,51 +266,12 @@ export default function GratitudeScreen() {
   /* ---------- UI ---------- */
   return (
     <div className="page-gratitude" style={{ display: "grid", gap: 12 }}>
-      {/* Title card with Alfred */}
-      <div className="card" style={{ position: "relative", paddingRight: 64 }}>
-        <button
-          onClick={() => setShowHelp(true)}
-          aria-label="Open Gratitude help"
-          title="Need a hand? Ask Alfred"
-          style={{
-            position: "absolute",
-            top: 8,
-            right: 8,
-            border: "none",
-            background: "transparent",
-            padding: 0,
-            cursor: "pointer",
-            lineHeight: 0,
-            zIndex: 10,
-          }}
-        >
-          {imgOk ? (
-            <img
-              src={GRAT_ALFRED_SRC}
-              alt="Gratitude Alfred — open help"
-              style={{ width: 48, height: 48 }}
-              onError={() => setImgOk(false)}
-            />
-          ) : (
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 36, height: 36, borderRadius: 999,
-                border: "1px solid #d1d5db",
-                background: "#f9fafb",
-                fontWeight: 700,
-              }}
-            >
-              ?
-            </span>
-          )}
-        </button>
+      {/* Title card — Alfred removed */}
+      <div className="card">
         <h1 style={{ margin: 0 }}>Gratitude Journal</h1>
       </div>
 
-      {/* Toolbar – your requested layout */}
+      {/* Toolbar */}
       <div className="card" style={{ display: "grid", gap: 8 }}>
         {/* Row 1: Today + streak */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
@@ -387,6 +280,7 @@ export default function GratitudeScreen() {
             🔥 {streak} day{streak === 1 ? "" : "s"} streak
           </div>
         </div>
+
         {/* Row 2: ← date → + count */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <button onClick={gotoPrev} aria-label="Previous day">←</button>
@@ -394,8 +288,27 @@ export default function GratitudeScreen() {
           <button onClick={gotoNext} aria-label="Next day">→</button>
           <div className="muted" style={{ marginLeft: "auto" }}>{countToday}/8 for this day</div>
         </div>
-        {/* Row 3: Prompt of the day */}
-        <div className="muted" style={{ fontStyle: "italic" }}>Prompt: {promptOfTheDay}</div>
+
+        {/* Row 3: Prompt of the day + toggle buttons */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <div className="muted" style={{ fontStyle: "italic" }}>Prompt: {promptOfTheDay}</div>
+          <div style={{ marginLeft: "auto", display: "inline-flex", gap: 8 }}>
+            <button
+              className={usePrompts ? "" : "btn-primary"}
+              onClick={() => setUsePrompts(false)}
+              title="Use the simple default placeholder"
+            >
+              Remove prompts
+            </button>
+            <button
+              className={usePrompts ? "btn-primary" : ""}
+              onClick={() => setUsePrompts(true)}
+              title="Use the detailed prompts in each box"
+            >
+              Add prompts
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Resurface past entry */}
@@ -407,11 +320,11 @@ export default function GratitudeScreen() {
         </div>
       )}
 
-      {/* Editor (mobile-first single column) */}
+      {/* Editor */}
       <div className="card card--wash" style={{ display: "grid", gap: 10 }}>
         {INDEXES.map((idx) => {
           const localUnsynced = unsynced[idx] != null;
-          const ph = PROMPTS[idx - 1] || SIMPLE_PLACEHOLDER;
+          const ph = usePrompts ? (PROMPTS[idx - 1] || SIMPLE_PLACEHOLDER) : SIMPLE_PLACEHOLDER;
           return (
             <div key={idx} style={{ display: "grid", gap: 6 }}>
               <div className="section-title">Gratitude {idx}</div>
@@ -474,16 +387,6 @@ export default function GratitudeScreen() {
           </ul>
         </div>
       </div>
-
-      {/* Help modal */}
-      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Gratitude — Help">
-        <div style={{ display: "flex", gap: 16 }}>
-          {imgOk && <img src={GRAT_ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
-          <div style={{ flex: 1 }}>
-            <GratitudeHelpContent />
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }
