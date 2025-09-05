@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* ---------- Public path helper ---------- */
