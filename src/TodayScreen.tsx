@@ -588,8 +588,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
       >
         <div className="row" style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap", width: "100%", minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
-            <div style={{ fontWeight: 800, fontSize: 18 }}>BYB</div>
-            <div className="muted" style={{ minWidth: 0 }}>• {niceDate}</div>
+            {/* Removed BYB label; show date only */}
+            <div className="muted" style={{ minWidth: 0 }}>{niceDate}</div>
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
             <span className="badge" title="Win if 3+ tasks done" style={{ background: summary.isWin ? "var(--success-soft)" : "var(--danger-soft)", border: "1px solid var(--border)" }}>{summary.isWin ? "Win" : "Keep going"}</span>
@@ -730,11 +730,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-     
-
       {/* Toast node */}
       {toast.node}
     </div>
   );
 }
-
