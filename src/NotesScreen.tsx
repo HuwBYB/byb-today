@@ -1,4 +1,3 @@
-// src/NotesScreen.tsx
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
@@ -80,38 +79,7 @@ function Modal({
   );
 }
 
-/* ---------- Help content ---------- */
-function NotesHelpContent() {
-  return (
-    <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
-      <p><em>Notes / Journal keeps ideas, meetings, drafts, and reflections in one place — with fast search so you can act on them.</em></p>
-
-      <h4 style={{ margin: 0 }}>Quick capture</h4>
-      <p>Use the bar at the top of the sidebar to dump thoughts or journal entries to your Inbox/Journal — no friction.</p>
-
-      <h4 style={{ margin: 0 }}>Search like a pro</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Type to search title & content instantly.</li>
-        <li>Filters: <code>#tag</code>, <code>folder:Work</code>, <code>is:pinned</code>.</li>
-      </ul>
-
-      <h4 style={{ margin: 0 }}>Backlinks & tags</h4>
-      <p>Link notes with <code>[[Wiki Links]]</code>. Inline <code>#tags</code> are picked up automatically.</p>
-
-      <h4 style={{ margin: 0 }}>Shortcuts</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li><b>/</b> focus search, <b>n</b> new note</li>
-        <li><b>Ctrl/Cmd + Enter</b> save & close</li>
-      </ul>
-
-      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e5e7eb" }}>
-        <strong>Coming soon (V2): Meeting Mode.</strong> Start/stop live audio capture, transcribe with on-device Whisper, and auto-summarise action items.
-      </div>
-    </div>
-  );
-}
-
-/* ---------- Journal Prompts ---------- */
+/* ---------- Journal prompts ---------- */
 const JOURNAL_PROMPTS: string[] = [
   "Reflect on Challenges: Describe a recent challenge you faced. What did you learn from it, and how can you apply that lesson in the future?",
   "Overcoming Limiting Beliefs: What is one limiting belief you hold about yourself? How can you challenge and change that belief?",
@@ -122,7 +90,7 @@ const JOURNAL_PROMPTS: string[] = [
   "Positive Self-Talk: List three positive affirmations you can tell yourself to reinforce a growth mindset.",
   "Comfort Zone: What is one thing you can do this week to step outside your comfort zone?",
   "Learning from Others: Write about a person who has influenced your growth mindset. What did you learn from them?",
-  "Daily Reflection: At the end of each day, write about one thing you learned and one way you challenged yourself.",
+  "Daily Reflection: At the end of each day, write about one thing you learned and one way you challenged yourself."
 ];
 
 /* ---------- Main ---------- */
@@ -152,9 +120,8 @@ export default function NotesScreen() {
   const [statusFilter, setStatusFilter] = useState<"active" | "archived">("active");
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
 
-  // modals
-  const [showHelp, setShowHelp] = useState(false);
-  const [showPrompts, setShowPrompts] = useState(false);
+  // Journal prompt modal
+  const [showPromptModal, setShowPromptModal] = useState(false);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const saveTimer = useRef<number | null>(null);
@@ -206,7 +173,8 @@ export default function NotesScreen() {
     setTagsInput(tagsToString(activeNote.tags || []));
     setPinned(activeNote.pinned || false);
     setArchived(activeNote.archived || false);
-  }, [activeNote?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeNote?.id]);
 
   function buildPatch() {
     // merge inline hashtags found in content/title with explicit tags input
@@ -373,16 +341,16 @@ export default function NotesScreen() {
     const term = raw.trim();
     const parts = term.split(/\s+/);
     const tags: string[] = [];
-    let folder: string | null = null;
+    let folderLocal: string | null = null;
     let isPinned: boolean | null = null;
     const words: string[] = [];
     parts.forEach(p => {
       if (p.startsWith("#")) tags.push(p.slice(1).toLowerCase());
-      else if (p.startsWith("folder:")) folder = p.slice(7);
+      else if (p.startsWith("folder:")) folderLocal = p.slice(7);
       else if (p === "is:pinned") isPinned = true;
       else words.push(p);
     });
-    return { words, tags, folder, isPinned };
+    return { words, tags, folder: folderLocal, isPinned };
   }
 
   const { listFiltered, matchTerms } = useMemo(() => {
@@ -445,19 +413,8 @@ export default function NotesScreen() {
   /* ---------- UI ---------- */
   return (
     <div className="page-notes" style={{ display: "grid", gap: 12 }}>
-      {/* Title + Help (generic) */}
-      <div className="card" style={{ position: "relative" }}>
-        <button
-          onClick={() => setShowHelp(true)}
-          aria-label="Open Notes help"
-          title="Help"
-          style={{
-            position: "absolute", top: 8, right: 8, border: "1px solid var(--border)",
-            background: "#f9fafb", padding: "6px 10px", cursor: "pointer", borderRadius: 8,
-          }}
-        >
-          ?
-        </button>
+      {/* Title */}
+      <div className="card">
         <h1 style={{ margin: 0 }}>Notes / Journal</h1>
         <div className="muted" style={{ marginTop: 4 }}>Capture ideas, plan work, and reflect daily.</div>
       </div>
@@ -466,14 +423,9 @@ export default function NotesScreen() {
         <div className="notes-layout" style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 12 }}>
           {/* Sidebar */}
           <aside className="card" style={{ display:"grid", gridTemplateRows:"auto auto auto auto 1fr auto", gap:10, minWidth:0 }}>
-            {/* Quick capture + Journal prompts */}
+            {/* Quick capture */}
             <div style={{ display:"grid", gap:6 }}>
-              <div className="section-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span>Quick capture</span>
-                <button className="btn-soft" onClick={() => setShowPrompts(true)} title="Pick a journal prompt" style={{ borderRadius: 999 }}>
-                  Journal prompts
-                </button>
-              </div>
+              <div className="section-title">Quick capture</div>
               <textarea
                 rows={3}
                 placeholder="New journal entry or note… (hashtags like #idea work too)"
@@ -490,6 +442,9 @@ export default function NotesScreen() {
                   <input value={qcFolder} onChange={e=>setQcFolder(e.target.value)} style={{ width:140 }} placeholder="Journal" />
                 </label>
                 <button className="btn-primary" onClick={quickCapture} style={{ borderRadius:8 }}>Add</button>
+                <button onClick={() => setShowPromptModal(true)} className="btn-soft" style={{ marginLeft: "auto" }}>
+                  Journal prompt
+                </button>
               </div>
             </div>
 
@@ -511,7 +466,7 @@ export default function NotesScreen() {
                   <option value="active">Active</option>
                   <option value="archived">Archived</option>
                 </select>
-                <button onClick={loadNotes} disabled={loading}>{loading?"…": "↻"}</button>
+                <button onClick={loadNotes} disabled={loading}>{loading ? "…" : "↻"}</button>
               </div>
             </div>
 
@@ -672,3 +627,58 @@ export default function NotesScreen() {
                     <button onClick={()=>archiveNote(activeNote)}>Archive</button>
                   )}
 
+                  <button onClick={saveAndClose} className="btn-primary" style={{ borderRadius:8 }}>
+                    Save & Close
+                  </button>
+
+                  <button onClick={()=>deleteNote(activeNote)} style={{ borderColor:"#fca5a5", color:"#b91c1c", background:"#fff5f5" }}>
+                    Delete
+                  </button>
+
+                  <div className="muted" style={{ marginLeft:"auto" }}>
+                    Created {formatDate(activeNote.created_at)} · Updated {formatDate(activeNote.updated_at)}
+                  </div>
+                </div>
+              </>
+            )}
+          </main>
+        </div>
+      </div>
+
+      {/* Journal Prompt Modal */}
+      <Modal open={showPromptModal} onClose={() => setShowPromptModal(false)} title="Journal prompts">
+        <div style={{ display: "grid", gap: 10 }}>
+          <div className="muted">Pick a prompt to drop into Quick capture, or try a random one.</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              onClick={() => {
+                const r = JOURNAL_PROMPTS[Math.floor(Math.random() * JOURNAL_PROMPTS.length)];
+                setQcText(r + "\n\n");
+                setShowPromptModal(false);
+              }}
+              className="btn-primary"
+              style={{ borderRadius: 8 }}
+            >
+              Surprise me
+            </button>
+          </div>
+          <ul className="list">
+            {JOURNAL_PROMPTS.map((p, i) => (
+              <li key={i} className="item" style={{ alignItems: "center", gap: 8 }}>
+                <div style={{ flex: 1 }}>{p}</div>
+                <button
+                  onClick={() => {
+                    setQcText(p + "\n\n");
+                    setShowPromptModal(false);
+                  }}
+                >
+                  Use
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </Modal>
+    </div>
+  );
+}
