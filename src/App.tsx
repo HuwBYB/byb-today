@@ -185,7 +185,7 @@ export default function App() {
           src="/BannerMenu"
           alt="Best You Blueprint"
           style={{
-            height: 32,
+            height: 56,
             width: "auto",
             objectFit: "contain",
             borderRadius: 6,
