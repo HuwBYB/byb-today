@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-/* -------- categories + colours (match DB constraint) --------
-   Allowed in DB: 'health' | 'personal' | 'financial' | 'career' | 'other'
----------------------------------------------------------------- */
+/* -------- categories + colours (match DB constraint) -------- */
 const CATS = [
   { key: "personal",  label: "Personal",  color: "#a855f7" },
   { key: "health",    label: "Health",    color: "#22c55e" },
-  { key: "career",    label: "Business",  color: "#3b82f6" }, // stored as 'career'
-  { key: "financial", label: "Finance",   color: "#f59e0b" }, // stored as 'financial'
+  { key: "career",    label: "Business",  color: "#3b82f6" },
+  { key: "financial", label: "Finance",   color: "#f59e0b" },
   { key: "other",     label: "Other",     color: "#6b7280" },
 ] as const;
 type AllowedCategory = typeof CATS[number]["key"];
@@ -59,20 +57,31 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
   // ux / system
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
 
   const catColor = colorOf(category);
 
   // Focus handling
   const titleRef = useRef<HTMLInputElement>(null);
   const lastFocusedEl = useRef<HTMLInputElement | null>(null);
+  let pointerWindow = useRef<number | null>(null); // allow focus change for a moment after pointer
 
   // Autofocus on mount (no scroll)
   useEffect(() => { titleRef.current?.focus({ preventScroll: true }); }, []);
 
-  // ===== HARD ISOLATION: quarantine events + focus lock =====
+  // ===== Event quarantine + focus lock (mobile safe) =====
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
+
+    // Track pointer inside the wizard to allow legitimate focus changes (avoid “double tap”)
+    const onPointerStart = (ev: Event) => {
+      const t = ev.target as Node | null;
+      if (t && root.contains(t)) {
+        if (pointerWindow.current) window.clearTimeout(pointerWindow.current);
+        pointerWindow.current = window.setTimeout(() => { pointerWindow.current = null; }, 250); // short window
+      }
+    };
 
     // Remember last input/textarea focused inside the wizard
     const onFocusIn = (ev: FocusEvent) => {
@@ -83,14 +92,14 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
       }
     };
 
-    // If something external blurs us, immediately restore focus
+    // If something external blurs us, restore focus — unless a pointer just started (iOS sets relatedTarget=null)
     const onFocusOut = (ev: FocusEvent) => {
       const next = ev.relatedTarget as Node | null;
-      // If the new focus is outside the wizard and we had a focused input, refocus it.
+      const pointerActive = pointerWindow.current !== null;
+      if (pointerActive) return; // let the tap move focus to the button/input the user intended
+
       if (lastFocusedEl.current && (!next || !root.contains(next))) {
-        // Queue to next tick to avoid interfering with native input event
         setTimeout(() => {
-          // Guard: only refocus if still detached from wizard focus
           const active = document.activeElement;
           if (!active || !root.contains(active)) {
             lastFocusedEl.current?.focus({ preventScroll: true });
@@ -101,15 +110,14 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
 
     root.addEventListener("focusin", onFocusIn, true);
     root.addEventListener("focusout", onFocusOut, true);
+    window.addEventListener("touchstart", onPointerStart, { capture: true, passive: true });
+    window.addEventListener("pointerdown", onPointerStart, { capture: true });
 
     // Stop global handlers from seeing key/input events that originate inside the wizard
     const stopIfInside = (ev: Event) => {
       const t = ev.target as Node | null;
-      if (t && root.contains(t)) {
-        ev.stopPropagation();
-      }
+      if (t && root.contains(t)) ev.stopPropagation();
     };
-
     window.addEventListener("keydown", stopIfInside, true);
     window.addEventListener("keyup", stopIfInside, true);
     window.addEventListener("keypress", stopIfInside, true);
@@ -119,6 +127,8 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
     return () => {
       root.removeEventListener("focusin", onFocusIn, true);
       root.removeEventListener("focusout", onFocusOut, true);
+      window.removeEventListener("touchstart", onPointerStart, true as any);
+      window.removeEventListener("pointerdown", onPointerStart, true as any);
       window.removeEventListener("keydown", stopIfInside, true);
       window.removeEventListener("keyup", stopIfInside, true);
       window.removeEventListener("keypress", stopIfInside, true);
@@ -127,7 +137,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
     };
   }, []);
 
-  // halfway = midpoint
+  // midpoint
   const computedHalfDate = useMemo(() => {
     if (!targetDate) return "";
     const a = fromISO(startDate), b = fromISO(targetDate);
@@ -138,8 +148,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
   const stepIndex = STEP_ORDER.indexOf(step);
   const progressPct = ((stepIndex + 1) / STEP_ORDER.length) * 100;
 
-  // prevent global shortcuts from stealing focus while typing (React layer too)
-  function stopKeyBubble(e: React.KeyboardEvent) { e.stopPropagation(); }
+  const stopKeyBubble = (e: React.KeyboardEvent) => e.stopPropagation();
 
   function goNext() {
     setErr(null);
@@ -190,7 +199,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         .single();
       if (gerr) throw gerr;
 
-      // 2) seed tasks — only first half
+      // 2) seed tasks — first half only
       const start = fromISO(startDate);
       const end   = fromISO(targetDate);
       if (end < start) throw new Error("Target date is before start date.");
@@ -265,9 +274,13 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         if (terr) throw terr;
       }
 
-      onCreated?.();
-      onClose?.();
-      alert(`🔥 Big goal created! Seeded ${tasks.length} item(s) for the first half.`);
+      // Show branded success toast instead of alert
+      setShowSuccess(true);
+      // close after a short, pleasant delay
+      window.setTimeout(() => {
+        onCreated?.();
+        onClose?.();
+      }, 1400);
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -276,7 +289,6 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
   }
 
   /* ---------------------- UI Building Blocks ---------------------- */
-
 
   function Nav({ showSkip }: { showSkip?: boolean }) {
     return (
@@ -318,19 +330,12 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
   }
 
   /* -------- Segmented Date Picker -------- */
-
   function SegmentedDate({
-    label,
-    value,
-    onChange,
-  }: {
-    label: string;
-    value: string;            // YYYY-MM-DD (or "")
-    onChange: (iso: string) => void;
-  }) {
+    label, value, onChange,
+  }: { label: string; value: string; onChange: (iso: string) => void; }) {
     const base = value ? fromISO(value) : new Date();
     const [y, setY] = useState(base.getFullYear());
-    const [m, setM] = useState(base.getMonth()); // 0..11
+    const [m, setM] = useState(base.getMonth());
     const [d, setD] = useState(base.getDate());
 
     const dim = daysInMonth(y, m);
@@ -351,7 +356,6 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
       <div onKeyDown={stopKeyBubble} onKeyUp={stopKeyBubble}>
         <div className="muted" style={{ marginBottom: 6 }}>{label}</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr 1fr", gap: 8 }}>
-          {/* Day */}
           <select
             value={safeD}
             onChange={(e) => { const nd = Number(e.target.value); setD(nd); emit(y, m, nd); }}
@@ -368,7 +372,6 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
             ))}
           </select>
 
-          {/* Month */}
           <select
             value={m}
             onChange={(e) => {
@@ -396,7 +399,6 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
             ))}
           </select>
 
-          {/* Year */}
           <select
             value={y}
             onChange={(e) => {
@@ -430,10 +432,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
 
   function StepTitle() {
     return (
-      <Card
-        title="Name your Big Goal"
-        subtitle="Make it inspiring and specific — this is your North Star."
-      >
+      <Card title="Name your Big Goal" subtitle="Make it inspiring and specific — this is your North Star.">
         <input
           ref={titleRef}
           data-biggoal-title
@@ -442,8 +441,8 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
           value={title}
           onFocus={(e) => { lastFocusedEl.current = e.currentTarget; }}
           onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => { stopKeyBubble(e); if (e.key === "Enter") goNext(); }}
-          onKeyUp={stopKeyBubble}
+          onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") goNext(); }}
+          onKeyUp={(e) => e.stopPropagation()}
           placeholder="e.g., Grow revenue to £25k/mo"
           style={{ width: "100%" }}
         />
@@ -491,7 +490,6 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         <div style={{ display: "grid", gap: 12 }}>
           <SegmentedDate label="Start date"  value={startDate}  onChange={setStartDate} />
           <SegmentedDate label="Target date" value={targetDate || todayISO} onChange={setTargetDate} />
-
           {targetDate && computedHalfDate && (
             <div style={{ marginTop: 6, padding: 10, borderRadius: 10, border: "1px dashed #c084fc", background: "#faf5ff", color: "#4c1d95" }}>
               Halfway milestone: <b>{computedHalfDate}</b>
@@ -513,14 +511,12 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
           value={halfwayNote}
           onFocus={(e) => { lastFocusedEl.current = e.currentTarget; }}
           onChange={(e) => setHalfwayNote(e.target.value)}
-          onKeyDown={(e) => { stopKeyBubble(e); if (e.key === "Enter") goNext(); }}
-          onKeyUp={stopKeyBubble}
+          onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") goNext(); }}
+          onKeyUp={(e) => e.stopPropagation()}
           placeholder="e.g., 50% of users onboarded, £12.5k MRR, 15 clients…"
           style={{ width: "100%" }}
         />
-        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-          This appears on your midpoint review task.
-        </div>
+        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>This appears on your midpoint review task.</div>
         <Nav showSkip />
       </Card>
     );
@@ -535,14 +531,12 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
           value={monthlyCommit}
           onFocus={(e) => { lastFocusedEl.current = e.currentTarget; }}
           onChange={(e) => setMonthlyCommit(e.target.value)}
-          onKeyDown={(e) => { stopKeyBubble(e); if (e.key === "Enter") goNext(); }}
-          onKeyUp={stopKeyBubble}
+          onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") goNext(); }}
+          onKeyUp={(e) => e.stopPropagation()}
           placeholder="e.g., Close 2 new customers"
           style={{ width: "100%" }}
         />
-        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-          We’ll schedule these each month in the first half (from your start).
-        </div>
+        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>We’ll schedule these each month in the first half.</div>
         <Nav showSkip />
       </Card>
     );
@@ -557,14 +551,12 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
           value={weeklyCommit}
           onFocus={(e) => { lastFocusedEl.current = e.currentTarget; }}
           onChange={(e) => setWeeklyCommit(e.target.value)}
-          onKeyDown={(e) => { stopKeyBubble(e); if (e.key === "Enter") goNext(); }}
-          onKeyUp={stopKeyBubble}
+          onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") goNext(); }}
+          onKeyUp={(e) => e.stopPropagation()}
           placeholder="e.g., Book 5 prospect calls"
           style={{ width: "100%" }}
         />
-        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-          We’ll schedule these weekly in the first half.
-        </div>
+        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>We’ll schedule these weekly in the first half.</div>
         <Nav showSkip />
       </Card>
     );
@@ -579,14 +571,12 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
           value={dailyCommit}
           onFocus={(e) => { lastFocusedEl.current = e.currentTarget; }}
           onChange={(e) => setDailyCommit(e.target.value)}
-          onKeyDown={(e) => { stopKeyBubble(e); if (e.key === "Enter") goNext(); }}
-          onKeyUp={stopKeyBubble}
+          onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") goNext(); }}
+          onKeyUp={(e) => e.stopPropagation()}
           placeholder="e.g., Reach out to 15 people"
           style={{ width: "100%" }}
         />
-        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-          We’ll seed daily tasks up to the halfway date.
-        </div>
+        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>We’ll seed daily tasks up to the halfway date.</div>
         <Nav showSkip />
       </Card>
     );
@@ -630,7 +620,8 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
   /* --------------------------- Render --------------------------- */
 
   return (
-    <div ref={rootRef} style={{ border: "1px solid #ddd", borderRadius: 16, padding: 16, background: "#fff" }}>
+    <div ref={rootRef} style={{ border: "1px solid #ddd", borderRadius: 16, padding: 16, background: "#fff", position: "relative" }}>
+      {/* Progress */}
       <div style={{ display: "grid", gap: 8 }}>
         <div style={{ height: 8, background: "#eef2ff", borderRadius: 999, overflow: "hidden" }}>
           <div style={{ width: `${progressPct}%`, height: "100%", background: "#6d28d9", transition: "width 300ms ease" }} />
@@ -651,6 +642,32 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         {step === "daily"    && <StepDaily />}
         {step === "review"   && <StepReview />}
       </div>
+
+      {/* Success toast */}
+      {showSuccess && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: "fixed", left: 16, right: 16, bottom: 24, zIndex: 3000,
+            background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14,
+            boxShadow: "0 20px 50px rgba(109,40,217,0.25)", padding: 14,
+            display: "flex", alignItems: "center", gap: 12
+          }}
+        >
+          {/* BYB butterfly (simple inline SVG to avoid asset plumbing) */}
+          <div style={{
+            width: 40, height: 40, borderRadius: 12, background: "#f5f3ff",
+            display: "grid", placeItems: "center", border: "1px solid #e9d5ff", flex: "0 0 auto"
+          }}>
+            <span aria-hidden style={{ fontSize: 22 }}>🦋</span>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 800, color: "#6d28d9" }}>Goal set</div>
+            <div className="muted">This is a perfect start.</div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
