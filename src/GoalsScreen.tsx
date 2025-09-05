@@ -202,7 +202,7 @@ export default function GoalsScreen() {
     if (ge) throw ge;
     const goal = g as Goal;
 
-    const startISO = goal.start_date || toISO(new Date()));
+    const startISO = goal.start_date || toISO(new Date());
     const endISO   = goal.target_date || startISO;
     const start = fromISO(startISO);
     const end   = fromISO(endISO);
