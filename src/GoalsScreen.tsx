@@ -167,9 +167,6 @@ export default function GoalsScreen() {
   // Help modal
   const [showHelp, setShowHelp] = useState(false);
 
-  // Refs to scroll/focus wizard when opening
-  const wizardAnchorRef = useRef<HTMLDivElement>(null);
-
   /* ----- auth ----- */
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
@@ -421,26 +418,6 @@ export default function GoalsScreen() {
   // compute balance directly (no useMemo)
   const balance = computeBalance(goals);
 
-  /* ----- NEW: mobile-safe scroll + single delayed focus when opening wizard ----- */
-  useEffect(() => {
-    if (!showWizard) return;
-
-    const anchor = wizardAnchorRef.current;
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-    // 1) Scroll (avoid smooth on mobile to prevent input blur)
-    anchor?.scrollIntoView({ behavior: isMobile ? "auto" : "smooth", block: "start" });
-
-    // 2) Focus the title input once after scrolling/paint settles
-    const tid = window.setTimeout(() => {
-      const root = anchor?.parentElement || document;
-      const input = root.querySelector<HTMLInputElement>('input[data-biggoal-title]');
-      input?.focus({ preventScroll: true });
-    }, isMobile ? 250 : 60);
-
-    return () => window.clearTimeout(tid);
-  }, [showWizard]);
-
   return (
     <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 12 }}>
       {/* Left: list + creators */}
@@ -490,9 +467,7 @@ export default function GoalsScreen() {
           + Create Big Goal
         </button>
 
-        {/* Wizard anchor and content */}
-        {showWizard && <div ref={wizardAnchorRef} />}
-
+        {/* Wizard content */}
         {showWizard && (
           <div style={{ marginTop: 8 }}>
             <BigGoalWizard
@@ -616,7 +591,6 @@ export default function GoalsScreen() {
                   onClick={async () => {
                     try {
                       setBusy(true);
-                      // Reseed from tomorrow (gives today breathing room if you’re editing now)
                       const t = new Date();
                       t.setDate(t.getDate() + 1);
                       const from = toISO(t);
