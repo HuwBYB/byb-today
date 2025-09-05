@@ -1,5 +1,4 @@
-// src/BigGoalWizard.tsx
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* -------- categories + colours (match DB constraint) --------
@@ -24,9 +23,7 @@ function fromISO(s: string) {
   const [y, m, d] = s.split("-").map(Number);
   return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
-function clampDay(d: Date) {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
+function clampDay(d: Date) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
 function lastDayOfMonth(y: number, m0: number) { return new Date(y, m0 + 1, 0).getDate(); }
 function addMonthsClamped(base: Date, months: number, anchorDay?: number) {
   const anchor = anchorDay ?? base.getDate();
@@ -35,15 +32,10 @@ function addMonthsClamped(base: Date, months: number, anchorDay?: number) {
   const ld = lastDayOfMonth(first.getFullYear(), first.getMonth());
   return new Date(first.getFullYear(), first.getMonth(), Math.min(anchor, ld));
 }
-function daysInMonth(year: number, monthIndex0: number) {
-  return lastDayOfMonth(year, monthIndex0);
-}
+function daysInMonth(year: number, monthIndex0: number) { return lastDayOfMonth(year, monthIndex0); }
 
 /* -------- props -------- */
-export type BigGoalWizardProps = {
-  onClose?: () => void;
-  onCreated?: () => void;
-};
+export type BigGoalWizardProps = { onClose?: () => void; onCreated?: () => void; };
 
 /* -------- steps -------- */
 type StepKey = "title" | "category" | "dates" | "halfway" | "monthly" | "weekly" | "daily" | "review";
@@ -81,6 +73,10 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
 
   const stepIndex = STEP_ORDER.indexOf(step);
   const progressPct = ((stepIndex + 1) / STEP_ORDER.length) * 100;
+
+  // Focus first control per step (without refiring every keystroke)
+  const stepChangedRef = useRef(step);
+  useEffect(() => { stepChangedRef.current = step; }, [step]);
 
   function goNext() {
     setErr(null);
@@ -309,10 +305,8 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
     const now = new Date();
     const currentYear = now.getFullYear();
     const years: number[] = [];
-    for (let yy = currentYear - 50; yy <= currentYear + 50; yy++) years.push(yy); // wide range for long goals
-    const months = [
-      "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"
-    ];
+    for (let yy = currentYear - 50; yy <= currentYear + 50; yy++) years.push(yy);
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
     return (
       <div>
@@ -322,12 +316,6 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
           <select
             value={safeD}
             onChange={(e) => { const nd = Number(e.target.value); setD(nd); emit(y, m, nd); }}
-            onWheel={(e) => {
-              e.preventDefault();
-              const dir = Math.sign(e.deltaY);
-              const nd = Math.min(Math.max(1, safeD + dir), daysInMonth(y, m));
-              setD(nd); emit(y, m, nd);
-            }}
             aria-label="Day"
           >
             {Array.from({ length: daysInMonth(y, m) }, (_, i) => i + 1).map(v => (
@@ -345,17 +333,6 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
               setD(nd);
               emit(y, nm, nd);
             }}
-            onWheel={(e) => {
-              e.preventDefault();
-              const dir = Math.sign(e.deltaY);
-              let nm = m + dir;
-              if (nm < 0) nm = 11;
-              if (nm > 11) nm = 0;
-              setM(nm);
-              const nd = Math.min(safeD, daysInMonth(y, nm));
-              setD(nd);
-              emit(y, nm, nd);
-            }}
             aria-label="Month"
           >
             {months.map((mm, idx) => (
@@ -368,15 +345,6 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
             value={y}
             onChange={(e) => {
               const ny = Number(e.target.value);
-              setY(ny);
-              const nd = Math.min(safeD, daysInMonth(ny, m));
-              setD(nd);
-              emit(ny, m, nd);
-            }}
-            onWheel={(e) => {
-              e.preventDefault();
-              const dir = Math.sign(e.deltaY);
-              const ny = y + dir;
               setY(ny);
               const nd = Math.min(safeD, daysInMonth(ny, m));
               setD(nd);
@@ -402,12 +370,12 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         subtitle="Make it inspiring and specific — this is your North Star."
       >
         <input
-          autoFocus
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") goNext(); }}
           placeholder="e.g., Grow revenue to £25k/mo"
           style={{ width: "100%" }}
+          autoComplete="off"
+          spellCheck={false}
         />
         <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
           Tip: Start with a verb — “grow”, “launch”, “run”, “write”.
@@ -461,16 +429,8 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         subtitle="Set your start and target dates. We’ll calculate the halfway point."
       >
         <div style={{ display: "grid", gap: 12 }}>
-          <SegmentedDate
-            label="Start date"
-            value={startDate}
-            onChange={setStartDate}
-          />
-          <SegmentedDate
-            label="Target date"
-            value={targetDate || todayISO}
-            onChange={setTargetDate}
-          />
+          <SegmentedDate label="Start date" value={startDate} onChange={setStartDate} />
+          <SegmentedDate label="Target date" value={targetDate || todayISO} onChange={setTargetDate} />
 
           {targetDate && computedHalfDate && (
             <div
@@ -502,9 +462,10 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         <input
           value={halfwayNote}
           onChange={(e) => setHalfwayNote(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") goNext(); }}
           placeholder="e.g., 50% of users onboarded, £12.5k MRR, 15 clients…"
           style={{ width: "100%" }}
+          autoComplete="off"
+          spellCheck={false}
         />
         <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
           This appears on your midpoint review task to refocus your plan.
@@ -523,9 +484,10 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         <input
           value={monthlyCommit}
           onChange={(e) => setMonthlyCommit(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") goNext(); }}
           placeholder="e.g., Close 2 new customers"
           style={{ width: "100%" }}
+          autoComplete="off"
+          spellCheck={false}
         />
         <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
           We’ll schedule these each month in the first half (from your start).
@@ -544,9 +506,10 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         <input
           value={weeklyCommit}
           onChange={(e) => setWeeklyCommit(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") goNext(); }}
           placeholder="e.g., Book 5 prospect calls"
           style={{ width: "100%" }}
+          autoComplete="off"
+          spellCheck={false}
         />
         <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
           We’ll schedule these weekly in the first half.
@@ -565,9 +528,10 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         <input
           value={dailyCommit}
           onChange={(e) => setDailyCommit(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") goNext(); }}
           placeholder="e.g., Reach out to 15 people"
           style={{ width: "100%" }}
+          autoComplete="off"
+          spellCheck={false}
         />
         <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
           We’ll seed daily tasks up to the halfway date.
@@ -645,6 +609,9 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
           background:#fff; border:1px solid #e5e7eb;
         }
         .muted { color:#6b7280; }
+        input[type="text"], input:not([type]), input[type="number"], select {
+          min-height: 38px;
+        }
       `}</style>
     </div>
   );
