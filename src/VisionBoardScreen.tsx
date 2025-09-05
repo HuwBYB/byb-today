@@ -1,26 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-
-/* ---------- Public path helper ---------- */
-function publicPath(p: string) {
-  // @ts-ignore
-  const base =
-    (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
-    (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
-    "";
-  const withSlash = p.startsWith("/") ? p : `/${p}`;
-  return `${base.replace(/\/$/, "")}${withSlash}`;
-}
-
-/* ---------- Alfred image ---------- */
-const VB_ALFRED_CANDIDATES = [
-  "/alfred/Vision_Alfred.png",
-  "/alfred/Vision_Alfred.jpg",
-  "/alfred/Vision_Alfred.jpeg",
-  "/alfred/Vision_Alfred.webp",
-].map(publicPath);
-
 /* ---------- Life areas (sections) ---------- */
 const SECTIONS = [
   { key: "personal",  label: "Personal",  color: "#a855f7" },
@@ -51,51 +31,6 @@ function writeLocalOrder(uid: string, map: Record<string, number>) {
   try { localStorage.setItem(orderKey(uid), JSON.stringify(map)); } catch {}
 }
 
-/* ---------- Modal shell ---------- */
-function Modal({ open, onClose, title, children }: {
-  open: boolean; onClose: () => void; title: string; children: ReactNode;
-}) {
-  const closeRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    if (open) window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-  useEffect(() => { if (open && closeRef.current) closeRef.current.focus(); }, [open]);
-  if (!open) return null;
-  return (
-    <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 2000,
-               display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 760, width: "100%", background: "#fff", borderRadius: 12,
-                 boxShadow: "0 10px 30px rgba(0,0,0,0.2)", padding: 20 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
-          <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
-          <button ref={closeRef} onClick={onClose} aria-label="Close" style={{ borderRadius: 8 }}>✕</button>
-        </div>
-        <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
-      </div>
-    </div>
-  );
-}
-
-/* ---------- Help content ---------- */
-function VisionHelpContent() {
-  return (
-    <div style={{ display: "grid", gap: 12, lineHeight: 1.6 }}>
-      <h4 style={{ margin: 0 }}>Make it vivid, make it daily</h4>
-      <ol style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Create sections (life areas) and drop images into each.</li>
-        <li>Add a short, specific affirmation under each image.</li>
-        <li>Reorder with drag &amp; drop until it “feels right”.</li>
-        <li>Use <b>Play</b> for a 30s slideshow or export a wallpaper collage.</li>
-        <li>Ask yourself: “What’s one tiny step I can do <i>today</i> toward this?”</li>
-      </ol>
-    </div>
-  );
-}
-
 /* ---------- Types ---------- */
 type VBImage = {
   path: string;        // storage path
@@ -106,6 +41,65 @@ type VBImage = {
   created_at?: string;
 };
 
+/* ---------- Offline (IndexedDB) ---------- */
+const IDB_NAME = "byb-vision";
+const IDB_STORE = "images";
+const IDB_VERSION = 1;
+
+function idbOpen(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE, { keyPath: "path" });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbPutBlob(path: string, blob: Blob) {
+  const db = await idbOpen();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    const store = tx.objectStore(IDB_STORE);
+    store.put({ path, type: blob.type, blob });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+async function idbGetBlob(path: string): Promise<Blob | null> {
+  const db = await idbOpen();
+  const out = await new Promise<Blob | null>((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readonly");
+    const store = tx.objectStore(IDB_STORE);
+    const req = store.get(path);
+    req.onsuccess = () => {
+      const rec = req.result as { blob?: Blob } | undefined;
+      resolve(rec?.blob ?? null);
+    };
+    req.onerror = () => reject(req.error);
+  });
+  db.close();
+  return out;
+}
+async function idbGetAllKeys(): Promise<string[]> {
+  const db = await idbOpen();
+  const out = await new Promise<string[]>((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readonly");
+    const store = tx.objectStore(IDB_STORE);
+    const req = store.getAllKeys();
+    req.onsuccess = () => resolve((req.result as IDBValidKey[]).map(String));
+    req.onerror = () => reject(req.error);
+  });
+  db.close();
+  return out;
+}
+
+/* ========================== MAIN SCREEN ========================== */
+
 export default function VisionBoardScreen() {
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -115,18 +109,15 @@ export default function VisionBoardScreen() {
 
   const [selectedIdx, setSelectedIdx] = useState<number>(0);
   const [playing, setPlaying] = useState(false);
+  const [slideMs, setSlideMs] = useState<number>(30000); // 10s / 20s / 30s
 
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const [showHelp, setShowHelp] = useState(false);
-  const [imgIdx, setImgIdx] = useState(0);
-  const VB_ALFRED_SRC = VB_ALFRED_CANDIDATES[imgIdx] ?? "";
-
   const fileRef = useRef<HTMLInputElement>(null);
   const dragFrom = useRef<number | null>(null);
 
-  // ⬆️ Increased from 6 → 10
+  // ⬆️ Increased from 6 → 10 (kept)
   const MAX_IMAGES = 10;
 
   /* ----- inline CSS (mobile-first) ----- */
@@ -178,7 +169,6 @@ export default function VisionBoardScreen() {
   }, []);
 
   /* ----- load images ----- */
-  // Manual reload utility (used by the debug strip)
   async function reloadFromStorage() {
     if (!userId) return;
     setErr(null);
@@ -237,34 +227,66 @@ export default function VisionBoardScreen() {
       });
 
       baseRows.sort((a, b) => a.order_index - b.order_index);
-      setImages(baseRows.slice(0, MAX_IMAGES));
+      const next = baseRows.slice(0, MAX_IMAGES);
+      setImages(next);
       setSelectedIdx(0);
+
+      // If offline, try to hydrate offline blob URLs
+      if (!navigator.onLine) {
+        await hydrateOfflineURLs(next);
+      }
     } catch (e: any) {
       setErr(e.message || String(e));
       setImages([]);
     }
   }
 
-  // Keep original automatic load behaviour
-
   useEffect(() => {
     if (!userId) return;
     reloadFromStorage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
   /* ----- slideshow ----- */
   useEffect(() => {
     if (!playing || images.length === 0) return;
-    const id = setInterval(() => setSelectedIdx(i => (i + 1) % images.length), 30000);
+    const id = setInterval(() => setSelectedIdx(i => (i + 1) % images.length), slideMs);
     return () => clearInterval(id);
-  }, [playing, images.length]);
+  }, [playing, images.length, slideMs]);
 
-  const canAdd = useMemo(() => images.length < MAX_IMAGES, [images.length]);
-  const monthLabel = useMemo(() => new Date().toLocaleString(undefined, { month: "long", year: "numeric" }), []);
-  const filtered = useMemo(
-    () => activeSection === "all" ? images : images.filter(i => i.section === activeSection),
-    [images, activeSection]
-  );
+  /* ----- offline URL map ----- */
+  const [offlineURLs, setOfflineURLs] = useState<Record<string, string>>({});
+  const objectURLsRef = useRef<string[]>([]);
+  function revokeObjectURLs() {
+    objectURLsRef.current.forEach((u) => URL.revokeObjectURL(u));
+    objectURLsRef.current = [];
+  }
+  useEffect(() => {
+    const onOnline = () => { /* when back online, prefer network URLs */ setOfflineURLs({}); };
+    const onOffline = () => { hydrateOfflineURLs(images); };
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+      revokeObjectURLs();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [images]);
+
+  async function hydrateOfflineURLs(list: VBImage[]) {
+    const map: Record<string, string> = {};
+    revokeObjectURLs();
+    for (const it of list) {
+      const blob = await idbGetBlob(it.path);
+      if (blob) {
+        const u = URL.createObjectURL(blob);
+        objectURLsRef.current.push(u);
+        map[it.path] = u;
+      }
+    }
+    setOfflineURLs(map);
+  }
 
   /* ---------- DB helpers ---------- */
   async function upsertMetaMany(rows: Array<Pick<VBImage, "path" | "caption" | "section" | "order_index">>) {
@@ -322,13 +344,18 @@ export default function VisionBoardScreen() {
         const order_index = images.length + added.length; // append
         const row: VBImage = { path, url: pub.publicUrl, caption: "", section: defaultSection, order_index };
         added.push(row);
+
+        // Also drop into IDB so it’s immediately available offline
+        await idbPutBlob(path, file);
       }
 
       const next = [...images, ...added].slice(0, MAX_IMAGES);
       setImages(next);
-
-      // persist metadata for new rows
       await upsertMetaMany(added.map(r => ({ path: r.path, caption: "", section: r.section, order_index: r.order_index })));
+
+      if (!navigator.onLine) {
+        await hydrateOfflineURLs(next);
+      }
 
       if (fileRef.current) fileRef.current.value = "";
     } catch (e: any) {
@@ -354,6 +381,11 @@ export default function VisionBoardScreen() {
       if (selectedIdx >= reindexed.length) setSelectedIdx(Math.max(0, reindexed.length - 1));
 
       await upsertMetaMany(reindexed.map(r => ({ path: r.path, caption: r.caption, section: r.section, order_index: r.order_index })));
+
+      // clear any offline URL for this path
+      setOfflineURLs(prev => {
+        const n = { ...prev }; delete n[img.path]; return n;
+      });
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -362,6 +394,11 @@ export default function VisionBoardScreen() {
   }
 
   /* ---------- Drag & Drop (reorder) ---------- */
+  const filtered = useMemo(
+    () => activeSection === "all" ? images : images.filter(i => i.section === activeSection),
+    [images, activeSection]
+  );
+
   function onDragStart(e: React.DragEvent, filteredIndex: number) {
     dragFrom.current = filteredIndex;
     e.dataTransfer.effectAllowed = "move";
@@ -417,13 +454,21 @@ export default function VisionBoardScreen() {
     const cellW = Math.floor((W - P * 3) / cols);
     const cellH = Math.floor((H - 200 - P * 6) / rows); // leave top area for title
 
-    // load
-    const imgs = await Promise.all(src.map((it) => new Promise<HTMLImageElement>((resolve) => {
+    // load (prefer offline blobs when available)
+    const imgs = await Promise.all(src.map(async (it) => {
       const im = new Image();
       im.crossOrigin = "anonymous";
-      im.onload = () => resolve(im);
-      im.src = it.url;
-    })));
+      const blob = await idbGetBlob(it.path);
+      if (blob) {
+        const u = URL.createObjectURL(blob);
+        im.onload = () => URL.revokeObjectURL(u);
+        im.src = u;
+      } else {
+        im.src = it.url;
+      }
+      await new Promise<void>((res) => { im.onload = () => res(); im.onerror = () => res(); });
+      return im;
+    }));
 
     imgs.slice(0, cols * rows).forEach((im, idx) => {
       const c = idx % cols, r = Math.floor(idx / cols);
@@ -492,33 +537,88 @@ export default function VisionBoardScreen() {
     if (line) ctx.fillText(line.trim(), x, y);
   }
 
+  /* ---------- Slideshow controls ---------- */
+  const slideOpts = [
+    { label: "10s", ms: 10000 },
+    { label: "20s", ms: 20000 },
+    { label: "30s", ms: 30000 },
+  ];
+
   /* ---------- UI ---------- */
+  const monthLabel = useMemo(() => new Date().toLocaleString(undefined, { month: "long", year: "numeric" }), []);
   const current = images[selectedIdx] || null;
-  const monthStr = monthLabel;
 
   function prev() { if (images.length) setSelectedIdx(i => (i - 1 + images.length) % images.length); }
   function next() { if (images.length) setSelectedIdx(i => (i + 1) % images.length); }
+
+  const canAdd = useMemo(() => images.length < MAX_IMAGES, [images.length]);
+  const displayURL = (img: VBImage) => offlineURLs[img.path] ?? img.url;
+
+  /* ---------- Save all offline ---------- */
+  async function saveAllOffline() {
+    if (images.length === 0) return;
+    setBusy(true);
+    try {
+      const map: Record<string, string> = {};
+      revokeObjectURLs();
+      for (const it of images) {
+        // Fetch as blob (prefer network if online; if offline and already cached, skip)
+        if (!navigator.onLine) {
+          const cached = await idbGetBlob(it.path);
+          if (cached) {
+            const u = URL.createObjectURL(cached);
+            objectURLsRef.current.push(u);
+            map[it.path] = u;
+            continue;
+          }
+        }
+        const res = await fetch(it.url);
+        const blob = await res.blob();
+        await idbPutBlob(it.path, blob);
+        const u = URL.createObjectURL(blob);
+        objectURLsRef.current.push(u);
+        map[it.path] = u;
+      }
+      setOfflineURLs(map);
+      alert("Images saved for offline use.");
+    } catch (e:any) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /* ---------- Save single to device (download/share) ---------- */
+  async function saveToDevice(img: VBImage) {
+    try {
+      let blob: Blob | null = await idbGetBlob(img.path);
+      if (!blob) {
+        const res = await fetch(img.url);
+        blob = await res.blob();
+      }
+      if (!blob) return;
+      const file = new File([blob], img.path.split("/").pop() || "image.jpg", { type: blob.type || "image/jpeg" });
+      const navAny = navigator as any;
+      if (navAny?.canShare && navAny.canShare({ files: [file] })) {
+        try { await navAny.share({ files: [file], title: "Vision image" }); return; } catch {}
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = file.name; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e:any) {
+      setErr(e.message || String(e));
+    }
+  }
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
       {styleTag}
 
-      {/* Title + Help */}
-      <div className="card" style={{ position: "relative", paddingRight: 64 }}>
-        <button
-          onClick={() => setShowHelp(true)}
-          aria-label="Open Vision Board help"
-          title="Need a hand? Ask Alfred"
-          style={{ position: "absolute", top: 8, right: 8, border: "none", background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10 }}
-        >
-          {VB_ALFRED_SRC ? (
-            <img src={VB_ALFRED_SRC} alt="Vision Board Alfred — open help" style={{ width: 48, height: 48 }} onError={() => setImgIdx(i => i + 1)} />
-          ) : (
-            <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db", background: "#f9fafb", fontWeight: 700 }}>?</span>
-          )}
-        </button>
+      {/* Title */}
+      <div className="card">
         <h1 style={{ margin: 0 }}>Vision Board</h1>
-        <div className="muted">{monthStr}</div>
+        <div className="muted">{monthLabel}</div>
       </div>
 
       {/* Toolbar */}
@@ -540,15 +640,48 @@ export default function VisionBoardScreen() {
             <span className="vb-dot" title="Color" style={{ background: colorOf(defaultSection) }} />
           </div>
 
-          <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: "none" }}
-                 onChange={e => handleUpload(e.target.files)} />
-          <button onClick={() => fileRef.current?.click()} disabled={!userId || !canAdd || busy}
-                  className="btn-primary" style={{ borderRadius: 8 }}>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            style={{ display: "none" }}
+            onChange={e => handleUpload(e.target.files)}
+          />
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={!userId || !canAdd || busy}
+            className="btn-primary"
+            style={{ borderRadius: 8 }}
+          >
             {busy ? "Uploading…" : `Upload image${canAdd ? "" : " (full)"}`}
           </button>
 
-          <button onClick={() => setPlaying(p => !p)} disabled={images.length <= 1}>
-            {playing ? "Pause" : "Play 30s"}
+          {/* Slideshow controls */}
+          <div style={{ display: "inline-flex", gap: 6, alignItems: "center", marginLeft: "auto" }}>
+            <span className="muted">Slideshow</span>
+            <div className="btn-group" role="group" aria-label="Slideshow speed">
+              {slideOpts.map(o => (
+                <button
+                  key={o.ms}
+                  onClick={() => setSlideMs(o.ms)}
+                  className={slideMs === o.ms ? "btn-primary" : ""}
+                  style={{ borderRadius: 8 }}
+                  title={`Set to ${o.label} per slide`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setPlaying(p => !p)} disabled={images.length <= 1}>
+              {playing ? "Pause" : `Play (${slideOpts.find(s => s.ms === slideMs)?.label})`}
+            </button>
+          </div>
+        </div>
+
+        <div className="vb-actions">
+          <button onClick={saveAllOffline} className="btn-soft" disabled={images.length === 0 || busy}>
+            {busy ? "Saving…" : "Save all offline"}
           </button>
           <button onClick={exportCollage} disabled={images.length === 0} className="btn-soft">
             Export collage
@@ -568,7 +701,7 @@ export default function VisionBoardScreen() {
               </svg>
             </button>
 
-            <img key={current.path} src={current.url} alt="" />
+            <img key={current.path} src={displayURL(current)} alt="" />
 
             <button className="vb-arrow vb-arrow--right" aria-label="Next" onClick={next}>
               <svg viewBox="0 0 20 20" width="18" height="18" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -593,7 +726,7 @@ export default function VisionBoardScreen() {
               />
             </label>
 
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
                 <span className="muted">Section</span>
                 <select
@@ -603,6 +736,9 @@ export default function VisionBoardScreen() {
                   {SECTIONS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
                 </select>
               </label>
+              <button onClick={() => saveToDevice(current)} className="btn-soft">
+                Save to device
+              </button>
               <button onClick={() => removeAt(selectedIdx)} className="btn-soft" style={{ marginLeft: "auto" }}>
                 Delete
               </button>
@@ -631,7 +767,7 @@ export default function VisionBoardScreen() {
                   onClick={() => setSelectedIdx(idxAll)}
                   title={img.caption || "Open"}
                 >
-                  <img src={img.url} alt="" className="vb-thumb" />
+                  <img src={displayURL(img)} alt="" className="vb-thumb" />
                   <div style={{ padding: 8, display: "grid", gap: 6 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <span className="vb-dot" style={{ background: colorOf(img.section) }} />
@@ -644,24 +780,6 @@ export default function VisionBoardScreen() {
           </div>
         )}
       </div>
-
-      {/* Help modal */}
-      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Vision Board — Help">
-        <div style={{ display: "flex", gap: 16 }}>
-          {VB_ALFRED_SRC && (
-            <img
-              src={VB_ALFRED_SRC}
-              alt=""
-              aria-hidden="true"
-              style={{ width: 72, height: 72, flex: "0 0 auto" }}
-              onError={() => setImgIdx(i => i + 1)}
-            />
-          )}
-          <div style={{ flex: 1 }}>
-            <VisionHelpContent />
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }
