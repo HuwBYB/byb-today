@@ -332,7 +332,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
     }
 
     const now = new Date();
-    theconst currentYear = now.getFullYear();
+    const currentYear = now.getFullYear();
     const years: number[] = [];
     for (let yy = currentYear - 50; yy <= currentYear + 50; yy++) years.push(yy); // wide range for long goals
     const months = [
