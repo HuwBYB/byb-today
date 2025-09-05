@@ -27,7 +27,7 @@ const ITEMS: MenuItem[] = [
   { key: "gratitude",    label: "Gratitude",       icon: "🙏" },
   { key: "exercise",     label: "Exercise",        icon: "🏋️" },
   { key: "wins",         label: "Your Wins",       icon: "🏆" },
-  { key: "eva",          label: "Eva",             icon: "/LogoButterfly.png" },
+  { key: "eva",          label: "Eva",             icon: "💡" },
   { key: "confidence",   label: "Confidence",      icon: "🔥" },
   { key: "notes",        label: "Notes",           icon: "📝" },
   { key: "focus",        label: "Focus",           icon: "🎧" },
