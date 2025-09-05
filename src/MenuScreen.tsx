@@ -29,7 +29,7 @@ const ITEMS: MenuItem[] = [
   { key: "wins",         label: "Your Wins",       icon: "🏆" },
   { key: "eva",          label: "Eva",             icon: "💡" },
   { key: "confidence",   label: "Confidence",      icon: "🔥" },
-  { key: "notes",        label: "Notes",           icon: "📝" },
+  { key: "notes",        label: "Notes / Journal", icon: "📝" },
   { key: "focus",        label: "Focus",           icon: "🎧" },
   { key: "meditation",   label: "Meditation",      icon: "📺" },
   { key: "affirmations", label: "Affirmations",    icon: "✨" },
