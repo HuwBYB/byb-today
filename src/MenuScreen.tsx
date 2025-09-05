@@ -121,7 +121,7 @@ export default function MenuScreen({
       {it.icon}
     </div>
     {/* ⬇️ added marginTop */}
-    <div style={{ fontWeight: 700, marginTop: 4 }}>{it.label}</div>
+    <div style={{ fontWeight: 700, marginTop: 8 }}>{it.label}</div>
   </button>
 ))}
         </div>
