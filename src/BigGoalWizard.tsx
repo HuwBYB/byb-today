@@ -1,15 +1,15 @@
-import { useMemo, useState, useRef, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* -------- categories + colours (match DB constraint) --------
    Allowed in DB: 'health' | 'personal' | 'financial' | 'career' | 'other'
 ---------------------------------------------------------------- */
 const CATS = [
-  { key: "personal",  label: "Personal",  color: "#a855f7" }, // purple
-  { key: "health",    label: "Health",    color: "#22c55e" }, // green
-  { key: "career",    label: "Business",  color: "#3b82f6" }, // blue (stored as 'career')
-  { key: "financial", label: "Finance",   color: "#f59e0b" }, // amber (stored as 'financial')
-  { key: "other",     label: "Other",     color: "#6b7280" }, // gray
+  { key: "personal",  label: "Personal",  color: "#a855f7" },
+  { key: "health",    label: "Health",    color: "#22c55e" },
+  { key: "career",    label: "Business",  color: "#3b82f6" },
+  { key: "financial", label: "Finance",   color: "#f59e0b" },
+  { key: "other",     label: "Other",     color: "#6b7280" },
 ] as const;
 type AllowedCategory = typeof CATS[number]["key"];
 const colorOf = (k: AllowedCategory) => CATS.find(c => c.key === k)?.color || "#6b7280";
@@ -74,16 +74,11 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
   const stepIndex = STEP_ORDER.indexOf(step);
   const progressPct = ((stepIndex + 1) / STEP_ORDER.length) * 100;
 
-  // Focus first control per step (without refiring every keystroke)
-  const stepChangedRef = useRef(step);
-  useEffect(() => { stepChangedRef.current = step; }, [step]);
-
   function goNext() {
     setErr(null);
     const idx = STEP_ORDER.indexOf(step);
     const next = STEP_ORDER[idx + 1];
     if (!next) return;
-    // light validation on required steps
     if (step === "title" && !title.trim()) { setErr("Give your goal a name you’re proud of."); return; }
     if (step === "dates") {
       if (!targetDate) { setErr("Pick your target date."); return; }
@@ -110,7 +105,6 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
       const userId = userData.user?.id;
       if (!userId) throw new Error("Not signed in.");
 
-      // 1) create goal
       const { data: goal, error: gerr } = await supabase.from("goals")
         .insert({
           user_id: userId,
@@ -128,7 +122,6 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         .single();
       if (gerr) throw gerr;
 
-      // 2) seed tasks — ONLY FIRST HALF (up to halfway date inclusive)
       const start = fromISO(startDate);
       const end   = fromISO(targetDate);
       if (end < start) throw new Error("Target date is before start date.");
@@ -148,7 +141,6 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         category: cat,
         category_color: col
       });
-
       if (computedHalfDate) {
         tasks.push({
           user_id: userId,
@@ -286,17 +278,14 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
     value: string;            // YYYY-MM-DD (or "")
     onChange: (iso: string) => void;
   }) {
-    // parse incoming date or default to today
     const base = value ? fromISO(value) : new Date();
     const [y, setY] = useState(base.getFullYear());
-    const [m, setM] = useState(base.getMonth()); // 0..11
+    const [m, setM] = useState(base.getMonth());
     const [d, setD] = useState(base.getDate());
 
-    // keep day in range if month/year change
     const dim = daysInMonth(y, m);
     const safeD = Math.min(d, dim);
 
-    // build ISO on any change
     function emit(nextY = y, nextM = m, nextD = safeD) {
       const iso = toISO(new Date(nextY, nextM, nextD));
       onChange(iso);
@@ -312,7 +301,6 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
       <div>
         <div className="muted" style={{ marginBottom: 6 }}>{label}</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr 1fr", gap: 8 }}>
-          {/* Day */}
           <select
             value={safeD}
             onChange={(e) => { const nd = Number(e.target.value); setD(nd); emit(y, m, nd); }}
@@ -323,7 +311,6 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
             ))}
           </select>
 
-          {/* Month */}
           <select
             value={m}
             onChange={(e) => {
@@ -340,7 +327,6 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
             ))}
           </select>
 
-          {/* Year */}
           <select
             value={y}
             onChange={(e) => {
@@ -376,6 +362,8 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
           style={{ width: "100%" }}
           autoComplete="off"
           spellCheck={false}
+          onKeyDownCapture={(e) => e.stopPropagation()}
+          onKeyUpCapture={(e) => e.stopPropagation()}
         />
         <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
           Tip: Start with a verb — “grow”, “launch”, “run”, “write”.
@@ -410,6 +398,8 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
                   justifyContent: "center",
                   fontWeight: category === c.key ? 700 : 500,
                 }}
+                onKeyDownCapture={(e) => e.stopPropagation()}
+                onKeyUpCapture={(e) => e.stopPropagation()}
               >
                 <span style={{ width: 12, height: 12, borderRadius: 999, background: c.color }} />
                 {c.label}
@@ -466,6 +456,8 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
           style={{ width: "100%" }}
           autoComplete="off"
           spellCheck={false}
+          onKeyDownCapture={(e) => e.stopPropagation()}
+          onKeyUpCapture={(e) => e.stopPropagation()}
         />
         <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
           This appears on your midpoint review task to refocus your plan.
@@ -488,6 +480,8 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
           style={{ width: "100%" }}
           autoComplete="off"
           spellCheck={false}
+          onKeyDownCapture={(e) => e.stopPropagation()}
+          onKeyUpCapture={(e) => e.stopPropagation()}
         />
         <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
           We’ll schedule these each month in the first half (from your start).
@@ -510,6 +504,8 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
           style={{ width: "100%" }}
           autoComplete="off"
           spellCheck={false}
+          onKeyDownCapture={(e) => e.stopPropagation()}
+          onKeyUpCapture={(e) => e.stopPropagation()}
         />
         <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
           We’ll schedule these weekly in the first half.
@@ -532,6 +528,8 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
           style={{ width: "100%" }}
           autoComplete="off"
           spellCheck={false}
+          onKeyDownCapture={(e) => e.stopPropagation()}
+          onKeyUpCapture={(e) => e.stopPropagation()}
         />
         <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
           We’ll seed daily tasks up to the halfway date.
@@ -582,7 +580,20 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
   /* --------------------------- Render --------------------------- */
 
   return (
-    <div style={{ border: "1px solid #ddd", borderRadius: 16, padding: 16, background: "#fff" }}>
+    <div
+      style={{ border: "1px solid #ddd", borderRadius: 16, padding: 16, background: "#fff" }}
+      // Stop global shortcuts while typing inside the wizard
+      onKeyDownCapture={(e) => {
+        const t = e.target as HTMLElement;
+        const tag = t?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") e.stopPropagation();
+      }}
+      onKeyUpCapture={(e) => {
+        const t = e.target as HTMLElement;
+        const tag = t?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") e.stopPropagation();
+      }}
+    >
       {Header}
 
       <div style={{ marginTop: 12 }}>
@@ -596,7 +607,6 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         {step === "review"   && <StepReview />}
       </div>
 
-      {/* subtle keyframe for card entrance */}
       <style>{`
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(4px); }
