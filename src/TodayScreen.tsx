@@ -185,8 +185,8 @@ function fireConfetti() {
   setTimeout(() => container.remove(), 2200);
 }
 
-/* ===== Encouragements + Toast ===== */
-const ALFRED_LINES = [
+/* ===== Encouragements + Toast (no Alfred) ===== */
+const ENCOURAGE_LINES = [
   "Lovely momentum. Keep it rolling.",
   "One pebble at a time becomes a mountain.",
   "Stacked: another tiny win in the bank.",
@@ -197,16 +197,67 @@ function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length
 
 function useToast() {
   const [msg, setMsg] = useState<string | null>(null);
-  function show(m: string) { setMsg(m); setTimeout(() => setMsg(null), 2500); }
+
+  function show(m: string) {
+    setMsg(m);
+    setTimeout(() => setMsg(null), 2500);
+  }
+
   const node = (
-    <div aria-live="polite" style={{ position: "fixed", left: 0, right: 0, bottom: "calc(16px + env(safe-area-inset-bottom,0))", display: "flex", justifyContent: "center", pointerEvents: "none", zIndex: 3500 }}>
+    <div
+      aria-live="polite"
+      style={{
+        position: "fixed",
+        left: 0,
+        right: 0,
+        bottom: "calc(16px + env(safe-area-inset-bottom,0))",
+        display: "flex",
+        justifyContent: "center",
+        pointerEvents: "none",
+        zIndex: 3500
+      }}
+    >
       {msg && (
-        <div className="card" style={{ background: "#111827", color: "white", borderRadius: 12, padding: "10px 14px", boxShadow: "0 8px 20px rgba(0,0,0,.25)", pointerEvents: "all" }}>
-          {msg}
+        <div
+          className="card"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 10,
+            background: "#ffffff",
+            color: "var(--text)",
+            borderRadius: 14,
+            padding: "10px 14px",
+            boxShadow: "0 8px 20px rgba(0,0,0,.14)",
+            border: "1px solid var(--border)",
+            pointerEvents: "all"
+          }}
+        >
+          {/* Swap 🦋 for your actual BYB logo if available:
+              <img src="/byb-butterfly.svg" alt="" width={18} height={18} /> */}
+          <span
+            aria-hidden="true"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 22,
+              height: 22,
+              borderRadius: 999,
+              background: "var(--primary-soft)",
+              border: "1px solid var(--border)",
+              fontSize: 14,
+              lineHeight: 1
+            }}
+          >
+            🦋
+          </span>
+          <span style={{ fontWeight: 700 }}>{msg}</span>
         </div>
       )}
     </div>
   );
+
   return { node, show };
 }
 
@@ -484,7 +535,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         .eq("id", t.id);
       if (error) throw error;
       await loadAll();
-      if (markDone) { fireConfetti(); toast.show(`Alfred: ${pick(ALFRED_LINES)}`); }
+      if (markDone) { fireConfetti(); toast.show(pick(ENCOURAGE_LINES)); }
     } catch (e: any) { setErr(e.message || String(e)); }
   }
 
