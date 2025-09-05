@@ -277,17 +277,6 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
 
   /* ---------------------- UI Building Blocks ---------------------- */
 
-  const Header = (
-    <div style={{ display: "grid", gap: 8 }}>
-      <div style={{ height: 8, background: "#eef2ff", borderRadius: 999, overflow: "hidden" }}>
-        <div style={{ width: `${progressPct}%`, height: "100%", background: "#6d28d9", transition: "width 300ms ease" }} />
-      </div>
-      <div className="muted" style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-        <span>Step {stepIndex + 1} of {STEP_ORDER.length}</span>
-        <span>{Math.round(progressPct)}%</span>
-      </div>
-    </div>
-  );
 
   function Nav({ showSkip }: { showSkip?: boolean }) {
     return (
