@@ -1,3 +1,4 @@
+// src/NotesScreen.tsx
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
@@ -50,18 +51,6 @@ function normalizeTitle(s: string) {
   return (s || "").trim().toLowerCase();
 }
 
-/** Public path helper (Vite/CRA/Vercel/GH Pages) */
-function publicPath(p: string) {
-  // @ts-ignore
-  const base =
-    (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
-    (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
-    "";
-  const withSlash = p.startsWith("/") ? p : `/${p}`;
-  return `${base.replace(/\/$/, "")}${withSlash}`;
-}
-const NOTES_ALFRED_SRC = publicPath("/alfred/Notes_Alfred.png");
-
 /* ---------- Modal ---------- */
 function Modal({
   open, onClose, title, children,
@@ -83,7 +72,7 @@ function Modal({
                  boxShadow: "0 10px 30px rgba(0,0,0,0.2)", padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
           <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
-          <button ref={closeRef} onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>✕</button>
+          <button ref={closeRef} onClick={onClose} aria-label="Close" title="Close" style={{ borderRadius: 8 }}>✕</button>
         </div>
         <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
       </div>
@@ -122,6 +111,20 @@ function NotesHelpContent() {
   );
 }
 
+/* ---------- Journal Prompts ---------- */
+const JOURNAL_PROMPTS: string[] = [
+  "Reflect on Challenges: Describe a recent challenge you faced. What did you learn from it, and how can you apply that lesson in the future?",
+  "Overcoming Limiting Beliefs: What is one limiting belief you hold about yourself? How can you challenge and change that belief?",
+  "Growth Through Feedback: Write about a time you received constructive criticism. How did it make you feel, and what actions did you take as a result?",
+  "Admiration and Learning: Think of someone you admire for their growth mindset. What qualities do they possess that you can learn from?",
+  "Embracing Failure: Describe a failure you experienced. What did it teach you, and how can you use that lesson to grow?",
+  "Future Vision: Imagine yourself five years from now with a fully developed growth mindset. What does your life look like?",
+  "Positive Self-Talk: List three positive affirmations you can tell yourself to reinforce a growth mindset.",
+  "Comfort Zone: What is one thing you can do this week to step outside your comfort zone?",
+  "Learning from Others: Write about a person who has influenced your growth mindset. What did you learn from them?",
+  "Daily Reflection: At the end of each day, write about one thing you learned and one way you challenged yourself.",
+];
+
 /* ---------- Main ---------- */
 export default function NotesScreen() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -149,9 +152,9 @@ export default function NotesScreen() {
   const [statusFilter, setStatusFilter] = useState<"active" | "archived">("active");
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
 
-  // Alfred
+  // modals
   const [showHelp, setShowHelp] = useState(false);
-  const [imgOk, setImgOk] = useState(true);
+  const [showPrompts, setShowPrompts] = useState(false);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const saveTimer = useRef<number | null>(null);
@@ -442,33 +445,18 @@ export default function NotesScreen() {
   /* ---------- UI ---------- */
   return (
     <div className="page-notes" style={{ display: "grid", gap: 12 }}>
-      {/* Title + Alfred */}
-      <div className="card" style={{ position: "relative", paddingRight: 64 }}>
+      {/* Title + Help (generic) */}
+      <div className="card" style={{ position: "relative" }}>
         <button
           onClick={() => setShowHelp(true)}
           aria-label="Open Notes help"
-          title="Need a hand? Ask Alfred"
+          title="Help"
           style={{
-            position: "absolute", top: 8, right: 8, border: "none",
-            background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10,
+            position: "absolute", top: 8, right: 8, border: "1px solid var(--border)",
+            background: "#f9fafb", padding: "6px 10px", cursor: "pointer", borderRadius: 8,
           }}
         >
-          {imgOk ? (
-            <img
-              src={NOTES_ALFRED_SRC}
-              alt="Notes Alfred — open help"
-              style={{ width: 48, height: 48 }}
-              onError={() => setImgOk(false)}
-            />
-          ) : (
-            <span
-              style={{
-                display: "inline-flex", alignItems: "center", justifyContent: "center",
-                width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db",
-                background: "#f9fafb", fontWeight: 700,
-              }}
-            >?</span>
-          )}
+          ?
         </button>
         <h1 style={{ margin: 0 }}>Notes / Journal</h1>
         <div className="muted" style={{ marginTop: 4 }}>Capture ideas, plan work, and reflect daily.</div>
@@ -478,9 +466,14 @@ export default function NotesScreen() {
         <div className="notes-layout" style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 12 }}>
           {/* Sidebar */}
           <aside className="card" style={{ display:"grid", gridTemplateRows:"auto auto auto auto 1fr auto", gap:10, minWidth:0 }}>
-            {/* Quick capture */}
+            {/* Quick capture + Journal prompts */}
             <div style={{ display:"grid", gap:6 }}>
-              <div className="section-title">Quick capture</div>
+              <div className="section-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span>Quick capture</span>
+                <button className="btn-soft" onClick={() => setShowPrompts(true)} title="Pick a journal prompt" style={{ borderRadius: 999 }}>
+                  Journal prompts
+                </button>
+              </div>
               <textarea
                 rows={3}
                 placeholder="New journal entry or note… (hashtags like #idea work too)"
@@ -679,33 +672,3 @@ export default function NotesScreen() {
                     <button onClick={()=>archiveNote(activeNote)}>Archive</button>
                   )}
 
-                  <button onClick={saveAndClose} className="btn-primary" style={{ borderRadius:8 }}>
-                    Save & Close
-                  </button>
-
-                  <button onClick={()=>deleteNote(activeNote)} style={{ borderColor:"#fca5a5", color:"#b91c1c", background:"#fff5f5" }}>
-                    Delete
-                  </button>
-
-                  <div className="muted" style={{ marginLeft:"auto" }}>
-                    Created {formatDate(activeNote.created_at)} · Updated {formatDate(activeNote.updated_at)}
-                  </div>
-                </div>
-              </>
-            )}
-          </main>
-        </div>
-      </div>
-
-      {/* Help modal */}
-      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Notes / Journal — Help">
-        <div style={{ display: "flex", gap: 16 }}>
-          {imgOk && <img src={NOTES_ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
-          <div style={{ flex: 1 }}>
-            <NotesHelpContent />
-          </div>
-        </div>
-      </Modal>
-    </div>
-  );
-}
