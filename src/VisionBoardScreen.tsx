@@ -85,18 +85,7 @@ async function idbGetBlob(path: string): Promise<Blob | null> {
   db.close();
   return out;
 }
-async function idbGetAllKeys(): Promise<string[]> {
-  const db = await idbOpen();
-  const out = await new Promise<string[]>((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, "readonly");
-    const store = tx.objectStore(IDB_STORE);
-    const req = store.getAllKeys();
-    req.onsuccess = () => resolve((req.result as IDBValidKey[]).map(String));
-    req.onerror = () => reject(req.error);
-  });
-  db.close();
-  return out;
-}
+
 
 /* ========================== MAIN SCREEN ========================== */
 
