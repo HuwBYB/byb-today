@@ -52,18 +52,7 @@ type TemplateRow = {
   };
 };
 
-/* ---------- Path + date helpers ---------- */
-function publicPath(p: string) {
-  // @ts-ignore
-  const base =
-    (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
-    (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
-    "";
-  const withSlash = p.startsWith("/") ? p : `/${p}`;
-  return `${base.replace(/\/$/, "")}${withSlash}`;
-}
-const EX_ALFRED_SRC = publicPath("/alfred/Exercise_Alfred.png");
-
+/* ---------- Date helpers ---------- */
 function toISO(d: Date) {
   const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
@@ -113,33 +102,6 @@ function Modal({
   );
 }
 
-/* ---------- Inlined help content ---------- */
-function ExerciseHelpContent() {
-  return (
-    <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
-      <p><em>“Exercise should be part of everyone’s life — whether that’s a short walk or a full workout.”</em></p>
-
-      <h4 style={{ margin: 0 }}>Quick start</h4>
-      <ol style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Tap <b>New session</b>.</li>
-        <li>Use <b>Quick add</b> to log what you’re doing.</li>
-        <li>When you’re done, tap <b>Complete session</b>.</li>
-      </ol>
-
-      <h4 style={{ margin: 0 }}>Weights workflow</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Add an exercise, then name it in the row input.</li>
-        <li>Add sets, record <b>kg</b> and <b>reps</b>. Use history to copy last sets.</li>
-      </ul>
-
-      <h4 style={{ margin: 0 }}>Cardio & classes</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Log <b>duration</b> (mm:ss) and <b>distance</b> (km) if relevant — pace is automatic.</li>
-      </ul>
-    </div>
-  );
-}
-
 /* ---------- Main ---------- */
 export default function ExerciseDiaryScreen() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -160,10 +122,6 @@ export default function ExerciseDiaryScreen() {
   const [openHistoryFor, setOpenHistoryFor] = useState<Record<number, boolean>>({});
   const [loadingPrevFor, setLoadingPrevFor] = useState<Record<number, boolean>>({});
   const [prevByItem, setPrevByItem] = useState<Record<number, PrevEntry[]>>({});
-
-  // help modal
-  const [showHelp, setShowHelp] = useState(false);
-  const [imgOk, setImgOk] = useState(true);
 
   // collapsed
   const [finished, setFinished] = useState(false);
@@ -961,47 +919,8 @@ export default function ExerciseDiaryScreen() {
 
   return (
     <div className="page-exercise" style={{ display: "grid", gap: 12 }}>
-      {/* Title card with Alfred */}
-      <div className="card" style={{ position: "relative", paddingRight: 64 }}>
-        <button
-          onClick={() => setShowHelp(true)}
-          aria-label="Open Exercise help"
-          title="Need a hand? Ask Alfred"
-          style={{
-            position: "absolute",
-            top: 8,
-            right: 8,
-            border: "none",
-            background: "transparent",
-            padding: 0,
-            cursor: "pointer",
-            lineHeight: 0,
-            zIndex: 10,
-          }}
-        >
-          {imgOk ? (
-            <img
-              src={EX_ALFRED_SRC}
-              alt="Exercise Alfred — open help"
-              style={{ width: 48, height: 48 }}
-              onError={() => setImgOk(false)}
-            />
-          ) : (
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 36, height: 36, borderRadius: 999,
-                border: "1px solid #d1d5db",
-                background: "#f9fafb",
-                fontWeight: 700,
-              }}
-            >
-              ?
-            </span>
-          )}
-        </button>
+      {/* Title */}
+      <div className="card">
         <h1 style={{ margin: 0 }}>Exercise Diary</h1>
       </div>
 
@@ -1248,16 +1167,6 @@ export default function ExerciseDiaryScreen() {
           </aside>
         </div>
       </div>
-
-      {/* Help modal */}
-      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Exercise — Help">
-        <div style={{ display: "flex", gap: 16 }}>
-          {imgOk && <img src={EX_ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
-          <div style={{ flex: 1 }}>
-            <ExerciseHelpContent />
-          </div>
-        </div>
-      </Modal>
 
       {/* History Modal */}
       {modalOpen && (
