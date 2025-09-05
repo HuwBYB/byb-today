@@ -66,10 +66,17 @@ export default function App() {
       const u = sess?.user || null;
       setUserId(u?.id ?? null);
       if (u?.id) loadProfile(u.id);
-      else { setProfile(null); setProfileLoading(false); }
+      else {
+        setProfile(null);
+        setProfileLoading(false);
+      }
     });
     unsub = () => sub.data.subscription.unsubscribe();
-    return () => { try { unsub?.(); } catch {} };
+    return () => {
+      try {
+        unsub?.();
+      } catch {}
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -92,34 +99,57 @@ export default function App() {
   }
 
   function onboardingLocalDone(): boolean {
-    try { return localStorage.getItem(LS_DONE) === "1"; } catch { return false; }
+    try {
+      return localStorage.getItem(LS_DONE) === "1";
+    } catch {
+      return false;
+    }
   }
-  function profileSaysDone(p: ProfileRow | null): boolean { return !!p?.onboarding_done; }
+  function profileSaysDone(p: ProfileRow | null): boolean {
+    return !!p?.onboarding_done;
+  }
   function showOnboarding(): boolean {
     if (profileSaysDone(profile)) return false;
     if (onboardingLocalDone()) return false;
     return true;
   }
-  async function handleOnboardingDone() { if (userId) await loadProfile(userId); }
+  async function handleOnboardingDone() {
+    if (userId) await loadProfile(userId);
+  }
 
   /* ----- routing ----- */
   function renderTab() {
     switch (tab) {
-      case "today":        return <TodayScreen externalDateISO={externalDateISO} />;
-      case "menu":         return <MenuScreen onOpenTab={(k) => setTab(k as Tab)} />;
-      case "calendar":     return <CalendarScreen />;
-      case "goals":        return <GoalsScreen />;
-      case "vision":       return <VisionBoardScreen />;
-      case "gratitude":    return <GratitudeScreen />;
-      case "exercise":     return <ExerciseDiaryScreen />;
-      case "wins":         return <WinsScreen />;
-      case "alfred":       return <AlfredScreen />;
-      case "confidence":   return <ConfidenceScreen />;
-      case "notes":        return <NotesScreen />;
-      case "focus":        return <FocusAlfredScreen />;
-      case "meditation":   return <MeditationScreen />;
-      case "affirmations": return <AffirmationBuilder />;
-      default:             return <TodayScreen externalDateISO={externalDateISO} />;
+      case "today":
+        return <TodayScreen externalDateISO={externalDateISO} />;
+      case "menu":
+        return <MenuScreen onOpenTab={(k) => setTab(k as Tab)} />;
+      case "calendar":
+        return <CalendarScreen />;
+      case "goals":
+        return <GoalsScreen />;
+      case "vision":
+        return <VisionBoardScreen />;
+      case "gratitude":
+        return <GratitudeScreen />;
+      case "exercise":
+        return <ExerciseDiaryScreen />;
+      case "wins":
+        return <WinsScreen />;
+      case "alfred":
+        return <AlfredScreen />;
+      case "confidence":
+        return <ConfidenceScreen />;
+      case "notes":
+        return <NotesScreen />;
+      case "focus":
+        return <FocusAlfredScreen />;
+      case "meditation":
+        return <MeditationScreen />;
+      case "affirmations":
+        return <AffirmationBuilder />;
+      default:
+        return <TodayScreen externalDateISO={externalDateISO} />;
     }
   }
 
@@ -129,49 +159,39 @@ export default function App() {
 
   return (
     <AuthGate>
-      {/* Top bar — left-aligned logo + name, opens the Menu */}
+      {/* Top bar — left-aligned banner, opens the Menu */}
       <header
         role="button"
         aria-label="Open menu"
         onClick={() => setTab("menu")}
         tabIndex={0}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setTab("menu"); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") setTab("menu");
+        }}
         style={{
           position: "sticky",
           top: "env(safe-area-inset-top, 0)",
           zIndex: 1000,
-          background: "#D7F0FA", // pale blue fallback
+          background: "#D7F0FA",
           display: "flex",
           alignItems: "center",
           justifyContent: "flex-start",
-          gap: 10,
           padding: "8px 12px",
           borderBottom: "1px solid var(--border)",
           cursor: "pointer",
         }}
       >
-        {/* Use your BannerMenu asset as the logo */}
         <img
           src="/BannerMenu"
-          alt="BYB logo"
+          alt="Best You Blueprint"
           style={{
-            height: 28,
+            height: 32,
             width: "auto",
             objectFit: "contain",
             borderRadius: 6,
             flex: "0 0 auto",
           }}
         />
-
-        <span
-
-        {/* If you ever want a right-side decorative banner, drop it here */}
-        {/* <img
-          src="/BannerMenu"
-          alt=""
-          aria-hidden
-          style={{ marginLeft: "auto", height: 40, width: "auto", objectFit: "contain" }}
-        /> */}
       </header>
 
       {/* Hidden date input (kept for future use; not visible) */}
@@ -180,7 +200,13 @@ export default function App() {
         type="date"
         value={selectedISO}
         onChange={(e) => setExternalDateISO(e.target.value || undefined)}
-        style={{ position: "absolute", opacity: 0, width: 0, height: 0, pointerEvents: "none" }}
+        style={{
+          position: "absolute",
+          opacity: 0,
+          width: 0,
+          height: 0,
+          pointerEvents: "none",
+        }}
         aria-hidden
       />
 
