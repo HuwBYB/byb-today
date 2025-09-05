@@ -1,5 +1,4 @@
-// api/eva.js -> proxy to alfred.js
-const mod = require('./alfred.js');
-const handler = mod.default || mod;
-module.exports = (req, res) => handler(req, res);
-if (mod.config) module.exports.config = mod.config;
+// api/eva.js
+export { default } from "./alfred.js";
+// If you ever add a named export like `export const config = …` in alfred.js,
+// you can forward it too with:  export { config } from "./alfred.js";
