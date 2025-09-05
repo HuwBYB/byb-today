@@ -8,7 +8,7 @@ type MenuItem = {
     | "gratitude"
     | "exercise"
     | "wins"
-    | "alfred"     // <-- keep router key for Eva
+    | "alfred"     // keep router key for Eva
     | "eva"        // optional: keep in the type for future-proofing
     | "confidence"
     | "notes"
@@ -42,12 +42,19 @@ export default function MenuScreen({
 }: {
   onOpenTab: (key: MenuItem["key"]) => void;
 }) {
-  // If you ever reintroduce "eva" in ITEMS, this keeps back-compat
+  // Back-compat if "eva" ever appears in ITEMS
   const resolveKey = (k: MenuItem["key"]): MenuItem["key"] =>
     k === "eva" ? "alfred" : k;
 
   return (
-    <div style={{ display: "grid", gap: 12 }}>
+    <div
+      style={{
+        display: "grid",
+        gap: 12,
+        // Safe padding so bottom items are fully tappable above mobile toolbars/overlays
+        paddingBottom: "calc(24px + env(safe-area-inset-bottom, 0px))",
+      }}
+    >
       {/* Today Page card right at the top */}
       <div
         className="card"
@@ -63,7 +70,7 @@ export default function MenuScreen({
       </div>
 
       {/* Rest of the menu */}
-      <div className="card" style={{ padding: 12 }}>
+      <div className="card" style={{ padding: 12, position: "relative", zIndex: 1 }}>
         <div
           style={{
             display: "grid",
@@ -84,7 +91,7 @@ export default function MenuScreen({
                 alignContent: "center",
                 justifyItems: "center",
                 textAlign: "center",
-                minHeight: 110,
+                minHeight: 120, // a touch more height for comfortable tap area
               }}
             >
               {/* Icon container for both emoji and image */}
@@ -102,11 +109,7 @@ export default function MenuScreen({
                   <img
                     src={it.icon}
                     alt=""
-                    style={{
-                      maxWidth: "32px",
-                      maxHeight: "32px",
-                      objectFit: "contain",
-                    }}
+                    style={{ maxWidth: "32px", maxHeight: "32px", objectFit: "contain" }}
                   />
                 ) : (
                   <span style={{ fontSize: 28, lineHeight: 1 }}>{it.icon}</span>
@@ -114,11 +117,14 @@ export default function MenuScreen({
               </div>
 
               {/* Label (uniform spacing from icon) */}
-              <div style={{ fontWeight: 700, marginTop: 10 }}>{it.label}</div>
+              <div style={{ fontWeight: 700, marginTop: 12 }}>{it.label}</div>
             </button>
           ))}
         </div>
       </div>
+
+      {/* Bottom spacer to guarantee tap room beyond any fixed elements */}
+      <div style={{ height: 40 }} />
     </div>
   );
 }
