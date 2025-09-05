@@ -8,7 +8,8 @@ type MenuItem = {
     | "gratitude"
     | "exercise"
     | "wins"
-    | "eva"
+    | "alfred"     // <-- keep router key for Eva
+    | "eva"        // optional: keep in the type for future-proofing
     | "confidence"
     | "notes"
     | "focus"
@@ -27,7 +28,8 @@ const ITEMS: MenuItem[] = [
   { key: "gratitude",    label: "Gratitude",       icon: "🙏" },
   { key: "exercise",     label: "Exercise",        icon: "🏋️" },
   { key: "wins",         label: "Your Wins",       icon: "🏆" },
-  { key: "eva",          label: "Eva",             icon: "💡" },
+  // Use the router's existing key but the new name
+  { key: "alfred",       label: "Eva",             icon: "💡" },
   { key: "confidence",   label: "Confidence",      icon: "🔥" },
   { key: "notes",        label: "Notes / Journal", icon: "📝" },
   { key: "focus",        label: "Focus",           icon: "🎧" },
@@ -40,6 +42,10 @@ export default function MenuScreen({
 }: {
   onOpenTab: (key: MenuItem["key"]) => void;
 }) {
+  // If you ever reintroduce "eva" in ITEMS, this keeps back-compat
+  const resolveKey = (k: MenuItem["key"]): MenuItem["key"] =>
+    k === "eva" ? "alfred" : k;
+
   return (
     <div style={{ display: "grid", gap: 12 }}>
       {/* Today Page card right at the top */}
@@ -68,7 +74,7 @@ export default function MenuScreen({
           {ITEMS.filter((it) => it.key !== "today").map((it) => (
             <button
               key={it.key}
-              onClick={() => onOpenTab(it.key)}
+              onClick={() => onOpenTab(resolveKey(it.key))}
               className="btn-soft"
               style={{
                 borderRadius: 16,
@@ -107,8 +113,8 @@ export default function MenuScreen({
                 )}
               </div>
 
-              {/* Label */}
-              <div style={{ fontWeight: 700, marginTop: 8 }}>{it.label}</div>
+              {/* Label (uniform spacing from icon) */}
+              <div style={{ fontWeight: 700, marginTop: 10 }}>{it.label}</div>
             </button>
           ))}
         </div>
