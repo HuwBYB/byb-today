@@ -446,14 +446,7 @@ Keep it present-tense, positive, under 12 words, believable:
           </div>
         </div>
 
-        {/* Footer note + explicit button to Confidence */}
-        <div className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div className="muted">Saved items go to your Confidence page’s rotation for today.</div>
-          <a href="/confidence" className="btn-primary" style={{ borderRadius: 10, padding: "8px 12px", textDecoration: "none" }}>
-            Open Confidence →
-          </a>
-        </div>
-      </div>
+   
 
       {/* Help modal */}
       <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Affirmation Builder — Help">
