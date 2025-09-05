@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+// src/CalendarScreen.tsx
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* ===================== Types ===================== */
@@ -27,77 +28,6 @@ const CATS = [
 type CatKey = typeof CATS[number]["key"];
 const colorOf = (k: CatKey | null | undefined) =>
   CATS.find(c => c.key === k)?.color || "#6b7280";
-
-/** Public path helper (Vite/CRA/Vercel/GH Pages) */
-function publicPath(p: string) {
-  // @ts-ignore
-  const base =
-    (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
-    (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
-    "";
-  const withSlash = p.startsWith("/") ? p : `/${p}`;
-  return `${base.replace(/\/$/, "")}${withSlash}`;
-}
-
-/** Alfred image candidates */
-const CAL_ALFRED_CANDIDATES = [
-  "/alfred/Calendar_Alfred.png",
-  "/alfred/Calendar_Alfred.jpg",
-  "/alfred/Calendar_Alfred.jpeg",
-  "/alfred/Calendar_Alfred.webp",
-].map(publicPath);
-
-/* ---------- Modal ---------- */
-function Modal({
-  open, onClose, title, children,
-}: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
-  const closeRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    if (open) window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-  useEffect(() => { if (open && closeRef.current) closeRef.current.focus(); }, [open]);
-  if (!open) return null;
-  return (
-    <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 2000,
-               display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 760, width: "100%", background: "#fff", borderRadius: 12,
-                 boxShadow: "0 10px 30px rgba(0,0,0,0.2)", padding: 20 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
-          <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
-          <button ref={closeRef} onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>✕</button>
-        </div>
-        <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
-      </div>
-    </div>
-  );
-}
-
-/* ---------- Inline help content ---------- */
-function CalendarHelpContent() {
-  return (
-    <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
-      <p><em>Keep key dates in one place — add naturally, repeat flexibly, and export anywhere.</em></p>
-
-      <h4 style={{ margin: "8px 0" }}>Quick add (examples)</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li><code>Lunch with Ana tomorrow #personal !high</code></li>
-        <li><code>Gym every Mon,Wed,Fri #health</code></li>
-        <li><code>Invoice client on 15 Sep every month until 2026-06-01 #career</code></li>
-        <li><code>Pay VAT 15/10 every 2 weeks !high</code></li>
-      </ul>
-
-      <h4 style={{ margin: "8px 0" }}>Tips</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Week view for rapid planning; Month view for the big picture.</li>
-        <li>Export to ICS/CSV for other calendars; import ICS/CSV to pull dates in.</li>
-      </ul>
-    </div>
-  );
-}
 
 /* ========================== MAIN SCREEN ========================== */
 
@@ -187,23 +117,12 @@ export default function CalendarScreen({
   const [nlp, setNlp] = useState("");
   const [addingNlp, setAddingNlp] = useState(false);
 
-  // Import/Export
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [exporting, setExporting] = useState<"ics" | "csv" | null>(null);
-  const [importing, setImporting] = useState(false);
-
-  // Alfred modal
-  const [showHelp, setShowHelp] = useState(false);
-  const [imgIdx, setImgIdx] = useState(0);
-  const ALFRED_SRC = CAL_ALFRED_CANDIDATES[imgIdx] ?? "";
-
   // Month/year selectors
   const months = useMemo(
     () => Array.from({ length: 12 }, (_, i) => ({
       value: i,
       label: new Date(2000, i, 1).toLocaleString(undefined, { month: "long" })
-    })),
-    []
+    })), []
   );
   const years = useMemo(() => {
     const y = today.getFullYear();
@@ -433,128 +352,15 @@ export default function CalendarScreen({
     }
   }
 
-  /* ================= Import / Export ================= */
-  async function exportICS() {
-    setExporting("ics");
-    try {
-      const events: Task[] = [];
-      const first = toISO(firstDayOfMonth), last = toISO(lastDayOfMonth);
-      for (const [iso, list] of Object.entries(tasksByDay)) {
-        if (iso >= first && iso <= last) events.push(...list);
-      }
-      const ics = toICS(events);
-      const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
-      downloadBlob(blob, `calendar_${monthLabel.replace(/\s/g, "_")}.ics`);
-    } finally {
-      setExporting(null);
-    }
-  }
-
-  async function exportCSV() {
-    setExporting("csv");
-    try {
-      const rows: string[] = ["date,title,category,priority"];
-      const first = toISO(firstDayOfMonth), last = toISO(lastDayOfMonth);
-      for (const [iso, list] of Object.entries(tasksByDay)) {
-        if (iso < first || iso > last) continue;
-        for (const t of list) {
-          rows.push(`${iso},"${csvEscape(t.title || "")}",${t.category || ""},${t.priority ?? ""}`);
-        }
-      }
-      const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
-      downloadBlob(blob, `calendar_${monthLabel.replace(/\s/g, "_")}.csv`);
-    } finally {
-      setExporting(null);
-    }
-  }
-
-  function onImportClick() {
-    fileInputRef.current?.click();
-  }
-
-  async function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file || !userId) return;
-    setImporting(true);
-    setErr(null);
-    try {
-      const text = await file.text();
-      let rows: Array<{ title: string; due_date: string; category?: CatKey; priority?: number }> = [];
-      if (file.name.toLowerCase().endsWith(".ics")) {
-        rows = parseICS(text);
-      } else {
-        rows = parseCSV(text);
-      }
-      if (!rows.length) throw new Error("No events found in file.");
-
-      // sanitize + clamp categories/priorities
-      const inserts = rows.map(r => ({
-        user_id: userId,
-        title: (r.title || "").trim(),
-        due_date: r.due_date,
-        category: (r.category && isCatKey(r.category)) ? r.category : "other",
-        category_color: colorOf((r.category && isCatKey(r.category)) ? r.category : "other"),
-        priority: (r.priority && [1,2,3].includes(r.priority)) ? r.priority : 2,
-        source: "calendar_import",
-      }));
-
-      const { data, error } = await supabase.from("tasks").insert(inserts as any).select();
-      if (error) throw error;
-
-      // merge into current month cache if visible
-      const first = toISO(firstDayOfMonth), last = toISO(lastDayOfMonth);
-      setTasksByDay(prev => {
-        const map = { ...prev };
-        for (const t of data as Task[]) {
-          const day = (t.due_date || "").slice(0, 10);
-          if (day && day >= first && day <= last) {
-            (map[day] ||= []).push(t);
-          }
-        }
-        return map;
-      });
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
-      setImporting(false);
-      e.target.value = ""; // reset
-    }
-  }
-
   const dayTasks = tasksByDay[selectedISO] || [];
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      {/* Title card with Alfred + controls */}
-      <div className="card" style={{ position: "relative", display: "grid", gap: 10, paddingRight: 64 }}>
-        {/* Alfred — top-right */}
-        <button
-          onClick={() => setShowHelp(true)}
-          aria-label="Open Calendar help"
-          title="Need a hand? Ask Alfred"
-          style={{
-            position: "absolute", top: 8, right: 8,
-            border: "none", background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10,
-          }}
-        >
-          {ALFRED_SRC ? (
-            <img
-              src={ALFRED_SRC}
-              alt="Calendar Alfred — open help"
-              style={{ width: 48, height: 48 }}
-              onError={() => setImgIdx(i => i + 1)}
-            />
-          ) : (
-            <span style={{
-              display: "inline-flex", alignItems: "center", justifyContent: "center",
-              width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db", background: "#f9fafb", fontWeight: 700,
-            }}>?</span>
-          )}
-        </button>
-
+      {/* Title card with controls (Alfred/help & Import/Export removed) */}
+      <div className="card" style={{ position: "relative", display: "grid", gap: 10 }}>
         <h1 style={{ margin: 0 }}>Calendar</h1>
 
-        {/* Row: Left controls + View toggle + Import/Export */}
+        {/* Row: Left controls + View toggle */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap", flexWrap: "wrap" }}>
             <button onClick={goToday} title="Go to today" aria-label="Go to today"
@@ -590,17 +396,6 @@ export default function CalendarScreen({
                 Week
               </button>
             </div>
-
-            <button onClick={exportICS} disabled={!!exporting} className="btn-soft" title="Export current month (.ics)">
-              {exporting === "ics" ? "Exporting…" : "Export ICS"}
-            </button>
-            <button onClick={exportCSV} disabled={!!exporting} className="btn-soft" title="Export current month (.csv)">
-              {exporting === "csv" ? "Exporting…" : "Export CSV"}
-            </button>
-            <button onClick={onImportClick} disabled={importing} className="btn-soft" title="Import ICS/CSV">
-              {importing ? "Importing…" : "Import"}
-            </button>
-            <input ref={fileInputRef} type="file" accept=".ics,.csv,text/calendar,text/csv" onChange={onImportFile} style={{ display: "none" }} />
           </div>
         </div>
 
@@ -736,7 +531,7 @@ export default function CalendarScreen({
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
             <h2 style={{ margin: 0 }}>{selectedISO}</h2>
             <span className="muted">
-              {loading ? "Loading…" : `${dayTasks.length} task${dayTasks.length === 1 ? "" : "s"}`}
+              {loading ? "Loading…" : `${(tasksByDay[selectedISO] || []).length} task${(tasksByDay[selectedISO] || []).length === 1 ? "" : "s"}`}
             </span>
           </div>
 
@@ -818,24 +613,6 @@ export default function CalendarScreen({
         </ul>
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
-
-      {/* Help modal */}
-      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Calendar — Help">
-        <div style={{ display: "flex", gap: 16 }}>
-          {ALFRED_SRC && (
-            <img
-              src={ALFRED_SRC}
-              alt=""
-              aria-hidden="true"
-              style={{ width: 72, height: 72, flex: "0 0 auto" }}
-              onError={() => setImgIdx(i => i + 1)}
-            />
-          )}
-          <div style={{ flex: 1 }}>
-            <CalendarHelpContent />
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }
@@ -1080,120 +857,6 @@ function relativeToISO(token: string, baseISO: string): string | null {
 function mapWeekday(tok: string): number {
   const m: Record<string, number> = { mon:1, tue:2, tues:2, wed:3, thu:4, thur:4, thurs:4, fri:5, sat:6, sun:7 };
   return m[tok] || 1;
-}
-
-/* ===================== Import/Export helpers ===================== */
-function toICS(events: Task[]) {
-  const lines = [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    "PRODID:-//BYB//Calendar//EN",
-  ];
-  const dtstamp = toICSDate(new Date());
-  for (const ev of events) {
-    const dt = ev.due_date ? ev.due_date.replace(/-/g, "") : "";
-    if (!dt) continue;
-    const uid = `${ev.id || Math.random().toString(36).slice(2)}@byb`;
-    lines.push(
-      "BEGIN:VEVENT",
-      `UID:${uid}`,
-      `DTSTAMP:${dtstamp}`,
-      `DTSTART;VALUE=DATE:${dt}`,
-      `SUMMARY:${icsEscape(ev.title || "")}`,
-      "END:VEVENT"
-    );
-  }
-  lines.push("END:VCALENDAR");
-  return lines.join("\r\n");
-}
-function toICSDate(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  const ss = String(d.getSeconds()).padStart(2, "0");
-  return `${y}${m}${day}T${hh}${mm}${ss}Z`;
-}
-function icsEscape(s: string) {
-  return s.replace(/([,;])/g, "\\$1");
-}
-function parseICS(text: string): Array<{ title: string; due_date: string; category?: CatKey; priority?: number }> {
-  const rows: Array<{ title: string; due_date: string; category?: CatKey; priority?: number }> = [];
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
-  let cur: { summary?: string; dtstart?: string } = {};
-  for (const line of lines) {
-    if (line.startsWith("BEGIN:VEVENT")) cur = {};
-    else if (line.startsWith("SUMMARY:")) cur.summary = line.slice(8).trim();
-    else if (line.startsWith("DTSTART")) {
-      const parts = line.split(":");
-      const val = parts[1]?.trim() || "";
-      // handle VALUE=DATE:YYYYMMDD
-      const y = val.slice(0, 4), m = val.slice(4, 6), d = val.slice(6, 8);
-      if (y && m && d) cur.dtstart = `${y}-${m}-${d}`;
-    } else if (line.startsWith("END:VEVENT")) {
-      if (cur.summary && cur.dtstart) {
-        rows.push({ title: cur.summary, due_date: cur.dtstart });
-      }
-      cur = {};
-    }
-  }
-  return rows;
-}
-function parseCSV(text: string): Array<{ title: string; due_date: string; category?: CatKey; priority?: number }> {
-  const out: Array<{ title: string; due_date: string; category?: CatKey; priority?: number }> = [];
-  const lines = text.replace(/\r\n/g, "\n").split("\n").filter(Boolean);
-  if (!lines.length) return out;
-  let startIdx = 0;
-  const first = lines[0].toLowerCase();
-  if (first.includes("date") && first.includes("title")) { startIdx = 1; }
-  for (let i = startIdx; i < lines.length; i++) {
-    const cols = splitCsvLine(lines[i]);
-    if (!cols.length) continue;
-    // Expect date,title,category,priority (flexible)
-    const dateCol = cols[0]?.trim() || "";
-    const titleCol = cols[1]?.trim() || "";
-    const catCol = (cols[2]?.trim() || "") as CatKey;
-    const priCol = cols[3]?.trim();
-    const iso = normalizeAnyDateToISO(dateCol, toISO(new Date())) || "";
-    if (!iso || !titleCol) continue;
-    const pri = priCol ? Number(priCol) : undefined;
-    out.push({ title: unquote(titleCol), due_date: iso, category: isCatKey(catCol) ? catCol : undefined, priority: isFinite(pri as number) ? (pri as number) : undefined });
-  }
-  return out;
-}
-function splitCsvLine(line: string): string[] {
-  const out: string[] = [];
-  let cur = "";
-  let inQ = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
-      else inQ = !inQ;
-    } else if (ch === "," && !inQ) {
-      out.push(cur); cur = "";
-    } else cur += ch;
-  }
-  out.push(cur);
-  return out;
-}
-function csvEscape(s: string) {
-  if (s.includes(",") || s.includes('"') || s.includes("\n")) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
-function unquote(s: string) {
-  if (s.startsWith('"') && s.endsWith('"')) return s.slice(1, -1).replace(/""/g, '"');
-  return s;
-}
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = filename; a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
-}
-function isCatKey(k: any): k is CatKey {
-  return ["personal","health","career","financial","other"].includes(k);
 }
 
 /* ===================== date utils ===================== */
