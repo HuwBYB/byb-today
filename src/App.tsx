@@ -164,20 +164,6 @@ export default function App() {
         />
 
         <span
-          style={{
-            fontSize: 16,
-            fontWeight: 700,
-            letterSpacing: 0.2,
-            lineHeight: 1,
-            color: "var(--foreground, #0a0a0a)",
-            userSelect: "none",
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          Best You Blueprint
-        </span>
 
         {/* If you ever want a right-side decorative banner, drop it here */}
         {/* <img
