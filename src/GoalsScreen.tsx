@@ -3,30 +3,6 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 import BigGoalWizard from "./BigGoalWizard";
 
-/* ---------- Keyboard shield (blocks global shortcuts while typing in wizard) ---------- */
-function KeyboardShield({ children }: { children: ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const stop = (ev: Event) => {
-      const root = ref.current;
-      if (!root) return;
-      if (root.contains(ev.target as Node)) {
-        // Stop native listeners above (document/window) from seeing this
-        ev.stopPropagation();
-        // @ts-ignore
-        if (typeof (ev as any).stopImmediatePropagation === "function") {
-          // @ts-ignore
-          (ev as any).stopImmediatePropagation();
-        }
-      }
-    };
-    const types: Array<keyof DocumentEventMap> = ["keydown", "keypress", "keyup"];
-    types.forEach(t => document.addEventListener(t, stop, true)); // capture phase
-    return () => types.forEach(t => document.removeEventListener(t, stop, true));
-  }, []);
-  return <div ref={ref}>{children}</div>;
-}
-
 /* ---------- Categories + colours (match DB constraint) ---------- */
 const CATS = [
   { key: "personal",  label: "Personal",  color: "#a855f7" },
@@ -192,6 +168,9 @@ export default function GoalsScreen() {
   // Help modal
   const [showHelp, setShowHelp] = useState(false);
 
+  // Refs to scroll/focus wizard when opening
+  const wizardAnchorRef = useRef<HTMLDivElement>(null);
+
   /* ----- auth ----- */
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
@@ -257,7 +236,7 @@ export default function GoalsScreen() {
 
     const queue: any[] = [];
 
-    // monthly
+    // monthly — same DOM cadence, first >= fromDate
     const monthSteps = (steps as Step[]).filter(s => s.cadence === "monthly");
     if (monthSteps.length) {
       let cursor = addMonthsClamped(start, 0, start.getDate());
@@ -276,11 +255,11 @@ export default function GoalsScreen() {
       }
     }
 
-    // weekly
+    // weekly — cadence every 7 days from (start + 7)
     const weekSteps = (steps as Step[]).filter(s => s.cadence === "weekly");
     if (weekSteps.length) {
       let cursor = new Date(start);
-      cursor.setDate(cursor.getDate() + 7);
+      cursor.setDate(cursor.getDate() + 7); // first weekly
       while (cursor < fromDate) cursor.setDate(cursor.getDate() + 7);
       while (cursor <= end) {
         const due = toISO(cursor);
@@ -296,7 +275,7 @@ export default function GoalsScreen() {
       }
     }
 
-    // daily
+    // daily — from max(fromDate, start)
     const daySteps = (steps as Step[]).filter(s => s.cadence === "daily");
     if (daySteps.length) {
       let cursor = new Date(Math.max(fromDate.getTime(), start.getTime()));
@@ -343,6 +322,7 @@ export default function GoalsScreen() {
     setDaily(d.length ? d : [""]);
     setEditCat(normalizeCat(g.category));
 
+    // —— Auto-loop after halfway: if we're past halfway and no upcoming tasks, reseed from today
     try {
       const today = isoToday();
       const half = (g.halfway_date || "") as string;
@@ -439,8 +419,32 @@ export default function GoalsScreen() {
     }
   }
 
-  // compute balance directly
+  // compute balance directly (no useMemo)
   const balance = computeBalance(goals);
+
+  /* ----- Scroll to wizard & focus the title on open ----- */
+  useEffect(() => {
+    if (!showWizard) return;
+    // Scroll the anchor into view
+    wizardAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    // After paint, try to focus the title input inside the wizard
+    const focusSoon = () => {
+      const root = wizardAnchorRef.current?.parentElement || document;
+      const input = root.querySelector<HTMLInputElement>('input[data-biggoal-title]');
+      if (input) { input.focus({ preventScroll: true }); return true; }
+      return false;
+    };
+
+    // try a few times in case of async render
+    let tries = 0;
+    const id = window.setInterval(() => {
+      tries++;
+      if (focusSoon() || tries >= 8) window.clearInterval(id);
+    }, 60);
+
+    return () => window.clearInterval(id);
+  }, [showWizard]);
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 12 }}>
@@ -476,23 +480,39 @@ export default function GoalsScreen() {
             </label>
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-            <button type="button" className="btn-primary" onClick={createSimpleGoal} disabled={!sgTitle.trim() || creatingSimple} style={{ borderRadius: 8 }}>
+            <button className="btn-primary" onClick={createSimpleGoal} disabled={!sgTitle.trim() || creatingSimple} style={{ borderRadius: 8 }}>
               {creatingSimple ? "Adding…" : "Add Goal"}
             </button>
           </div>
         </div>
 
-        {/* Big Goal wizard */}
-        <button type="button" className="btn-primary" onClick={() => setShowWizard(true)} style={{ borderRadius: 8 }}>
+        {/* Big Goal wizard trigger */}
+        <button
+          className="btn-primary"
+          onClick={() => setShowWizard(true)}
+          style={{ borderRadius: 8 }}
+        >
           + Create Big Goal
         </button>
+
+        {/* Wizard anchor and content */}
+        {showWizard && <div ref={wizardAnchorRef} />}
+
+        {showWizard && (
+          <div style={{ marginTop: 8 }}>
+            <BigGoalWizard
+              onClose={() => setShowWizard(false)}
+              onCreated={() => { setShowWizard(false); loadGoals(); }}
+            />
+          </div>
+        )}
 
         <div className="section-title">Your goals</div>
         <ul className="list">
           {goals.length === 0 && <li className="muted">No goals yet.</li>}
           {goals.map(g => (
             <li key={g.id} className="item">
-              <button type="button" style={{ width: "100%", textAlign: "left", display: "flex", gap: 8, alignItems: "center" }} onClick={() => openGoal(g)}>
+              <button style={{ width: "100%", textAlign: "left", display: "flex", gap: 8, alignItems: "center" }} onClick={() => openGoal(g)}>
                 <span
                   title={g.category || "No category"}
                   style={{ width: 10, height: 10, borderRadius: 999, background: g.category_color || "#e5e7eb", border: "1px solid #d1d5db", flex: "0 0 auto" }}
@@ -508,17 +528,6 @@ export default function GoalsScreen() {
             </li>
           ))}
         </ul>
-
-        {showWizard && (
-          <div style={{ marginTop: 8 }}>
-            <KeyboardShield>
-              <BigGoalWizard
-                onClose={() => setShowWizard(false)}
-                onCreated={() => { setShowWizard(false); loadGoals(); }}
-              />
-            </KeyboardShield>
-          </div>
-        )}
       </div>
 
       {/* Right: Balance + details/steps */}
@@ -592,7 +601,7 @@ export default function GoalsScreen() {
                     <span style={{ width: 16, height: 16, borderRadius: 999, background: colorOf(editCat), border: "1px solid #ccc" }} />
                   </div>
                 </label>
-                <button type="button" className="btn-primary" onClick={saveGoalDetails} disabled={busy} style={{ borderRadius: 8, marginLeft: "auto" }}>
+                <button className="btn-primary" onClick={saveGoalDetails} disabled={busy} style={{ borderRadius: 8, marginLeft: "auto" }}>
                   {busy ? "Saving…" : "Save details"}
                 </button>
               </div>
@@ -606,13 +615,13 @@ export default function GoalsScreen() {
                   Update your steps if needed. We’ll extend your monthly/weekly/daily tasks from here to the target date.
                 </div>
                 <button
-                  type="button"
                   className="btn-primary"
                   style={{ borderRadius: 8 }}
                   disabled={busy}
                   onClick={async () => {
                     try {
                       setBusy(true);
+                      // Reseed from tomorrow (gives today breathing room if you’re editing now)
                       const t = new Date();
                       t.setDate(t.getDate() + 1);
                       const from = toISO(t);
@@ -639,10 +648,10 @@ export default function GoalsScreen() {
                 {monthly.map((v, i) => (
                   <div key={`m${i}`} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
                     <input value={v} onChange={e => setMonthly(monthly.map((x,idx)=>idx===i?e.target.value:x))} placeholder="Monthly step…" style={{ flex: 1 }} />
-                    {monthly.length > 1 && <button type="button" onClick={() => setMonthly(monthly.filter((_,idx)=>idx!==i))}>–</button>}
+                    {monthly.length > 1 && <button onClick={() => setMonthly(monthly.filter((_,idx)=>idx!==i))}>–</button>}
                   </div>
                 ))}
-                <button type="button" onClick={() => setMonthly([...monthly, ""])}>+ Add monthly step</button>
+                <button onClick={() => setMonthly([...monthly, ""])}>+ Add monthly step</button>
               </fieldset>
 
               <fieldset style={{ border: "1px solid #eee", borderRadius: 8, padding: 10, marginBottom: 10 }}>
@@ -650,10 +659,10 @@ export default function GoalsScreen() {
                 {weekly.map((v, i) => (
                   <div key={`w${i}`} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
                     <input value={v} onChange={e => setWeekly(weekly.map((x,idx)=>idx===i?e.target.value:x))} placeholder="Weekly step…" style={{ flex: 1 }} />
-                    {weekly.length > 1 && <button type="button" onClick={() => setWeekly(weekly.filter((_,idx)=>idx!==i))}>–</button>}
+                    {weekly.length > 1 && <button onClick={() => setWeekly(weekly.filter((_,idx)=>idx!==i))}>–</button>}
                   </div>
                 ))}
-                <button type="button" onClick={() => setWeekly([...weekly, ""])}>+ Add weekly step</button>
+                <button onClick={() => setWeekly([...weekly, ""])}>+ Add weekly step</button>
               </fieldset>
 
               <fieldset style={{ border: "1px solid #eee", borderRadius: 8, padding: 10 }}>
@@ -661,15 +670,15 @@ export default function GoalsScreen() {
                 {daily.map((v, i) => (
                   <div key={`d${i}`} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
                     <input value={v} onChange={e => setDaily(daily.map((x,idx)=>idx===i?e.target.value:x))} placeholder="Daily step…" style={{ flex: 1 }} />
-                    {daily.length > 1 && <button type="button" onClick={() => setDaily(daily.filter((_,idx)=>idx!==i))}>–</button>}
+                    {daily.length > 1 && <button onClick={() => setDaily(daily.filter((_,idx)=>idx!==i))}>–</button>}
                   </div>
                 ))}
-                <button type="button" onClick={() => setDaily([...daily, ""])}>+ Add daily step</button>
+                <button onClick={() => setDaily([...daily, ""])}>+ Add daily step</button>
               </fieldset>
 
               {err && <div style={{ color: "red", marginTop: 8 }}>{err}</div>}
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button type="button" onClick={saveSteps} disabled={busy} className="btn-primary" style={{ borderRadius: 8 }}>
+                <button onClick={saveSteps} disabled={busy} className="btn-primary" style={{ borderRadius: 8 }}>
                   {busy ? "Saving…" : "Save steps & reseed"}
                 </button>
               </div>
