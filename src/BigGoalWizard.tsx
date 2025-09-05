@@ -71,9 +71,9 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
 
   const catColor = colorOf(category);
 
-  // focus guards
-  const rootRef = useRef<HTMLDivElement>(null);
+  // focus the title automatically when wizard mounts
   const titleRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { titleRef.current?.focus({ preventScroll: true }); }, []);
 
   // halfway = exact midpoint between start and target
   const computedHalfDate = useMemo(() => {
@@ -85,6 +85,11 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
 
   const stepIndex = STEP_ORDER.indexOf(step);
   const progressPct = ((stepIndex + 1) / STEP_ORDER.length) * 100;
+
+  // prevent global shortcuts from stealing focus while typing
+  function stopKeyBubble(e: React.KeyboardEvent) {
+    e.stopPropagation();
+  }
 
   function goNext() {
     setErr(null);
@@ -142,14 +147,14 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
       if (end < start) throw new Error("Target date is before start date.");
 
       const tasks: any[] = [];
-      const cat = (goal as any).category as AllowedCategory;
-      const col = (goal as any).category_color;
+      const cat = goal.category as AllowedCategory;
+      const col = goal.category_color;
 
       // Milestones
       tasks.push({
         user_id: userId,
-        goal_id: (goal as any).id,
-        title: `BIG GOAL — Target: ${(goal as any).title}`,
+        goal_id: goal.id,
+        title: `BIG GOAL — Target: ${goal.title}`,
         due_date: targetDate,
         source: "big_goal_target",
         priority: 2,
@@ -160,7 +165,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
       if (computedHalfDate) {
         tasks.push({
           user_id: userId,
-          goal_id: (goal as any).id,
+          goal_id: goal.id,
           title: `BIG GOAL — Midpoint Review${halfwayNote.trim() ? `: ${halfwayNote.trim()}` : ""}`,
           due_date: computedHalfDate,
           source: "big_goal_midpoint_review",
@@ -179,7 +184,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         let d = addMonthsClamped(start, 1, start.getDate());
         while (withinFirstHalf(d)) {
           tasks.push({
-            user_id: userId, goal_id: (goal as any).id,
+            user_id: userId, goal_id: goal.id,
             title: `BIG GOAL — Monthly: ${monthlyCommit.trim()}`,
             due_date: toISO(d), source: "big_goal_monthly", priority: 2,
             category: cat, category_color: col
@@ -192,7 +197,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         let d = new Date(start); d.setDate(d.getDate() + 7);
         while (withinFirstHalf(d)) {
           tasks.push({
-            user_id: userId, goal_id: (goal as any).id,
+            user_id: userId, goal_id: goal.id,
             title: `BIG GOAL — Weekly: ${weeklyCommit.trim()}`,
             due_date: toISO(d), source: "big_goal_weekly", priority: 2,
             category: cat, category_color: col
@@ -205,7 +210,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         let d = clampDay(new Date(Math.max(Date.now(), start.getTime())));
         while (withinFirstHalf(d)) {
           tasks.push({
-            user_id: userId, goal_id: (goal as any).id,
+            user_id: userId, goal_id: goal.id,
             title: `BIG GOAL — Daily: ${dailyCommit.trim()}`,
             due_date: toISO(d), source: "big_goal_daily", priority: 2,
             category: cat, category_color: col
@@ -229,43 +234,6 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
       setBusy(false);
     }
   }
-
-  /* ---------------------- Focus/Hotkey shields ---------------------- */
-
-  // Block global key handlers while typing inside the wizard (capture phase)
-  useEffect(() => {
-    const stop = (ev: Event) => {
-      const root = rootRef.current;
-      if (!root) return;
-      if (root.contains(ev.target as Node)) {
-        ev.stopPropagation();
-        // @ts-ignore
-        if (typeof (ev as any).stopImmediatePropagation === "function") (ev as any).stopImmediatePropagation();
-      }
-    };
-    const types: Array<keyof DocumentEventMap> = ["keydown", "keypress", "keyup"];
-    types.forEach(t => document.addEventListener(t, stop, true));
-    return () => types.forEach(t => document.removeEventListener(t, stop, true));
-  }, []);
-
-  // If the title input gets blurred by something outside, gently refocus it
-  useEffect(() => {
-    const el = titleRef.current;
-    if (!el) return;
-    const onBlur = () => {
-      setTimeout(() => {
-        const root = rootRef.current;
-        if (!root) return;
-        const active = document.activeElement;
-        // Only refocus if focus left the wizard entirely
-        if (!active || !root.contains(active)) {
-          el.focus({ preventScroll: true });
-        }
-      }, 0);
-    };
-    el.addEventListener("blur", onBlur);
-    return () => el.removeEventListener("blur", onBlur);
-  }, []);
 
   /* ---------------------- UI Building Blocks ---------------------- */
 
@@ -356,7 +324,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
     ];
 
     return (
-      <div>
+      <div onKeyDown={stopKeyBubble} onKeyUp={stopKeyBubble} onKeyPress={stopKeyBubble}>
         <div className="muted" style={{ marginBottom: 6 }}>{label}</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr 1fr", gap: 8 }}>
           {/* Day */}
@@ -445,10 +413,12 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         <input
           ref={titleRef}
           data-biggoal-title
-          autoFocus
+          autoComplete="off"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") goNext(); }}
+          onKeyDown={(e) => { stopKeyBubble(e); if (e.key === "Enter") goNext(); }}
+          onKeyUp={stopKeyBubble}
+          onKeyPress={stopKeyBubble}
           placeholder="e.g., Grow revenue to £25k/mo"
           style={{ width: "100%" }}
         />
@@ -543,9 +513,12 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         subtitle="Describe the checkpoint that proves you’re on track."
       >
         <input
+          autoComplete="off"
           value={halfwayNote}
           onChange={(e) => setHalfwayNote(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") goNext(); }}
+          onKeyDown={(e) => { stopKeyBubble(e); if (e.key === "Enter") goNext(); }}
+          onKeyUp={stopKeyBubble}
+          onKeyPress={stopKeyBubble}
           placeholder="e.g., 50% of users onboarded, £12.5k MRR, 15 clients…"
           style={{ width: "100%" }}
         />
@@ -555,3 +528,149 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         <Nav showSkip />
       </Card>
     );
+  }
+
+  function StepMonthly() {
+    return (
+      <Card
+        title="Monthly commitment"
+        subtitle="What will you do each month to move the needle?"
+      >
+        <input
+          autoComplete="off"
+          value={monthlyCommit}
+          onChange={(e) => setMonthlyCommit(e.target.value)}
+          onKeyDown={(e) => { stopKeyBubble(e); if (e.key === "Enter") goNext(); }}
+          onKeyUp={stopKeyBubble}
+          onKeyPress={stopKeyBubble}
+          placeholder="e.g., Close 2 new customers"
+          style={{ width: "100%" }}
+        />
+        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+          We’ll schedule these each month in the first half (from your start).
+        </div>
+        <Nav showSkip />
+      </Card>
+    );
+  }
+
+  function StepWeekly() {
+    return (
+      <Card
+        title="Weekly commitment"
+        subtitle="Small, repeatable actions build momentum."
+      >
+        <input
+          autoComplete="off"
+          value={weeklyCommit}
+          onChange={(e) => setWeeklyCommit(e.target.value)}
+          onKeyDown={(e) => { stopKeyBubble(e); if (e.key === "Enter") goNext(); }}
+          onKeyUp={stopKeyBubble}
+          onKeyPress={stopKeyBubble}
+          placeholder="e.g., Book 5 prospect calls"
+          style={{ width: "100%" }}
+        />
+        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+          We’ll schedule these weekly in the first half.
+        </div>
+        <Nav showSkip />
+      </Card>
+    );
+  }
+
+  function StepDaily() {
+    return (
+      <Card
+        title="Daily commitment"
+        subtitle="Tiny daily actions create outsized results."
+      >
+        <input
+          autoComplete="off"
+          value={dailyCommit}
+          onChange={(e) => setDailyCommit(e.target.value)}
+          onKeyDown={(e) => { stopKeyBubble(e); if (e.key === "Enter") goNext(); }}
+          onKeyUp={stopKeyBubble}
+          onKeyPress={stopKeyBubble}
+          placeholder="e.g., Reach out to 15 people"
+          style={{ width: "100%" }}
+        />
+        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+          We’ll seed daily tasks up to the halfway date.
+        </div>
+        <Nav showSkip />
+      </Card>
+    );
+  }
+
+  function StepReview() {
+    return (
+      <Card
+        title="Review & launch 🚀"
+        subtitle="Here’s your plan for the first half. Ready to make it real?"
+      >
+        <div style={{ display: "grid", gap: 10 }}>
+          <Row label="Goal" value={title || "—"} />
+          <Row label="Category" value={CATS.find(c => c.key === category)?.label || "—"} dotColor={catColor} />
+          <Row label="Start → Target" value={`${startDate || "—"}  →  ${targetDate || "—"}`} />
+          <Row label="Halfway date" value={computedHalfDate || "—"} />
+          <Row label="Halfway checkpoint" value={halfwayNote || "—"} />
+          <Row label="Monthly" value={monthlyCommit || "—"} />
+          <Row label="Weekly" value={weeklyCommit || "—"} />
+          <Row label="Daily" value={dailyCommit || "—"} />
+        </div>
+        {err && <div style={{ color: "crimson", marginTop: 8 }}>{err}</div>}
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <button type="button" onClick={goBack} disabled={busy}>Back</button>
+          <div style={{ flex: 1 }} />
+          <button type="button" className="btn-primary" onClick={create} disabled={busy} style={{ borderRadius: 8 }}>
+            {busy ? "Creating…" : "Create Big Goal"}
+          </button>
+        </div>
+      </Card>
+    );
+  }
+
+  function Row({ label, value, dotColor }: { label: string; value: string; dotColor?: string }) {
+    return (
+      <div style={{ display: "flex", gap: 8, alignItems: "center", border: "1px solid #f1f5f9", padding: "8px 10px", borderRadius: 8 }}>
+        <div style={{ width: 120, color: "#64748b", fontSize: 12, textTransform: "uppercase" }}>{label}</div>
+        {dotColor && <span style={{ width: 10, height: 10, borderRadius: 999, background: dotColor, marginRight: 4 }} />}
+        <div style={{ fontWeight: 600 }}>{value}</div>
+      </div>
+    );
+  }
+
+  /* --------------------------- Render --------------------------- */
+
+  return (
+    <div style={{ border: "1px solid #ddd", borderRadius: 16, padding: 16, background: "#fff" }}>
+      {Header}
+
+      <div style={{ marginTop: 12 }}>
+        {step === "title"    && <StepTitle />}
+        {step === "category" && <StepCategory />}
+        {step === "dates"    && <StepDates />}
+        {step === "halfway"  && <StepHalfway />}
+        {step === "monthly"  && <StepMonthly />}
+        {step === "weekly"   && <StepWeekly />}
+        {step === "daily"    && <StepDaily />}
+        {step === "review"   && <StepReview />}
+      </div>
+
+      {/* subtle keyframe for card entrance */}
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .btn-primary {
+          background:#6d28d9; border:1px solid #5b21b6; color:#fff; padding:10px 14px; font-weight:700;
+        }
+        .btn-soft {
+          background:#fff; border:1px solid #e5e7eb;
+        }
+        .muted { color:#6b7280; }
+      `}</style>
+    </div>
+  );
+}
