@@ -1,3 +1,4 @@
+// src/AffirmationBuilderScreen.tsx
 import { useEffect, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
@@ -11,7 +12,9 @@ function publicPath(p: string) {
   const withSlash = p.startsWith("/") ? p : `/${p}`;
   return `${base.replace(/\/$/, "")}${withSlash}`;
 }
-const ALFRED_SRC = publicPath("/alfred/Confidence_Alfred.png");
+// If you add an EVA help image later, point this to it.
+// For now we’ll hide the image if missing.
+const EVA_HELP_IMG = publicPath("/eva/Affirmations_Eva.png");
 
 /* ---------- Types ---------- */
 type Category = "business" | "relationships" | "financial" | "personal" | "health";
@@ -24,8 +27,8 @@ type AffirmationRow = {
 };
 
 /* ---------- Storage keys ---------- */
-const LS_VAULT = "byb:affirmations:v1";                 // All saved affirmations (vault)
-const LS_CONF_TODAY_PREFIX = "byb:confidence:today:";    // Per-day rotation for Confidence
+const LS_VAULT = "byb:affirmations:v1";
+const LS_CONF_TODAY_PREFIX = "byb:confidence:today:";
 
 /* ---------- Utils ---------- */
 const todayISO = () => {
@@ -78,7 +81,7 @@ function Modal({
   );
 }
 
-/* ---------- Alfred help content ---------- */
+/* ---------- Help content (EVA) ---------- */
 function BuilderHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
@@ -87,7 +90,7 @@ function BuilderHelpContent() {
       <h4 style={{ margin: 0 }}>How to use</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
         <li><b>Pick an area</b>: Business, Relationships, Financial, Personal, or Health.</li>
-        <li><b>Write your own</b> or click <i>Ask Alfred</i> for 2–3 suggestions.</li>
+        <li><b>Write your own</b> or click <i>Ask EVA</i> for 2–3 suggestions.</li>
         <li><b>Tweak tone</b> with one-taps: Shorter, Stronger, Gentler.</li>
         <li><b>Save</b> to your vault and <b>Send to Confidence</b> for today’s practice set.</li>
       </ul>
@@ -137,8 +140,8 @@ export default function AffirmationBuilderScreen() {
     { key: "health", label: "Health" },
   ];
 
-  /* ---------- Alfred helpers (uses your /api/alfred contract) ---------- */
-  async function askAlfred() {
+  /* ---------- EVA helpers (calls your /api/eva endpoint) ---------- */
+  async function askEva() {
     setErr(null);
     setBusySuggest(true);
     setSelectedIdx(null);
@@ -147,24 +150,22 @@ export default function AffirmationBuilderScreen() {
 `Help me write 3 short, present-tense affirmations for the "${active}" area.
 Theme (optional): ${theme || "(none)"}
 Rules: under 12 words, positive, believable, in my control. Output as bullet points.`;
-      const res = await fetch("/api/alfred", {
+      const res = await fetch("/api/eva", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // Your API expects { persona/history } OR { mode/messages } depending on your latest version.
-          // The latest you shared returns { reply } and accepts { mode, messages }:
           mode: "friend",
           messages: [{ role: "user", content: prompt }],
         }),
       });
-      if (!res.ok) throw new Error(`Alfred error: ${res.status}`);
+      if (!res.ok) throw new Error(`EVA error: ${res.status}`);
       const data = await res.json();
       const reply: string = data.reply || data.text || "";
       const lines = reply.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
       const bulls = lines
         .filter(l => /^[-*•]\s+/.test(l) || /^\d+\.\s+/.test(l))
         .map(l => l.replace(/^([-*•]\s+|\d+\.\s+)/, "").trim());
-      const opts = (bulls.length ? bulls : lines).slice(0, 3);
+      const opts = (bulls.length ? bulls : lines).slice(0, 3).map(s => s.replace(/^"|"$/g, ""));
       setSuggestions(opts);
       if (opts[0]) { setText(opts[0]); setSelectedIdx(0); }
     } catch (e: any) {
@@ -172,6 +173,36 @@ Rules: under 12 words, positive, believable, in my control. Output as bullet poi
     } finally {
       setBusySuggest(false);
     }
+  }
+
+  // Simple local heuristics as a fallback if the network call fails
+  function localRefine(kind: "shorter" | "stronger" | "gentler", s: string) {
+    let t = s.trim();
+
+    if (kind === "shorter") {
+      // Remove commas/clauses and trim to ~10 words
+      t = t.replace(/,.*$/g, "").replace(/\s{2,}/g, " ");
+      const words = t.split(/\s+/).slice(0, 10);
+      t = words.join(" ");
+    } else if (kind === "stronger") {
+      // Remove hedges; strengthen verbs
+      t = t
+        .replace(/\b(maybe|try|trying|hope|hoping|aim|aiming|could|should|might|want to)\b/gi, "")
+        .replace(/\bI (can|will)\b/gi, "I")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+      if (!/^I\b/i.test(t)) t = `I ${t.charAt(0).toLowerCase()}${t.slice(1)}`;
+    } else if (kind === "gentler") {
+      // Add warmth
+      if (!/with (kindness|calm|patience)/i.test(t)) {
+        t = `${t} with kindness`;
+      }
+      t = t.replace(/\s{2,}/g, " ");
+    }
+
+    // Keep under ~12 words
+    const words = t.split(/\s+/).slice(0, 12);
+    return words.join(" ").trim();
   }
 
   async function refineTone(kind: "shorter" | "stronger" | "gentler") {
@@ -183,7 +214,7 @@ Rules: under 12 words, positive, believable, in my control. Output as bullet poi
 `Rewrite this affirmation with a ${kind} tone.
 Keep it present-tense, positive, under 12 words, believable:
 "${text}"`;
-      const res = await fetch("/api/alfred", {
+      const res = await fetch("/api/eva", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -191,11 +222,38 @@ Keep it present-tense, positive, under 12 words, believable:
           messages: [{ role: "user", content: prompt }],
         }),
       });
-      if (!res.ok) throw new Error(`Alfred error: ${res.status}`);
+
+      // If API fails, fall back locally
+      if (!res.ok) {
+        const offline = localRefine(kind, text);
+        setText(offline);
+        setSelectedIdx(null);
+        setErr("EVA is offline — used a local tweak.");
+        return;
+      }
+
       const data = await res.json();
-      const out = (data.reply || data.text || "").trim().split(/\r?\n/).find(Boolean) || "";
-      if (out) { setText(out.replace(/^"|"$/g, "")); setSelectedIdx(null); }
+      // Pick the first non-empty line
+      const out =
+        (data.reply || data.text || "")
+          .trim()
+          .split(/\r?\n/)
+          .map((l: string) => l.replace(/^[-*•]\s+/, "").replace(/^"|"$/g, "").trim())
+          .find((l: string) => !!l) || "";
+
+      if (out) {
+        setText(out);
+        setSelectedIdx(null);
+      } else {
+        // Fallback if EVA returned something unexpected
+        const offline = localRefine(kind, text);
+        setText(offline);
+        setSelectedIdx(null);
+      }
     } catch (e: any) {
+      const offline = localRefine(kind, text);
+      setText(offline);
+      setSelectedIdx(null);
       setErr(e.message || String(e));
     } finally {
       setBusySuggest(false);
@@ -220,8 +278,8 @@ Keep it present-tense, positive, under 12 words, believable:
       if (userId) {
         await supabase.from("affirmations").insert({ user_id: userId, category: active, text: clean });
       }
-    } catch (e) {
-      console.warn("Supabase save failed, falling back to local vault.");
+    } catch {
+      // best-effort only
     }
 
     // 2) Local vault (always)
@@ -237,22 +295,38 @@ Keep it present-tense, positive, under 12 words, believable:
   return (
     <div className="page-affirmation-builder" style={{ maxWidth: "100%", overflowX: "hidden" }}>
       <div className="container" style={{ display: "grid", gap: 12 }}>
-        {/* Header with Alfred help */}
-        <div className="card" style={{ position: "relative", paddingRight: 64 }}>
+        {/* Header (EVA) */}
+        <div className="card" style={{ position: "relative" }}>
+          <h1 style={{ margin: 0 }}>Affirmation Builder</h1>
+          <div className="muted">Create personal, powerful lines — then send them to Confidence.</div>
           <button
             onClick={() => setShowHelp(true)}
             aria-label="Open builder help"
-            title="Need a hand? Ask Alfred"
-            style={{ position: "absolute", top: 8, right: 8, border: "none", background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10 }}
+            title="Need a hand? Ask EVA"
+            style={{
+              position: "absolute", top: 8, right: 8, border: "none",
+              background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10,
+            }}
           >
             {imgOk ? (
-              <img src={ALFRED_SRC} alt="Alfred — open help" style={{ width: 48, height: 48 }} onError={() => setImgOk(false)} />
+              <img
+                src={EVA_HELP_IMG}
+                alt="EVA — open help"
+                style={{ width: 44, height: 44, objectFit: "contain" }}
+                onError={() => setImgOk(false)}
+              />
             ) : (
-              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db", background: "#f9fafb", fontWeight: 700 }}>?</span>
+              <span
+                style={{
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  width: 34, height: 34, borderRadius: 999, border: "1px solid #d1d5db",
+                  background: "#f9fafb", fontWeight: 700,
+                }}
+              >
+                ?
+              </span>
             )}
           </button>
-          <h1 style={{ margin: 0 }}>Affirmation Builder</h1>
-          <div className="muted">Create personal, powerful lines — then send them to Confidence.</div>
         </div>
 
         {/* Category tabs */}
@@ -288,17 +362,17 @@ Keep it present-tense, positive, under 12 words, believable:
             aria-label="Affirmation text"
           />
 
-          <div className="section-title">Or ask Alfred</div>
+          <div className="section-title">Or ask EVA</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <input
               value={theme}
               onChange={e => setTheme(e.target.value)}
               placeholder="Theme (optional) — e.g., money, calm, leadership"
-              aria-label="Theme for Alfred"
+              aria-label="Theme for EVA"
               style={{ flex: 1, minWidth: 220 }}
             />
-            <button onClick={askAlfred} disabled={busySuggest} className="btn-primary" style={{ borderRadius: 8 }}>
-              {busySuggest ? "Thinking…" : "Ask Alfred"}
+            <button onClick={askEva} disabled={busySuggest} className="btn-primary" style={{ borderRadius: 8 }}>
+              {busySuggest ? "Thinking…" : "Ask EVA"}
             </button>
           </div>
 
@@ -315,15 +389,16 @@ Keep it present-tense, positive, under 12 words, believable:
                       aria-pressed={activeChip}
                       style={{
                         padding: "8px 10px",
-                        borderRadius: 999,
+                        borderRadius: 12,
                         border: "1px solid",
                         borderColor: activeChip ? "hsl(var(--pastel-hsl))" : "#e5e7eb",
                         background: activeChip ? "hsl(var(--pastel-hsl) / .45)" : "#fff",
                         fontWeight: activeChip ? 700 : 500,
                         maxWidth: "100%",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
+                        // MOBILE: allow two+ lines instead of single-line truncation
+                        whiteSpace: "normal",
+                        wordBreak: "break-word",
+                        textAlign: "left",
                       }}
                       title={s}
                     >
@@ -342,7 +417,7 @@ Keep it present-tense, positive, under 12 words, believable:
             <button onClick={() => refineTone("gentler")} disabled={!text || busySuggest}>Gentler</button>
           </div>
 
-          {/* Preview card + human tip (replaces TTS) */}
+          {/* Preview card */}
           <div
             aria-label="Affirmation preview"
             style={{
@@ -383,7 +458,15 @@ Keep it present-tense, positive, under 12 words, believable:
       {/* Help modal */}
       <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Affirmation Builder — Help">
         <div style={{ display: "flex", gap: 16 }}>
-          {imgOk && <img src={ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
+          {imgOk && (
+            <img
+              src={EVA_HELP_IMG}
+              alt=""
+              aria-hidden="true"
+              style={{ width: 72, height: 72, flex: "0 0 auto", objectFit: "contain" }}
+              onError={() => setImgOk(false)}
+            />
+          )}
           <div style={{ flex: 1 }}>
             <BuilderHelpContent />
           </div>
