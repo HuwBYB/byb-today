@@ -1,4 +1,20 @@
 // src/MenuScreen.tsx
+import type { ReactNode } from "react";
+
+/** Public path helper (works with Vite/CRA/Vercel/GH Pages) */
+function publicPath(p: string) {
+  // @ts-ignore
+  const base =
+    (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
+    (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
+    "";
+  const withSlash = p.startsWith("/") ? p : `/${p}`;
+  return `${base.replace(/\/$/, "")}${withSlash}`;
+}
+
+// Path to your butterfly logo in /public
+const EVA_ICON_SRC = publicPath("/LogoButterfly.png");
+
 type MenuItem = {
   key:
     | "today"
@@ -8,31 +24,51 @@ type MenuItem = {
     | "gratitude"
     | "exercise"
     | "wins"
-    | "eva"          // renamed from "alfred"
+    | "eva"
     | "confidence"
     | "notes"
     | "focus"
     | "meditation"
     | "affirmations";
   label: string;
-  icon: string;
+  icon: ReactNode; // supports emoji or <img>
   desc?: string;
 };
 
+const EvaIcon = () => (
+  <img
+    src={EVA_ICON_SRC}
+    alt="Eva"
+    width={28}
+    height={28}
+    style={{ display: "block" }}
+    onError={(e) => {
+      // fallback to 🦋 emoji if image fails
+      const span = document.createElement("span");
+      span.textContent = "🦋";
+      span.style.fontSize = "28px";
+      const parent = e.currentTarget.parentElement;
+      if (parent) {
+        parent.replaceChild(span, e.currentTarget);
+      }
+    }}
+  />
+);
+
 const ITEMS: MenuItem[] = [
-  { key: "today",        label: "Today Page",      icon: "✅" },
-  { key: "calendar",     label: "Calendar",        icon: "🗓️" },
-  { key: "goals",        label: "Goals",           icon: "🎯" },
-  { key: "vision",       label: "Vision Board",    icon: "🌈" },
-  { key: "gratitude",    label: "Gratitude",       icon: "🙏" },
-  { key: "exercise",     label: "Exercise",        icon: "🏋️" },
-  { key: "wins",         label: "Your Wins",       icon: "🏆" },
-  { key: "eva",          label: "Eva (EVA)",       icon: "" }, // icon handled separately
-  { key: "confidence",   label: "Confidence",      icon: "🔥" },
-  { key: "notes",        label: "Notes",           icon: "📝" },
-  { key: "focus",        label: "Focus",           icon: "🎧" },
-  { key: "meditation",   label: "Meditation",      icon: "📺" },
-  { key: "affirmations", label: "Affirmations",    icon: "✨" },
+  { key: "today",        label: "Today Page",   icon: "✅" },
+  { key: "calendar",     label: "Calendar",     icon: "🗓️" },
+  { key: "goals",        label: "Goals",        icon: "🎯" },
+  { key: "vision",       label: "Vision Board", icon: "🌈" },
+  { key: "gratitude",    label: "Gratitude",    icon: "🙏" },
+  { key: "exercise",     label: "Exercise",     icon: "🏋️" },
+  { key: "wins",         label: "Your Wins",    icon: "🏆" }, // updated label
+  { key: "eva",          label: "Eva",          icon: <EvaIcon /> }, // updated name + logo
+  { key: "confidence",   label: "Confidence",   icon: "🔥" },
+  { key: "notes",        label: "Notes",        icon: "📝" },
+  { key: "focus",        label: "Focus",        icon: "🎧" },
+  { key: "meditation",   label: "Meditation",   icon: "📺" },
+  { key: "affirmations", label: "Affirmations", icon: "✨" },
 ];
 
 export default function MenuScreen({
@@ -81,16 +117,8 @@ export default function MenuScreen({
                 minHeight: 110,
               }}
             >
-              <div style={{ fontSize: 28 }} aria-hidden>
-                {it.key === "eva" ? (
-                  <img
-                    src="/Logo Butterfly.png"
-                    alt="Eva logo"
-                    style={{ width: 36, height: 36, objectFit: "contain" }}
-                  />
-                ) : (
-                  it.icon
-                )}
+              <div style={{ fontSize: 28, lineHeight: 0 }} aria-hidden>
+                {it.icon}
               </div>
               <div style={{ fontWeight: 700 }}>{it.label}</div>
             </button>
