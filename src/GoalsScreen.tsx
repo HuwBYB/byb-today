@@ -202,7 +202,7 @@ export default function GoalsScreen() {
     if (ge) throw ge;
     const goal = g as Goal;
 
-    const startISO = goal.start_date || toISO(new Date());
+    const startISO = goal.start_date || toISO(new Date()));
     const endISO   = goal.target_date || startISO;
     const start = fromISO(startISO);
     const end   = fromISO(endISO);
@@ -433,13 +433,17 @@ export default function GoalsScreen() {
             <input value={sgTitle} onChange={e => setSgTitle(e.target.value)} placeholder="e.g., Read 12 books" />
           </label>
           {/* date + category row */}
-          <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "flex-end" }}>
             <label style={{ flex: 1 }}>
-              <div className="muted">Target date (optional)</div>
+              <div className="muted" style={{ minHeight: 32, display: "flex", alignItems: "flex-end", lineHeight: 1.2 }}>
+                Target date (optional)
+              </div>
               <input type="date" value={sgTarget} onChange={e => setSgTarget(e.target.value)} />
             </label>
             <label style={{ flex: 1 }}>
-              <div className="muted">Category</div>
+              <div className="muted" style={{ minHeight: 32, display: "flex", alignItems: "flex-end", lineHeight: 1.2 }}>
+                Category
+              </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <select value={sgCat} onChange={e => setSgCat(e.target.value as CatKey)}>
                   {CATS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
