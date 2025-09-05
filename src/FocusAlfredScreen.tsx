@@ -1,18 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, useMemo } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-/* ---------- Public path helper ---------- */
-function publicPath(p: string) {
-  // @ts-ignore
-  const base =
-    (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
-    (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
-    "";
-  const withSlash = p.startsWith("/") ? p : `/${p}`;
-  return `${base.replace(/\/$/, "")}${withSlash}`;
-}
-const FOCUS_ALFRED_SRC = publicPath("/alfred/imer_Alfred.png");
-
 /* ---------- Tiny helpers ---------- */
 function mmss(sec: number) {
   const s = Math.max(0, sec);
@@ -34,7 +22,7 @@ function startOfWeekMondayISO() {
 }
 
 /* ---------- Presets ---------- */
-type PresetKey = "pomodoro" | "swift" | "deep";
+type PresetKey = "pomodoro" | "swift" | "deep" | "custom";
 type Preset = {
   key: PresetKey;
   label: string;
@@ -43,13 +31,11 @@ type Preset = {
   longMin: number;
   cyclesBeforeLong: number;
 };
-
-const PRESETS: Preset[] = [
-  { key: "pomodoro", label: "25 / 5 (x4 → 15)", focusMin: 25, shortMin: 5, longMin: 15, cyclesBeforeLong: 4 },
-  { key: "swift",    label: "20 / 5 (x4 → 15)", focusMin: 20, shortMin: 5, longMin: 15, cyclesBeforeLong: 4 },
-  { key: "deep",     label: "50 / 10 (x2 → 20)", focusMin: 50, shortMin: 10, longMin: 20, cyclesBeforeLong: 2 },
+const PRESETS_BASE: Omit<Preset, "label">[] = [
+  { key: "pomodoro", focusMin: 25, shortMin: 5,  longMin: 15, cyclesBeforeLong: 4 },
+  { key: "swift",    focusMin: 20, shortMin: 5,  longMin: 15, cyclesBeforeLong: 4 },
+  { key: "deep",     focusMin: 50, shortMin: 10, longMin: 20, cyclesBeforeLong: 2 },
 ];
-function presetByKey(k: PresetKey): Preset { return PRESETS.find(p => p.key === k)!; }
 
 /* ---------- Modal ---------- */
 function Modal({
@@ -77,23 +63,28 @@ function Modal({
   );
 }
 
-/* ---------- Help content ---------- */
+/* ---------- Help content (mentions Eva) ---------- */
 function FocusHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
-      <p><em>Short, focused bursts with deliberate breaks — perfect for deep work and avoiding burnout.</em></p>
+      <p><em>Short, focused bursts with deliberate breaks — perfect for deep work without burnout.</em></p>
       <h4 style={{ margin: 0 }}>How this timer works</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li><b>Focus</b> for the set minutes (don’t switch tasks).</li>
+        <li><b>Focus</b> for the set minutes (no context-switching).</li>
         <li>Take a <b>Short break</b> after each focus cycle.</li>
         <li>After several cycles, enjoy a <b>Long break</b>.</li>
-        <li>Use presets: <b>25/5</b> classic Pomodoro, <b>20/5</b> swift, or <b>50/10</b> deep focus.</li>
+        <li>Use a preset or make a <b>Custom</b> one.</li>
       </ul>
       <h4 style={{ margin: 0 }}>Tips</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
         <li>Type a task to anchor your session, then Start.</li>
         <li>Breaks are for movement/water — not doomscrolling.</li>
+        <li>Tap <b>Distraction +</b> when you get pulled away to keep awareness high.</li>
+        <li>Stuck? Ask <b>Eva</b> for a quick 25-minute action plan.</li>
       </ul>
+      <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+        Shortcuts: <b>Space</b> start/pause • <b>R</b> reset • “<b>Mini</b>” opens a floating timer (Chrome).
+      </p>
     </div>
   );
 }
@@ -101,8 +92,9 @@ function FocusHelpContent() {
 /* ---------- Persisted state ---------- */
 type Phase = "focus" | "short" | "long";
 type SavedState = {
-  v: 2;
+  v: 3;
   presetKey: PresetKey;
+  custom: { focusMin: number; shortMin: number; longMin: number; cyclesBeforeLong: number };
   phase: Phase;
   running: boolean;
   cycle: number;
@@ -110,11 +102,14 @@ type SavedState = {
   remaining: number;        // seconds remaining when last saved (used if paused)
   autoStartNext: boolean;
   taskTitle: string;
+  soundOn: boolean;
+  notifOn: boolean;
 };
-const LS_KEY = "byb:focus_timer_state:v2";
+const LS_KEY = "byb:focus_timer_state:v3";
 
 /* ---- utils: sound + notifications ---- */
-function playBeep(times = 2) {
+function playBeep(times = 2, enabled = true) {
+  if (!enabled) return;
   try {
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
     let t = ctx.currentTime;
@@ -141,12 +136,11 @@ async function ensureNotifPermission(): Promise<boolean> {
   const res = await Notification.requestPermission();
   return res === "granted";
 }
-function sendNotification(title: string, body: string) {
+function sendNotification(enabled: boolean, title: string, body: string) {
+  if (!enabled) return;
   if (!("Notification" in window)) return;
   if (Notification.permission !== "granted") return;
-  try {
-    new Notification(title, { body, icon: FOCUS_ALFRED_SRC, badge: FOCUS_ALFRED_SRC });
-  } catch {}
+  try { new Notification(title, { body }); } catch {}
 }
 
 /* ---------- Confetti (light) ---------- */
@@ -189,8 +183,9 @@ function FocusSummary({ userId }:{ userId: string | null }) {
         .order("started_at", { ascending: false });
       if (error || !data) { setTodayMin(0); setWeekMin(0); return; }
       const week = data.reduce((a, x) => a + (x.minutes || 0), 0);
-      const today = data.filter(x => new Date(x.started_at) >= new Date(todayStartISO()))
-                        .reduce((a, x) => a + (x.minutes || 0), 0);
+      const today = data
+        .filter(x => new Date(x.started_at) >= new Date(todayStartISO()))
+        .reduce((a, x) => a + (x.minutes || 0), 0);
       setWeekMin(week); setTodayMin(today);
     };
     load();
@@ -206,30 +201,51 @@ function FocusSummary({ userId }:{ userId: string | null }) {
 
 /* ---------- Page ---------- */
 export default function FocusScreen() {
+  // preset state
   const [presetKey, setPresetKey] = useState<PresetKey>("pomodoro");
+  const [custom, setCustom] = useState({ focusMin: 25, shortMin: 5, longMin: 15, cyclesBeforeLong: 4 });
+
+  const presets: Preset[] = useMemo(() => {
+    const base = PRESETS_BASE.map(p => ({
+      ...p,
+      label: `${p.focusMin} / ${p.shortMin} (x${p.cyclesBeforeLong} → ${p.longMin})`
+    })) as Preset[];
+    return [
+      ...base,
+      { key: "custom", label: "Custom…", focusMin: custom.focusMin, shortMin: custom.shortMin, longMin: custom.longMin, cyclesBeforeLong: custom.cyclesBeforeLong },
+    ];
+  }, [custom]);
+
+  const currentPreset = useMemo(() => presets.find(pp => pp.key === presetKey)!, [presets, presetKey]);
+
+  // phase / timing
   const [phase, setPhase] = useState<Phase>("focus");
-  const [remaining, setRemaining] = useState(() => presetByKey("pomodoro").focusMin * 60);
+  const [remaining, setRemaining] = useState(() => currentPreset.focusMin * 60);
   const [running, setRunning] = useState(false);
   const [cycle, setCycle] = useState(0); // completed focus blocks in the current set
   const [autoStartNext, setAutoStartNext] = useState(true);
   const [currentTaskTitle, setCurrentTaskTitle] = useState("");
 
+  // feature toggles
+  const [soundOn, setSoundOn] = useState(true);
+  const [notifOn, setNotifOn] = useState(true);
+
+  // distraction tracking
+  const [manualDistractions, setManualDistractions] = useState(0);
+  const interruptionsRef = useRef(0); // tab-visibility interruptions
+
   // deadline for current phase (epoch ms). Used to keep time while backgrounded.
   const [targetAt, setTargetAt] = useState<number | null>(null);
 
-  // Help & image
+  // Help
   const [showHelp, setShowHelp] = useState(false);
-  const [imgOk, setImgOk] = useState(true);
-
-  const currentPreset = useMemo(() => presetByKey(presetKey), [presetKey]);
 
   // timers/handles
   const tickRef = useRef<number | null>(null);
   const notifTimeoutRef = useRef<number | null>(null);
 
-  // wake lock & interruptions
+  // wake lock
   const wakeRef = useRef<any>(null);
-  const interruptionsRef = useRef(0);
 
   // auth (for logging sessions)
   const [userId, setUserId] = useState<string | null>(null);
@@ -238,8 +254,9 @@ export default function FocusScreen() {
   /* ====== persistence ====== */
   function saveState(toSave?: Partial<SavedState>) {
     const snapshot: SavedState = {
-      v: 2,
+      v: 3,
       presetKey,
+      custom,
       phase,
       running,
       cycle,
@@ -247,6 +264,8 @@ export default function FocusScreen() {
       remaining,
       autoStartNext,
       taskTitle: currentTaskTitle,
+      soundOn,
+      notifOn,
       ...toSave,
     } as SavedState;
     try { localStorage.setItem(LS_KEY, JSON.stringify(snapshot)); } catch {}
@@ -255,20 +274,23 @@ export default function FocusScreen() {
     return (ph === "focus" ? p.focusMin : ph === "short" ? p.shortMin : p.longMin) * 60;
   }
 
-  // Restore on mount and catch up across missed boundaries
+  // Restore on mount
   useEffect(() => {
     try {
       const raw = localStorage.getItem(LS_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw) as SavedState;
-      if (!parsed || parsed.v !== 2) return;
+      if (!parsed || parsed.v !== 3) return;
 
       setPresetKey(parsed.presetKey);
+      setCustom(parsed.custom || custom);
       setPhase(parsed.phase);
       setCycle(parsed.cycle);
       setRunning(parsed.running);
       setAutoStartNext(parsed.autoStartNext ?? true);
       setCurrentTaskTitle(parsed.taskTitle || "");
+      setSoundOn(parsed.soundOn ?? true);
+      setNotifOn(parsed.notifOn ?? true);
 
       const now = Date.now();
       if (parsed.running && parsed.targetAt) {
@@ -278,7 +300,7 @@ export default function FocusScreen() {
 
         let guard = 0;
         while (tgt <= now && guard < 20) {
-          const next = computeNextPhase(ph, cyc, presetByKey(parsed.presetKey), tgt);
+          const next = computeNextPhase(ph, cyc, presetByKey(parsed.presetKey, parsed.custom), tgt);
           ph = next.nextPhase; cyc = next.nextCycle; tgt = next.nextTargetAt; guard++;
         }
 
@@ -291,14 +313,14 @@ export default function FocusScreen() {
         setRunning(true);
       } else {
         setTargetAt(null);
-        setRemaining(Math.max(0, parsed.remaining || durationFor(parsed.phase, presetByKey(parsed.presetKey))));
+        setRemaining(Math.max(0, parsed.remaining || durationFor(parsed.phase, presetByKey(parsed.presetKey, parsed.custom))));
       }
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Persist on changes
-  useEffect(() => { saveState(); }, [presetKey, phase, running, cycle, targetAt, remaining, autoStartNext, currentTaskTitle]);
+  useEffect(() => { saveState(); }, [presetKey, custom, phase, running, cycle, targetAt, remaining, autoStartNext, currentTaskTitle, soundOn, notifOn]);
 
   /* ====== wake lock ====== */
   async function requestWakeLock() {
@@ -354,7 +376,7 @@ export default function FocusScreen() {
     setTargetAt(null);
     setRemaining(currentPreset.focusMin * 60);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presetKey]);
+  }, [presetKey, currentPreset.focusMin]);
 
   /* ====== boundary notifications ====== */
   function clearBoundaryNotification() {
@@ -366,12 +388,20 @@ export default function FocusScreen() {
     notifTimeoutRef.current = window.setTimeout(() => {
       const label = phaseForLabel || phase;
       const next = label === "focus" ? "Break time!" : "Back to focus!";
-      sendNotification(next, label === "focus" ? "Focus block complete" : "Break finished");
-      playBeep(2);
+      sendNotification(notifOn, next, label === "focus" ? "Focus block complete" : "Break finished");
+      playBeep(2, soundOn);
     }, ms) as unknown as number;
   }
 
   /* ====== phase transitions ====== */
+  function presetByKey(k: PresetKey, customVals?: SavedState["custom"]): Preset {
+    if (k !== "custom") {
+      const base = PRESETS_BASE.find(p => p.key === k)!;
+      return { ...base, label: "" } as Preset;
+    }
+    const c = customVals || custom;
+    return { key: "custom", label: "Custom…", ...c };
+  }
   function computeNextPhase(ph: Phase, cyc: number, p: Preset, endedAtMs: number) {
     if (ph === "focus") {
       const nextCycle = cyc + 1;
@@ -394,9 +424,9 @@ export default function FocusScreen() {
 
     // Notify if not on page
     if (document.visibilityState !== "visible") {
-      sendNotification(justEnded === "focus" ? "Break time!" : "Back to focus!", justEnded === "focus" ? "Focus block complete" : "Break finished");
+      sendNotification(notifOn, justEnded === "focus" ? "Break time!" : "Back to focus!", justEnded === "focus" ? "Focus block complete" : "Break finished");
     }
-    playBeep(2);
+    playBeep(2, soundOn);
 
     // Log focus session
     if (justEnded === "focus" && userId) {
@@ -408,11 +438,12 @@ export default function FocusScreen() {
           phase: "focus",
           preset: presetKey,
           minutes: currentPreset.focusMin,
-          interruptions: interruptionsRef.current,
+          interruptions: interruptionsRef.current + manualDistractions,
           task_title: currentTaskTitle || null,
         });
       } catch {}
       interruptionsRef.current = 0;
+      setManualDistractions(0);
       setCelebrate(true);
       if ((navigator as any).vibrate) (navigator as any).vibrate(8);
       setTimeout(() => setCelebrate(false), 900);
@@ -439,7 +470,7 @@ export default function FocusScreen() {
 
   /* ====== controls ====== */
   async function start() {
-    await ensureNotifPermission().catch(()=>{});
+    if (notifOn) await ensureNotifPermission().catch(()=>{});
     await requestWakeLock();
     const base = remaining > 0 ? remaining : durationFor(phase, currentPreset);
     const tgt = Date.now() + base * 1000;
@@ -499,36 +530,30 @@ export default function FocusScreen() {
     pip.addEventListener('pagehide', () => clearInterval(i));
   }
 
+  // Fullscreen toggle
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.();
+    } else {
+      document.exitFullscreen?.();
+    }
+  }
+
   return (
     <div className="page-focus">
       <div className="container" style={{ display: "grid", gap: 12 }}>
-        {/* Title + Alfred button */}
+        {/* Header (mentions Eva in subtitle and help) */}
         <div className="card" style={{ position: "relative" }}>
           <button
             onClick={() => setShowHelp(true)}
             aria-label="Open Focus help"
-            title="Need a hand? Ask Alfred"
-            style={{ position: "absolute", top: 8, right: 8, border: "none", background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10 }}
+            title="Need a hand? Ask Eva"
+            style={{ position: "absolute", top: 8, right: 8, border: "1px solid var(--border)", background: "#fff", padding: "6px 10px", borderRadius: 999, cursor: "pointer" }}
           >
-            {imgOk ? (
-              <img
-                src={FOCUS_ALFRED_SRC}
-                alt="Focus Alfred — open help"
-                style={{ width: 48, height: 48 }}
-                onError={() => setImgOk(false)}
-              />
-            ) : (
-              <span
-                style={{
-                  display: "inline-flex", alignItems: "center", justifyContent: "center",
-                  width: 36, height: 36, borderRadius: 999, border: "1px solid #d1d5db", background: "#f9fafb", fontWeight: 700,
-                }}
-              >?</span>
-            )}
+            ?
           </button>
-
           <h1 style={{ margin: 0 }}>Focus Timer</h1>
-          <div className="muted">Deep work intervals with smart breaks.</div>
+          <div className="muted">Deep work intervals with smart breaks. Stuck? Ask <b>Eva</b> for a 25-minute plan.</div>
         </div>
 
         {/* Controls row */}
@@ -538,13 +563,32 @@ export default function FocusScreen() {
             <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
               <span className="muted">Preset</span>
               <select value={presetKey} onChange={e => setPresetKey(e.target.value as PresetKey)}>
-                {PRESETS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+                {presets.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
               </select>
             </label>
 
+            {presetKey === "custom" && (
+              <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+                <label>Focus <input type="number" min={1} value={custom.focusMin} onChange={e => setCustom(c => ({ ...c, focusMin: Math.max(1, Number(e.target.value)||1) }))} style={{ width:60 }} /></label>
+                <label>Short <input type="number" min={1} value={custom.shortMin} onChange={e => setCustom(c => ({ ...c, shortMin: Math.max(1, Number(e.target.value)||1) }))} style={{ width:60 }} /></label>
+                <label>Long <input type="number" min={1} value={custom.longMin} onChange={e => setCustom(c => ({ ...c, longMin: Math.max(1, Number(e.target.value)||1) }))} style={{ width:60 }} /></label>
+                <label>Cycles <input type="number" min={1} value={custom.cyclesBeforeLong} onChange={e => setCustom(c => ({ ...c, cyclesBeforeLong: Math.max(1, Number(e.target.value)||1) }))} style={{ width:60 }} /></label>
+              </div>
+            )}
+
             <label style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
               <input type="checkbox" checked={autoStartNext} onChange={e => setAutoStartNext(e.target.checked)} />
-              Auto-start next phase
+              Auto-start next
+            </label>
+
+            <label style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
+              <input type="checkbox" checked={soundOn} onChange={e => setSoundOn(e.target.checked)} />
+              Sound
+            </label>
+
+            <label style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
+              <input type="checkbox" checked={notifOn} onChange={e => setNotifOn(e.target.checked)} />
+              Notifications
             </label>
 
             <span className="badge" title="Completed focus cycles in this set">Cycles: {cycle}/{currentPreset.cyclesBeforeLong}</span>
@@ -583,7 +627,9 @@ export default function FocusScreen() {
                 if (running && targetAt) setTargetAt(targetAt + extra * 1000);
                 setRemaining(r => r + extra);
               }}>+5 min</button>
+              <button onClick={() => setManualDistractions(n => n + 1)} title="Log a distraction">Distraction +</button>
               <button onClick={openMiniTimer} title="Floating mini-timer (Chrome)">Mini</button>
+              <button onClick={toggleFullscreen} title="Fullscreen timer">Fullscreen</button>
             </div>
             <div style={{ flex: 1, minWidth: 180 }}>
               <div style={{ height: 10, borderRadius: 999, border: "1px solid var(--border)", background: "#f8fafc", overflow: "hidden" }}>
@@ -598,6 +644,11 @@ export default function FocusScreen() {
               </div>
             </div>
           </div>
+
+          {/* Distraction count display */}
+          <div className="muted" style={{ fontSize: 12 }}>
+            Logged distractions this focus block: {manualDistractions + (phase === "focus" ? interruptionsRef.current : 0)}
+          </div>
         </div>
 
         {/* Summary */}
@@ -611,16 +662,14 @@ export default function FocusScreen() {
             <li>Choose one task — close other tabs — hit Start.</li>
             <li>Breaks are for movement or water. After a few cycles, enjoy the longer break.</li>
           </ul>
+          <div className="muted" style={{ fontSize: 12 }}>
+            Want help chunking your work? Ask <b>Eva</b> to turn your goal into a 3-step plan for your next block.
+          </div>
         </div>
 
         {/* Help modal */}
-        <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Focus — Help">
-          <div style={{ display: "flex", gap: 16 }}>
-            {imgOk && <img src={FOCUS_ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
-            <div style={{ flex: 1 }}>
-              <FocusHelpContent />
-            </div>
-          </div>
+        <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Focus — Help (with Eva)">
+          <FocusHelpContent />
         </Modal>
       </div>
 
