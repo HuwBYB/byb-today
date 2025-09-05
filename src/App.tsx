@@ -129,8 +129,8 @@ export default function App() {
 
   return (
     <AuthGate>
-      {/* Sticky banner — always visible, opens the Menu */}
-      <div
+      {/* Top bar — left-aligned logo + name, opens the Menu */}
+      <header
         role="button"
         aria-label="Open menu"
         onClick={() => setTab("menu")}
@@ -140,27 +140,47 @@ export default function App() {
           position: "sticky",
           top: "env(safe-area-inset-top, 0)",
           zIndex: 1000,
-          background: "#D7F0FA", // pale blue fallback behind image
+          background: "#D7F0FA", // pale blue fallback
           display: "flex",
           alignItems: "center",
-          justifyContent: "center",
+          justifyContent: "flex-start", // left align
+          gap: 10,
           padding: "8px 12px",
           borderBottom: "1px solid var(--border)",
           cursor: "pointer",
         }}
       >
-        {/* The banner asset lives in /public as BannerMenu */}
+        {/* Swap src to your actual logo asset. If missing, it hides and text still shows. */}
         <img
-          src="/BannerMenu"
-          alt="Best You Blueprint — open menu"
-          style={{
-            height: 56,          // nice, compact top bar
-            width: "auto",
-            maxWidth: "100%",
-            objectFit: "contain",
-          }}
+          src="/byb-logo.svg"
+          alt="BYB"
+          style={{ height: 28, width: 28, objectFit: "contain", borderRadius: 6 }}
+          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
         />
-      </div>
+        <span
+          style={{
+            fontSize: 16,
+            fontWeight: 700,
+            letterSpacing: 0.2,
+            lineHeight: 1,
+            color: "var(--foreground, #0a0a0a)",
+            userSelect: "none",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          Best You Blueprint
+        </span>
+
+        {/* (Optional) Keep your old banner art on wide screens at the far right */}
+        {/* <img
+          src="/BannerMenu"
+          alt=""
+          aria-hidden
+          style={{ marginLeft: "auto", height: 40, width: "auto", objectFit: "contain" }}
+        /> */}
+      </header>
 
       {/* Hidden date input (kept for future use; not visible) */}
       <input
