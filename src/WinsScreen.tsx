@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* ---------- Types ---------- */
@@ -49,85 +49,6 @@ type Detail = {
   date: string;
   kind?: string;
 };
-
-/* ---------- Public path helper (Vite/CRA/Vercel/GH Pages) ---------- */
-function publicPath(p: string) {
-  // @ts-ignore
-  const base =
-    (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
-    (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
-    "";
-  const withSlash = p.startsWith("/") ? p : `/${p}`;
-  return `${base.replace(/\/$/, "")}${withSlash}`;
-}
-const WINS_ALFRED_SRC = publicPath("/alfred/Wins_Alfred.png");
-
-/* ---------- Modal ---------- */
-function Modal({
-  open, onClose, title, children,
-}: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
-  const closeRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    if (open) window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-  useEffect(() => { if (open && closeRef.current) closeRef.current.focus(); }, [open]);
-  if (!open) return null;
-  return (
-    <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 2000 }}>
-      <div onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 780, width: "100%", background: "#fff", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.2)", padding: 20 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
-          <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
-          <button ref={closeRef} onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>✕</button>
-        </div>
-        <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
-      </div>
-    </div>
-  );
-}
-
-/* ---------- Wins help content (inline) ---------- */
-function WinsHelpContent() {
-  return (
-    <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
-      <p><em>Wins shows your progress at a glance — finished tasks, big-goal milestones, workouts, and gratitudes — so momentum stays visible.</em></p>
-
-      <h4 style={{ margin: 0 }}>How it works</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li><b>At a glance</b>: quick totals for Today, This Week, This Month, This Year, and All-time.</li>
-        <li><b>KPIs</b>: switch between Everything, General tasks, Big goal tasks, Exercise, and Gratitudes.</li>
-        <li><b>Details</b>: the list underneath reflects your chosen <i>period</i> and <i>bucket</i>, newest first.</li>
-      </ul>
-
-      <h4 style={{ margin: 0 }}>What counts as a win?</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li><b>General</b>: any task you mark as <i>Done</i>.</li>
-        <li><b>Big goal</b>: tasks created from your Big Goal steps/milestones.</li>
-        <li><b>Exercise</b>: logged workout sessions from Exercise Diary.</li>
-        <li><b>Gratitudes</b>: each gratitude entry you add.</li>
-      </ul>
-
-      <h4 style={{ margin: 0 }}>Tips from Alfred</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>End each day by marking finished tasks — tiny celebrations compound.</li>
-        <li>Keep big goals moving with small weekly steps; they’ll show up here automatically.</li>
-        <li>Open a longer period when you need a motivation boost (e.g., This Month).</li>
-      </ul>
-
-      <h4 style={{ margin: 0 }}>Not seeing something?</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Make sure the task is marked <b>Done</b> (not just created).</li>
-        <li>Check you’re looking at the right <b>period</b> (Today vs Week/Month).</li>
-        <li>Try the <b>Everything</b> bucket to see all wins together.</li>
-      </ul>
-
-      <p><strong>Bottom line:</strong> Wins is your progress dashboard — a fast reminder that you’re moving forward.</p>
-    </div>
-  );
-}
 
 /* ---------- Helpers ---------- */
 function toISO(d: Date) {
@@ -384,10 +305,6 @@ export default function WinsScreen() {
   const [period, setPeriod] = useState<PeriodKey>("today");
   const [active, setActive] = useState<BucketKey>("all");
 
-  // Alfred
-  const [showHelp, setShowHelp] = useState(false);
-  const [imgOk, setImgOk] = useState(true);
-
   /* Auth */
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
@@ -616,47 +533,8 @@ export default function WinsScreen() {
   return (
     <div className="page-wins" style={{ maxWidth: "100%", overflowX: "hidden" }}>
       <div className="container" style={{ display: "grid", gap: 12 }}>
-        {/* Header with Alfred */}
-        <div className="card" style={{ position: "relative", paddingRight: 64 }}>
-          <button
-            onClick={() => setShowHelp(true)}
-            aria-label="Open Wins help"
-            title="Need a hand? Ask Alfred"
-            style={{
-              position: "absolute",
-              top: 8,
-              right: 8,
-              border: "none",
-              background: "transparent",
-              padding: 0,
-              cursor: "pointer",
-              lineHeight: 0,
-              zIndex: 10,
-            }}
-          >
-            {imgOk ? (
-              <img
-                src={WINS_ALFRED_SRC}
-                alt="Wins Alfred — open help"
-                style={{ width: 48, height: 48 }}
-                onError={() => setImgOk(false)}
-              />
-            ) : (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 36, height: 36, borderRadius: 999,
-                  border: "1px solid #d1d5db",
-                  background: "#f9fafb",
-                  fontWeight: 700,
-                }}
-              >
-                ?
-              </span>
-            )}
-          </button>
+        {/* Header */}
+        <div className="card">
           <h1 style={{ margin: 0 }}>Your Wins</h1>
         </div>
 
@@ -753,16 +631,6 @@ export default function WinsScreen() {
 
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
-
-      {/* Help modal */}
-      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Wins — Help">
-        <div style={{ display: "flex", gap: 16 }}>
-          {imgOk && <img src={WINS_ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
-          <div style={{ flex: 1 }}>
-            <WinsHelpContent />
-          </div>
-        </div>
-      </Modal>
 
       <ConfettiBurst show={celebrate} />
     </div>
