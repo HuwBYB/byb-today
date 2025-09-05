@@ -1,4 +1,3 @@
-// src/AffirmationBuilderScreen.tsx
 import { useEffect, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
@@ -59,7 +58,7 @@ async function sendToConfidenceTodayLocal(row: AffirmationRow) {
 /* ---------- Modal ---------- */
 function Modal({
   open, onClose, title, children,
-}: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+}: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     if (open) window.addEventListener("keydown", onKey);
@@ -395,7 +394,6 @@ Keep it present-tense, positive, under 12 words, believable:
                         background: activeChip ? "hsl(var(--pastel-hsl) / .45)" : "#fff",
                         fontWeight: activeChip ? 700 : 500,
                         maxWidth: "100%",
-                        // MOBILE: allow two+ lines instead of single-line truncation
                         whiteSpace: "normal",
                         wordBreak: "break-word",
                         textAlign: "left",
@@ -445,8 +443,7 @@ Keep it present-tense, positive, under 12 words, believable:
             </button>
           </div>
         </div>
-
-   
+      </div>
 
       {/* Help modal */}
       <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Affirmation Builder — Help">
