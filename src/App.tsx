@@ -143,20 +143,26 @@ export default function App() {
           background: "#D7F0FA", // pale blue fallback
           display: "flex",
           alignItems: "center",
-          justifyContent: "flex-start", // left align
+          justifyContent: "flex-start",
           gap: 10,
           padding: "8px 12px",
           borderBottom: "1px solid var(--border)",
           cursor: "pointer",
         }}
       >
-        {/* Swap src to your actual logo asset. If missing, it hides and text still shows. */}
+        {/* Use your BannerMenu asset as the logo */}
         <img
-          src="/byb-logo.svg"
-          alt="BYB"
-          style={{ height: 28, width: 28, objectFit: "contain", borderRadius: 6 }}
-          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+          src="/BannerMenu"
+          alt="BYB logo"
+          style={{
+            height: 28,
+            width: "auto",
+            objectFit: "contain",
+            borderRadius: 6,
+            flex: "0 0 auto",
+          }}
         />
+
         <span
           style={{
             fontSize: 16,
@@ -173,7 +179,7 @@ export default function App() {
           Best You Blueprint
         </span>
 
-        {/* (Optional) Keep your old banner art on wide screens at the far right */}
+        {/* If you ever want a right-side decorative banner, drop it here */}
         {/* <img
           src="/BannerMenu"
           alt=""
@@ -199,9 +205,7 @@ export default function App() {
           display: "grid",
           gap: 12,
           padding: "12px",
-          // small top pad so content never hugs the banner edge on scroll bounce
           paddingTop: 12,
-          // no bottom nav anymore
           paddingBottom: "calc(12px + env(safe-area-inset-bottom, 0))",
         }}
       >
