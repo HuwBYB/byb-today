@@ -1,4 +1,3 @@
-// src/BigGoalWizard.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
@@ -52,6 +51,8 @@ const STEP_ORDER: StepKey[] = ["title","category","dates","halfway","monthly","w
 /* ========================= Component ========================= */
 
 export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
+
   const todayISO = useMemo(() => toISO(new Date()), []);
   const [step, setStep] = useState<StepKey>("title");
 
@@ -75,6 +76,21 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
   const titleRef = useRef<HTMLInputElement>(null);
   useEffect(() => { titleRef.current?.focus({ preventScroll: true }); }, []);
 
+  // HARD BLOCK: swallow global hotkeys while typing inside the wizard (capture phase)
+  useEffect(() => {
+    const handler = (ev: KeyboardEvent) => {
+      const root = rootRef.current;
+      if (!root) return;
+      const t = ev.target as Node | null;
+      if (t && root.contains(t)) {
+        // Let native typing happen, but stop bubbling to app-level hotkeys
+        ev.stopPropagation();
+      }
+    };
+    window.addEventListener("keydown", handler, true); // capture
+    return () => window.removeEventListener("keydown", handler, true);
+  }, []);
+
   // halfway = exact midpoint between start and target
   const computedHalfDate = useMemo(() => {
     if (!targetDate) return "";
@@ -86,7 +102,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
   const stepIndex = STEP_ORDER.indexOf(step);
   const progressPct = ((stepIndex + 1) / STEP_ORDER.length) * 100;
 
-  // prevent global shortcuts from stealing focus while typing
+  // prevent global shortcuts from stealing focus while typing (React layer)
   function stopKeyBubble(e: React.KeyboardEvent) {
     e.stopPropagation();
   }
@@ -316,7 +332,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
     }
 
     const now = new Date();
-    const currentYear = now.getFullYear();
+    theconst currentYear = now.getFullYear();
     const years: number[] = [];
     for (let yy = currentYear - 50; yy <= currentYear + 50; yy++) years.push(yy); // wide range for long goals
     const months = [
@@ -324,7 +340,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
     ];
 
     return (
-      <div onKeyDown={stopKeyBubble} onKeyUp={stopKeyBubble} onKeyPress={stopKeyBubble}>
+      <div onKeyDown={stopKeyBubble} onKeyUp={stopKeyBubble}>
         <div className="muted" style={{ marginBottom: 6 }}>{label}</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr 1fr", gap: 8 }}>
           {/* Day */}
@@ -414,11 +430,11 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
           ref={titleRef}
           data-biggoal-title
           autoComplete="off"
+          inputMode="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => { stopKeyBubble(e); if (e.key === "Enter") goNext(); }}
           onKeyUp={stopKeyBubble}
-          onKeyPress={stopKeyBubble}
           placeholder="e.g., Grow revenue to £25k/mo"
           style={{ width: "100%" }}
         />
@@ -514,11 +530,11 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
       >
         <input
           autoComplete="off"
+          inputMode="text"
           value={halfwayNote}
           onChange={(e) => setHalfwayNote(e.target.value)}
           onKeyDown={(e) => { stopKeyBubble(e); if (e.key === "Enter") goNext(); }}
           onKeyUp={stopKeyBubble}
-          onKeyPress={stopKeyBubble}
           placeholder="e.g., 50% of users onboarded, £12.5k MRR, 15 clients…"
           style={{ width: "100%" }}
         />
@@ -538,11 +554,11 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
       >
         <input
           autoComplete="off"
+          inputMode="text"
           value={monthlyCommit}
           onChange={(e) => setMonthlyCommit(e.target.value)}
           onKeyDown={(e) => { stopKeyBubble(e); if (e.key === "Enter") goNext(); }}
           onKeyUp={stopKeyBubble}
-          onKeyPress={stopKeyBubble}
           placeholder="e.g., Close 2 new customers"
           style={{ width: "100%" }}
         />
@@ -562,11 +578,11 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
       >
         <input
           autoComplete="off"
+          inputMode="text"
           value={weeklyCommit}
           onChange={(e) => setWeeklyCommit(e.target.value)}
           onKeyDown={(e) => { stopKeyBubble(e); if (e.key === "Enter") goNext(); }}
           onKeyUp={stopKeyBubble}
-          onKeyPress={stopKeyBubble}
           placeholder="e.g., Book 5 prospect calls"
           style={{ width: "100%" }}
         />
@@ -586,11 +602,11 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
       >
         <input
           autoComplete="off"
+          inputMode="text"
           value={dailyCommit}
           onChange={(e) => setDailyCommit(e.target.value)}
           onKeyDown={(e) => { stopKeyBubble(e); if (e.key === "Enter") goNext(); }}
           onKeyUp={stopKeyBubble}
-          onKeyPress={stopKeyBubble}
           placeholder="e.g., Reach out to 15 people"
           style={{ width: "100%" }}
         />
@@ -643,7 +659,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
   /* --------------------------- Render --------------------------- */
 
   return (
-    <div style={{ border: "1px solid #ddd", borderRadius: 16, padding: 16, background: "#fff" }}>
+    <div ref={rootRef} style={{ border: "1px solid #ddd", borderRadius: 16, padding: 16, background: "#fff" }}>
       {Header}
 
       <div style={{ marginTop: 12 }}>
