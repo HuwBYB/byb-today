@@ -8,7 +8,7 @@ type MenuItem = {
     | "gratitude"
     | "exercise"
     | "wins"
-    | "alfred"
+    | "eva"          // renamed from "alfred"
     | "confidence"
     | "notes"
     | "focus"
@@ -26,8 +26,8 @@ const ITEMS: MenuItem[] = [
   { key: "vision",       label: "Vision Board",    icon: "🌈" },
   { key: "gratitude",    label: "Gratitude",       icon: "🙏" },
   { key: "exercise",     label: "Exercise",        icon: "🏋️" },
-  { key: "wins",         label: "Your Successes",  icon: "🏆" },
-  { key: "alfred",       label: "Alfred",          icon: "🤖" },
+  { key: "wins",         label: "Your Wins",       icon: "🏆" },
+  { key: "eva",          label: "Eva (EVA)",       icon: "" }, // icon handled separately
   { key: "confidence",   label: "Confidence",      icon: "🔥" },
   { key: "notes",        label: "Notes",           icon: "📝" },
   { key: "focus",        label: "Focus",           icon: "🎧" },
@@ -82,7 +82,15 @@ export default function MenuScreen({
               }}
             >
               <div style={{ fontSize: 28 }} aria-hidden>
-                {it.icon}
+                {it.key === "eva" ? (
+                  <img
+                    src="/Logo Butterfly.png"
+                    alt="Eva logo"
+                    style={{ width: 36, height: 36, objectFit: "contain" }}
+                  />
+                ) : (
+                  it.icon
+                )}
               </div>
               <div style={{ fontWeight: 700 }}>{it.label}</div>
             </button>
