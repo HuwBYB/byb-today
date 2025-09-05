@@ -1,4 +1,3 @@
-// src/GoalsScreen.tsx
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 import BigGoalWizard from "./BigGoalWizard";
@@ -422,28 +421,24 @@ export default function GoalsScreen() {
   // compute balance directly (no useMemo)
   const balance = computeBalance(goals);
 
-  /* ----- Scroll to wizard & focus the title on open ----- */
+  /* ----- NEW: mobile-safe scroll + single delayed focus when opening wizard ----- */
   useEffect(() => {
     if (!showWizard) return;
-    // Scroll the anchor into view
-    wizardAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
-    // After paint, try to focus the title input inside the wizard
-    const focusSoon = () => {
-      const root = wizardAnchorRef.current?.parentElement || document;
+    const anchor = wizardAnchorRef.current;
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+    // 1) Scroll (avoid smooth on mobile to prevent input blur)
+    anchor?.scrollIntoView({ behavior: isMobile ? "auto" : "smooth", block: "start" });
+
+    // 2) Focus the title input once after scrolling/paint settles
+    const tid = window.setTimeout(() => {
+      const root = anchor?.parentElement || document;
       const input = root.querySelector<HTMLInputElement>('input[data-biggoal-title]');
-      if (input) { input.focus({ preventScroll: true }); return true; }
-      return false;
-    };
+      input?.focus({ preventScroll: true });
+    }, isMobile ? 250 : 60);
 
-    // try a few times in case of async render
-    let tries = 0;
-    const id = window.setInterval(() => {
-      tries++;
-      if (focusSoon() || tries >= 8) window.clearInterval(id);
-    }, 60);
-
-    return () => window.clearInterval(id);
+    return () => window.clearTimeout(tid);
   }, [showWizard]);
 
   return (
