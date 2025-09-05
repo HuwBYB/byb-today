@@ -101,28 +101,29 @@ export default function MenuScreen({
             gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
           }}
         >
-          {ITEMS.filter((it) => it.key !== "today").map((it) => (
-            <button
-              key={it.key}
-              onClick={() => onOpenTab(it.key)}
-              className="btn-soft"
-              style={{
-                borderRadius: 16,
-                padding: 14,
-                display: "grid",
-                gap: 6,
-                alignContent: "center",
-                justifyItems: "center",
-                textAlign: "center",
-                minHeight: 110,
-              }}
-            >
-              <div style={{ fontSize: 28, lineHeight: 0 }} aria-hidden>
-                {it.icon}
-              </div>
-              <div style={{ fontWeight: 700 }}>{it.label}</div>
-            </button>
-          ))}
+   {ITEMS.filter((it) => it.key !== "today").map((it) => (
+  <button
+    key={it.key}
+    onClick={() => onOpenTab(it.key)}
+    className="btn-soft"
+    style={{
+      borderRadius: 16,
+      padding: 14,
+      display: "grid",
+      gap: 6,
+      alignContent: "center",
+      justifyItems: "center",
+      textAlign: "center",
+      minHeight: 110,
+    }}
+  >
+    <div style={{ fontSize: 28, lineHeight: 0 }} aria-hidden>
+      {it.icon}
+    </div>
+    {/* ⬇️ added marginTop */}
+    <div style={{ fontWeight: 700, marginTop: 4 }}>{it.label}</div>
+  </button>
+))}
         </div>
       </div>
     </div>
