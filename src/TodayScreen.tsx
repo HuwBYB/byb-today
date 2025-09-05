@@ -7,6 +7,11 @@ import { supabase } from "./lib/supabaseClient";
    BYB — Today Screen (Simple + Defensive Filter)
    ============================================= */
 
+/* ===== Logo & Toast theme ===== */
+const TOAST_LOGO_SRC = "/LogoButterfly.png";     // served from public/
+const TOAST_BG = "#D7F0FA";                       // match App banner
+const TOAST_BORDER = "#bfe5f3";                   // subtle border to suit the bg
+
 /* ===== Types ===== */
 type Task = {
   id: number;
@@ -219,39 +224,35 @@ function useToast() {
     >
       {msg && (
         <div
+          // keep "card" for consistent radius/shadow, override colors below
           className="card"
           style={{
             display: "inline-flex",
             alignItems: "center",
             gap: 10,
-            background: "#ffffff",
+            background: TOAST_BG,                 // match banner
             color: "var(--text)",
             borderRadius: 14,
             padding: "10px 14px",
-            boxShadow: "0 8px 20px rgba(0,0,0,.14)",
-            border: "1px solid var(--border)",
+            boxShadow: "0 8px 20px rgba(0,0,0,.10)",
+            border: `1px solid ${TOAST_BORDER}`,
             pointerEvents: "all"
           }}
         >
-          {/* Swap 🦋 for your actual BYB logo if available:
-              <img src="/byb-butterfly.svg" alt="" width={18} height={18} /> */}
-          <span
-            aria-hidden="true"
+          <img
+            src={TOAST_LOGO_SRC}
+            alt=""
+            width={22}
+            height={22}
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 22,
-              height: 22,
-              borderRadius: 999,
-              background: "var(--primary-soft)",
-              border: "1px solid var(--border)",
-              fontSize: 14,
-              lineHeight: 1
+              display: "block",
+              objectFit: "contain",
+              borderRadius: 6,
+              border: `1px solid ${TOAST_BORDER}`,
+              background: "#ffffff88"
             }}
-          >
-            🦋
-          </span>
+            onError={(e) => { e.currentTarget.style.display = "none"; }}
+          />
           <span style={{ fontWeight: 700 }}>{msg}</span>
         </div>
       )}
@@ -521,7 +522,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
   function displayTitle(t: Task) {
     const base = (t.title || "").trim();
-    const g = t.goal_id != null ? goalMap[t.goal_id] : "";
+       const g = t.goal_id != null ? goalMap[t.goal_id] : "";
     return g ? `${base} (${g})` : base;
   }
 
