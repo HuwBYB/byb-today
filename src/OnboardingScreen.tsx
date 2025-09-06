@@ -13,6 +13,7 @@ const LS_BIG_GOAL = "byb:big_goal";
 
 /** Default nickname suggestions */
 const DEFAULT_NICKNAMES = [
+  // Existing set
   "King",
   "Champ",
   "Legend",
@@ -23,6 +24,19 @@ const DEFAULT_NICKNAMES = [
   "Hero",
   "Captain",
   "Tiger",
+  // New feminine-forward options
+  "Queen",
+  "Princess",
+  "Gurl",
+  "Boss Lady",
+  "Diva",
+  "Hot Stuff",
+  "Girlfriend",
+  "Chica",
+  "Darling",
+  "Babe",
+  "Bestie",
+  
 ];
 
 /** Utilities */
