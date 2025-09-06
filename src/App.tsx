@@ -17,6 +17,7 @@ import NotesScreen from "./NotesScreen";
 import FocusAlfredScreen from "./FocusAlfredScreen";
 import OnboardingScreen from "./OnboardingScreen";
 import MeditationScreen from "./meditation";
+import MotivationScreen from "./motivation";   // ⬅️ NEW
 import AffirmationBuilder from "./AffirmationBuilder";
 import MenuScreen from "./MenuScreen";
 
@@ -34,7 +35,7 @@ const LS_DONE = "byb:onboarding_done";
 type Tab =
   | "today" | "menu" | "calendar" | "goals" | "vision" | "gratitude"
   | "exercise" | "wins" | "alfred" | "confidence" | "notes"
-  | "focus" | "meditation" | "affirmations";
+  | "focus" | "meditation" | "motivation" | "affirmations"; // ⬅️ added "motivation"
 
 /* Helpers */
 function todayISO() {
@@ -146,6 +147,8 @@ export default function App() {
         return <FocusAlfredScreen />;
       case "meditation":
         return <MeditationScreen />;
+      case "motivation":                      {/* ⬅️ NEW route */}
+        return <MotivationScreen />;
       case "affirmations":
         return <AffirmationBuilder />;
       default:
