@@ -8,7 +8,8 @@ const toISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart
 const todayISO = () => toISO(new Date());
 
 /* Use the public image directly. The query string busts browser cache after deploy. */
-const POWER_POSE_SRC = "/PowerPoseArtDoll.png?v=2";
+const POWER_POSE_SRC = "/Power Pose Art Doll.png
+?v=2";
 
 /* ---------- Modal ---------- */
 function Modal({ open, onClose, title, children }:{
