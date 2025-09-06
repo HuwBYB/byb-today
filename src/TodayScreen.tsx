@@ -348,6 +348,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [poolInput, setPoolInput] = useState<string[]>([]);
   const [customNicks, setCustomNicks] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
+  const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
   // Responsive: <420px treated as compact
   const [isCompact, setIsCompact] = useState<boolean>(false);
@@ -622,9 +623,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
     setCustomNicks("");
   }
   function resetNicknames() {
-    if (window.confirm("Reset all nicknames? This will clear your selected and custom nicknames.")) {
-      setPoolInput([]);
-    }
+    // Open pretty BYB-styled confirm dialog instead of window.confirm
+    setConfirmResetOpen(true);
+  }
   }
 
   async function saveProfile() {
@@ -915,7 +916,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   style={{ flex: 1, minWidth: 0 }}
                 />
                 <button className="btn-soft" onClick={addCustomFromInput}>Add</button>
-                <button className="btn-soft" onClick={resetNicknames} title="Clear all nicknames">Reset</button>
+                <button className="btn-soft" onClick={() => setConfirmResetOpen(true)} title="Clear all nicknames">Reset</button>
               </div>
 
               {err && <div style={{ color: "red" }}>{err}</div>}
@@ -930,6 +931,36 @@ export default function TodayScreen({ externalDateISO }: Props) {
       )}
 
       {/* Toast node */}
+      {/* Confirm Reset (BYB styled) */}
+      {confirmResetOpen && (
+        <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-reset-title">
+          <div className="sheet" style={{ maxWidth: 420 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+              <img
+                src={TOAST_LOGO_SRC}
+                alt=""
+                width={28}
+                height={28}
+                style={{ display: "block", objectFit: "contain", borderRadius: 6, border: `1px solid ${TOAST_BORDER}`, background: "#ffffff" }}
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+              />
+              <div id="confirm-reset-title" style={{ fontWeight: 800, fontSize: 18 }}>Reset nicknames?</div>
+            </div>
+            <p className="muted" style={{ marginTop: 0 }}>This will clear your selected and custom nicknames.</p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn-soft" onClick={() => setConfirmResetOpen(false)}>Cancel</button>
+              <button
+                className="btn-primary"
+                onClick={() => { setPoolInput([]); setConfirmResetOpen(false); }}
+                style={{ background: "#ef4444" }}
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {toast.node}
     </div>
   );
