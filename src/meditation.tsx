@@ -13,9 +13,9 @@ const TOAST_LOGO_SRC = "/LogoButterfly.png";
 
 /** Your starter videos */
 const SEEDS: Partial<Video>[] = [
-  { title: "Starter: 10-min Calm", url: "https://youtu.be/j734gLbQFbU?si=6AnHq5m0lLMu7zrW" },
-  { title: "Starter: Focus Reset", url: "https://youtu.be/cyMxWXlX9sU?si=HyfDOCQuFNY9chFP" },
-  { title: "Starter: Deep Relax",  url: "https://youtu.be/P-8ALcF8AGE?si=JCtNqvsaKfxDLhdO" },
+  { title: "5-min Guided Meditation", url: "https://youtu.be/j734gLbQFbU?si=6AnHq5m0lLMu7zrW" },
+  { title: "10-min Guided Meditation", url: "https://youtu.be/cyMxWXlX9sU?si=HyfDOCQuFNY9chFP" },
+  { title: "Guided Meditation: Self Love",  url: "https://youtu.be/P-8ALcF8AGE?si=JCtNqvsaKfxDLhdO" },
 ];
 
 /* =========================
