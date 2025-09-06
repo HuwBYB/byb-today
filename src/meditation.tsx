@@ -292,7 +292,7 @@ export default function MeditationScreen() {
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">BYB Meditation Centre</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Meditation Centre</h1>
             {/* subtitle removed per request */}
           </div>
           <div className="flex items-center gap-2">
