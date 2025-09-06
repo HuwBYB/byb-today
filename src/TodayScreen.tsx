@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* =============================================
-   BYB — Today Screen (Profile editor + pretty Reset confirm)
+   BYB — Today Screen (Profile editor + Boost modal)
    ============================================= */
 
 /* ===== Logo & Toast theme ===== */
@@ -103,7 +103,7 @@ function pickGreetingLabel(): string {
     const pool = rotate ? (JSON.parse(localStorage.getItem(LS_POOL) || "[]") as string[]) : [];
     const list = [
       ...(name ? [name] : []),
-      ...(Array.isArray(pool) ? pool.filter(Boolean) : [])
+      ...(Array.isArray(pool) ? pool.filter(Boolean) : []),
     ];
     if (list.length === 0) return "";
     return list[Math.floor(Math.random() * list.length)];
@@ -116,13 +116,13 @@ const POSITIVE_GREETS = [
   "Great to see you",
   "Let’s make today a great day",
   "Let’s smash some goals today",
-  "Back at it — nice!"
+  "Back at it — nice!",
 ];
 const PROGRESS_GREETS = [
   "You’re smashing today",
   "You’re crushing this",
   "Momentum looks great",
-  "Lovely progress"
+  "Lovely progress",
 ];
 
 function timeGreeting(date = new Date()): string {
@@ -185,10 +185,7 @@ function fireConfetti() {
     el.animate(
       [
         { transform: `translateY(0) rotate(0deg)`, opacity: 1 },
-        {
-          transform: `translateY(${window.innerHeight + 40}px) rotate(${360 + Math.random() * 360}deg)`,
-          opacity: 0.6
-        }
+        { transform: `translateY(${window.innerHeight + 40}px) rotate(${360 + Math.random() * 360}deg)`, opacity: 0.6 },
       ],
       { duration: 1200 + Math.random() * 800, easing: "cubic-bezier(.2,.8,.2,1)" }
     );
@@ -203,7 +200,7 @@ const ENCOURAGE_LINES = [
   "One pebble at a time becomes a mountain.",
   "Stacked: another tiny win in the bank.",
   "You’re doing Future You a favour.",
-  "Mic drop. Onto the next."
+  "Mic drop. Onto the next.",
 ];
 function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)] as T;
@@ -228,7 +225,7 @@ function useToast() {
         display: "flex",
         justifyContent: "center",
         pointerEvents: "none",
-        zIndex: 3500
+        zIndex: 3500,
       }}
     >
       {msg && (
@@ -244,7 +241,7 @@ function useToast() {
             padding: "10px 14px",
             boxShadow: "0 8px 20px rgba(0,0,0,.10)",
             border: `1px solid ${TOAST_BORDER}`,
-            pointerEvents: "all"
+            pointerEvents: "all",
           }}
         >
           <img
@@ -257,7 +254,7 @@ function useToast() {
               objectFit: "contain",
               borderRadius: 6,
               border: `1px solid ${TOAST_BORDER}`,
-              background: "#ffffff88"
+              background: "#ffffff88",
             }}
             onError={(e) => {
               (e.currentTarget as HTMLImageElement).style.display = "none";
@@ -274,23 +271,51 @@ function useToast() {
 
 /* ===== Nickname options (match onboarding) ===== */
 const DEFAULT_NICKNAMES = [
-  "King",
-  "Champ",
-  "Legend",
-  "Boss",
-  "Chief",
-  "Star",
-  "Ace",
-  "Hero",
-  "Captain",
-  "Tiger",
-  "Queen",
-  "Princess",
-  "Gurl",
-  "Boss Lady",
-  "Diva",
-  "Hot Stuff",
-  "Girlfriend"
+  "King","Champ","Legend","Boss","Chief","Star","Ace","Hero","Captain","Tiger",
+  "Queen","Princess","Gurl","Boss Lady","Diva","Hot Stuff","Girlfriend",
+];
+
+/* ===== Boost lines (unisex, always positive) ===== */
+const BOOST_LINES = [
+  // Provided
+  "You have the power to make a difference.",
+  "The world is a better place with you in it.",
+  "Be the role model you would have wanted.",
+  "You are the only you in this world — embrace your uniqueness.",
+  "Try to inspire others by being the best you that you can be.",
+  "Be a positive light in this world.",
+  // More
+  "Your effort matters, even when it’s quiet.",
+  "Tiny steps today become giant wins tomorrow.",
+  "You’ve handled hard things before — you can handle this too.",
+  "Your kindness has a ripple effect you’ll never fully see.",
+  "Progress over perfection — always.",
+  "You are building a life Future You will thank you for.",
+  "Your presence changes rooms. In a good way.",
+  "You’re allowed to take up space and dream big.",
+  "Momentum loves action — you just started it.",
+  "You don’t need to be amazing to begin; beginning is amazing.",
+  "You’re closer than you think.",
+  "Energy follows focus — and your focus is strong.",
+  "You bring clarity where others find noise.",
+  "The way you show up inspires people you don’t even know.",
+  "You make difficult things look doable.",
+  "Courage is showing up — which you just did.",
+  "You are worthy of the goals you’re chasing.",
+  "Your future self is cheering for you right now.",
+  "Your consistency is quietly powerful.",
+  "You’ve got resilience in your bones.",
+  "You turn challenges into checkpoints.",
+  "Your ideas matter — keep going.",
+  "You can create something today that didn’t exist yesterday.",
+  "You lead by example without saying a word.",
+  "Your best is enough. And it compounds.",
+  "You’re writing a story you’ll be proud to tell.",
+  "You turn ‘someday’ into ‘done’.",
+  "Your focus is a superpower — use it for 5 minutes right now.",
+  "You bring warmth and strength in equal measure.",
+  "Someone believes in you because you’ve earned it.",
+  "You don’t chase perfect; you build progress.",
 ];
 
 /* =============================================
@@ -348,9 +373,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     `;
     document.head.appendChild(style);
     return () => {
-      try {
-        document.head.removeChild(style);
-      } catch {}
+      try { document.head.removeChild(style); } catch {}
     };
   }, []);
 
@@ -383,12 +406,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [savingProfile, setSavingProfile] = useState(false);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
+  // Boost modal
+  const [boostOpen, setBoostOpen] = useState(false);
+  const [boostLine, setBoostLine] = useState<string>("");
+
   // Responsive
   const [isCompact, setIsCompact] = useState<boolean>(false);
   useEffect(() => {
-    function check() {
-      setIsCompact(window.innerWidth < 420);
-    }
+    function check() { setIsCompact(window.innerWidth < 420); }
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
@@ -400,7 +425,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     pendingToday: 0,
     isWin: false,
     streak: 0,
-    bestStreak: 0
+    bestStreak: 0,
   });
 
   // streak micro animation
@@ -418,17 +443,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const toast = useToast();
 
   // external date change
-  useEffect(() => {
-    if (externalDateISO) setDateISO(externalDateISO);
-  }, [externalDateISO]);
+  useEffect(() => { if (externalDateISO) setDateISO(externalDateISO); }, [externalDateISO]);
 
   // user + greeting + last-visit
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
-      if (error) {
-        setErr(error.message);
-        return;
-      }
+      if (error) { setErr(error.message); return; }
       const user = data.user;
       setUserId(user?.id ?? null);
 
@@ -436,7 +456,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
       try {
         const nowMs = Date.now();
         const lastMs = Number(localStorage.getItem(LS_LAST_VISIT) || "0");
-        const missedNow = lastMs > 0 ? nowMs - lastMs > 86400000 : false;
+        const missedNow = lastMs > 0 ? (nowMs - lastMs) > 86400000 : false;
         setMissed(missedNow);
         localStorage.setItem(LS_LAST_VISIT, String(nowMs));
       } catch {}
@@ -444,10 +464,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   }, []);
 
   // clock
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 30_000);
-    return () => clearInterval(id);
-  }, []);
+  useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id); }, []);
 
   // Overdue helper
   const isOverdueFn = (t: Task) =>
@@ -470,7 +487,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
       const normalized: Task[] = raw.map((t) => ({
         ...t,
         due_date: t.due_date ? t.due_date.slice(0, 10) : null,
-        completed_at: t.completed_at
+        completed_at: t.completed_at,
       }));
 
       const list = normalized.filter(
@@ -516,8 +533,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   async function loadStreaks() {
     if (!userId) return;
     try {
-      const since = new Date();
-      since.setDate(since.getDate() - 180);
+      const since = new Date(); since.setDate(since.getDate() - 180);
       const { data, error } = await supabase
         .from("tasks")
         .select("completed_at,status,user_id")
@@ -533,17 +549,11 @@ export default function TodayScreen({ externalDateISO }: Props) {
         days.add(toISO(new Date(d.getFullYear(), d.getMonth(), d.getDate())));
       }
 
-      let streak = 0;
-      let cursor = todayISO();
-      while (days.has(cursor)) {
-        streak += 1;
-        cursor = addDays(cursor, -1);
-      }
+      let streak = 0; let cursor = todayISO();
+      while (days.has(cursor)) { streak += 1; cursor = addDays(cursor, -1); }
 
       const sorted = Array.from(days).sort();
-      let best = 0,
-        run = 0;
-      let prev: string | null = null;
+      let best = 0, run = 0; let prev: string | null = null;
       for (const d of sorted) {
         if (!prev) run = 1;
         else {
@@ -554,18 +564,11 @@ export default function TodayScreen({ externalDateISO }: Props) {
         prev = d;
       }
       setSummary((s) => ({ ...s, streak, bestStreak: best }));
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
   }
 
-  async function loadAll() {
-    await load();
-    await loadStreaks();
-  }
-  useEffect(() => {
-    if (userId && dateISO) loadAll();
-  }, [userId, dateISO]);
+  async function loadAll() { await load(); await loadStreaks(); }
+  useEffect(() => { if (userId && dateISO) loadAll(); }, [userId, dateISO]);
 
   // Recompute greeting line
   useEffect(() => {
@@ -588,35 +591,24 @@ export default function TodayScreen({ externalDateISO }: Props) {
         .eq("id", t.id);
       if (error) throw error;
       await loadAll();
-      if (markDone) {
-        fireConfetti();
-        toast.show(pick(ENCOURAGE_LINES));
-      }
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    }
+      if (markDone) { fireConfetti(); toast.show(pick(ENCOURAGE_LINES)); }
+    } catch (e: any) { setErr(e.message || String(e)); }
   }
 
   async function moveToSelectedDate(taskId: number) {
     try {
       const { error } = await supabase.from("tasks").update({ due_date: dateISO }).eq("id", taskId);
-      if (error) throw error;
-      await loadAll();
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    }
+      if (error) throw error; await loadAll();
+    } catch (e: any) { setErr(e.message || String(e)); }
   }
 
   async function moveAllOverdueHere() {
     try {
-      const overdueIds = tasks.filter(isOverdueFn).map((t) => t.id);
+      const overdueIds = tasks.filter(isOverdueFn).map(t => t.id);
       if (overdueIds.length === 0) return;
       const { error } = await supabase.from("tasks").update({ due_date: dateISO }).in("id", overdueIds);
-      if (error) throw error;
-      await loadAll();
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    }
+      if (error) throw error; await loadAll();
+    } catch (e: any) { setErr(e.message || String(e)); }
   }
 
   async function addTaskWithArgs(title: string, repeat: Repeat) {
@@ -624,12 +616,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
     const clean = title.trim();
     const occurrences = generateOccurrences(dateISO, repeat);
     const rows = occurrences.map((iso) => ({
-      user_id: userId,
-      title: clean,
-      due_date: iso,
-      status: "pending",
-      priority: 0,
-      source: repeat ? makeSeriesKey(repeat) : "manual"
+      user_id: userId, title: clean, due_date: iso, status: "pending",
+      priority: 0, source: repeat ? makeSeriesKey(repeat) : "manual"
     }));
     const { error } = await supabase.from("tasks").insert(rows as any);
     if (error) throw error;
@@ -637,18 +625,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
   async function addTask() {
     if (!userId || !newTitle.trim()) return;
-    setAdding(true);
-    setErr(null);
+    setAdding(true); setErr(null);
     try {
       await addTaskWithArgs(newTitle, newRepeat);
-      setNewTitle("");
-      setNewRepeat("");
+      setNewTitle(""); setNewRepeat("");
       await loadAll();
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
-      setAdding(false);
-    }
+    } catch (e: any) { setErr(e.message || String(e)); } finally { setAdding(false); }
   }
 
   /* ===== Profile helpers ===== */
@@ -663,34 +645,18 @@ export default function TodayScreen({ externalDateISO }: Props) {
           if (Array.isArray(raw)) {
             setPoolInput(raw as string[]);
           } else if (typeof raw === "string") {
-            try {
-              setPoolInput(JSON.parse(raw));
-            } catch {
-              setPoolInput([]);
-            }
+            try { setPoolInput(JSON.parse(raw)); } catch { setPoolInput([]); }
           } else {
-            try {
-              setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]"));
-            } catch {
-              setPoolInput([]);
-            }
+            try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
           }
           return;
         }
       }
       setNameInput(localStorage.getItem(LS_NAME) || "");
-      try {
-        setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]"));
-      } catch {
-        setPoolInput([]);
-      }
+      try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
     } catch {
       setNameInput(localStorage.getItem(LS_NAME) || "");
-      try {
-        setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]"));
-      } catch {
-        setPoolInput([]);
-      }
+      try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
     }
   }
 
@@ -746,6 +712,15 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 
+  /* ===== Boost helpers ===== */
+  function openBoost() {
+    setBoostLine(pick(BOOST_LINES));
+    setBoostOpen(true);
+  }
+  function nextBoost() {
+    setBoostLine(pick(BOOST_LINES));
+  }
+
   /* ===== Computed ===== */
   const niceDate = useMemo(() => formatNiceDate(dateISO), [dateISO]);
   const greeting = useMemo(() => (greetLine || timeGreeting(now)), [greetLine, now]);
@@ -768,7 +743,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
             gap: 8,
             flexWrap: "wrap",
             width: "100%",
-            minWidth: 0
+            minWidth: 0,
           }}
         >
           <h2 style={{ margin: 0, fontSize: 18, wordBreak: "break-word", minWidth: 0 }}>{title}</h2>
@@ -793,7 +768,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         overflowX: "hidden",
         width: "100%",
         maxWidth: "100vw",
-        padding: "12px 12px calc(72px + env(safe-area-inset-bottom,0))"
+        padding: "12px 12px calc(72px + env(safe-area-inset-bottom,0))",
       }}
     >
       {/* Top app bar */}
@@ -807,7 +782,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
           gap: 8,
           background: "#fff",
           borderRadius: 16,
-          padding: 12
+          padding: 12,
         }}
       >
         <div
@@ -815,9 +790,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
           style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap", width: "100%", minWidth: 0 }}
         >
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
-            <div className="muted" style={{ minWidth: 0 }}>
-              {niceDate}
-            </div>
+            <div className="muted" style={{ minWidth: 0 }}>{niceDate}</div>
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
             <span
@@ -827,16 +800,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
             >
               {summary.isWin ? "Win" : "Keep going"}
             </span>
-            <span className="badge" title="Tasks done today">
-              Done: {summary.doneToday}
-            </span>
+            <span className="badge" title="Tasks done today">Done: {summary.doneToday}</span>
             <span
               className="badge"
               title="Current streak (best)"
               style={{ transform: streakPulse ? "scale(1.08)" : "scale(1)", transition: "transform .25s ease" }}
             >
-              🔥 {summary.streak}
-              {summary.bestStreak > 0 ? ` (best ${summary.bestStreak})` : ""}
+              🔥 {summary.streak}{summary.bestStreak > 0 ? ` (best ${summary.bestStreak})` : ""}
             </span>
           </div>
         </div>
@@ -857,9 +827,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
             type="text"
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && newTitle.trim() && !adding) addTask();
-            }}
+            onKeyDown={(e) => { if (e.key === "Enter" && newTitle.trim() && !adding) addTask(); }}
             placeholder="Add a task for today…"
             style={{ flex: "1 1 220px", minWidth: 0, maxWidth: "100%" }}
             aria-label="Task title"
@@ -898,15 +866,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
             </button>
           )}
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", flexWrap: "wrap", width: isCompact ? "100%" : "auto", minWidth: 0 }}>
-            <input
-              type="date"
-              value={dateISO}
-              onChange={(e) => setDateISO(e.target.value)}
-              style={{ flex: isCompact ? "1 1 220px" : undefined, minWidth: 0, maxWidth: "100%" }}
-            />
-            <button className="btn-soft" onClick={() => setDateISO(todayISO())} style={{ flex: isCompact ? "1 1 120px" : undefined }}>
-              Today
-            </button>
+            <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} style={{ flex: isCompact ? "1 1 220px" : undefined, minWidth: 0, maxWidth: "100%" }} />
+            <button className="btn-soft" onClick={() => setDateISO(todayISO())} style={{ flex: isCompact ? "1 1 120px" : undefined }}>Today</button>
           </div>
         </div>
         {err && <div style={{ color: "red" }}>{err}</div>}
@@ -963,14 +924,21 @@ export default function TodayScreen({ externalDateISO }: Props) {
         )}
       </Section>
 
-      {/* Bottom action row */}
+      {/* Bottom action row: Boost (left) + Profile (right) */}
+      <div style={{ position: "fixed", left: 12, bottom: "calc(12px + env(safe-area-inset-bottom,0))", zIndex: 70 }}>
+        <button
+          className="btn-soft"
+          onClick={openBoost}
+          title="Need a Boost"
+          style={{ borderRadius: 999, padding: "10px 14px", boxShadow: "0 8px 20px rgba(0,0,0,.08)" }}
+        >
+          Need a Boost
+        </button>
+      </div>
       <div style={{ position: "fixed", right: 12, bottom: "calc(12px + env(safe-area-inset-bottom,0))", zIndex: 70 }}>
         <button
           className="btn-soft"
-          onClick={async () => {
-            await loadProfileIntoForm();
-            setProfileOpen(true);
-          }}
+          onClick={async () => { await loadProfileIntoForm(); setProfileOpen(true); }}
           title="Edit name & nicknames"
           style={{ borderRadius: 999, padding: "10px 14px", boxShadow: "0 8px 20px rgba(0,0,0,.08)" }}
         >
@@ -978,15 +946,58 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </button>
       </div>
 
+      {/* Boost Modal */}
+      {boostOpen && (
+        <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="boost-title">
+          <div className="sheet" style={{ maxWidth: 520 }}>
+            {/* Header row with close */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+              <div id="boost-title" style={{ fontWeight: 800, fontSize: 18 }}>Here’s a little boost</div>
+              <button className="btn-ghost" onClick={() => setBoostOpen(false)} aria-label="Close boost">Close</button>
+            </div>
+
+            {/* Message + BYB logo on the right */}
+            <div
+              className="card"
+              style={{
+                borderRadius: 14,
+                border: `1px solid ${TOAST_BORDER}`,
+                background: TOAST_BG,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
+              <div style={{ padding: "10px 12px", fontSize: 16, fontWeight: 700, lineHeight: 1.3 }}>
+                {boostLine}
+              </div>
+              <img
+                src={TOAST_LOGO_SRC}
+                alt="BYB"
+                width={40}
+                height={40}
+                style={{ marginRight: 10, borderRadius: 10, border: `1px solid ${TOAST_BORDER}`, background: "#fff", flex: "0 0 auto" }}
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+              />
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+              <button className="btn-soft" onClick={nextBoost} title="Show another">Another</button>
+              <button className="btn-primary" onClick={() => setBoostOpen(false)}>Got it</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Profile Modal */}
       {profileOpen && (
         <div className="overlay" role="dialog" aria-modal="true" aria-label="Edit profile">
           <div className="sheet">
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
               <div style={{ fontWeight: 800, fontSize: 18 }}>Edit your profile</div>
-              <button className="btn-ghost" onClick={() => setProfileOpen(false)} aria-label="Close profile">
-                Close
-              </button>
+              <button className="btn-ghost" onClick={() => setProfileOpen(false)} aria-label="Close profile">Close</button>
             </div>
 
             <div style={{ display: "grid", gap: 12 }}>
@@ -1008,7 +1019,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                       style={{
                         borderRadius: 999,
                         background: on ? "#e0f2fe" : "",
-                        border: on ? "1px solid #38bdf8" : "1px solid var(--border)"
+                        border: on ? "1px solid #38bdf8" : "1px solid var(--border)",
                       }}
                     >
                       {n}
@@ -1019,9 +1030,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
               {/* Selected chips incl. customs (removable) */}
               <div>
-                <div className="section-title" style={{ marginBottom: 6 }}>
-                  Selected nicknames
-                </div>
+                <div className="section-title" style={{ marginBottom: 6 }}>Selected nicknames</div>
                 {poolInput.length === 0 ? (
                   <div className="muted">None yet.</div>
                 ) : (
@@ -1029,9 +1038,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                     {poolInput.map((n) => (
                       <span key={n} className="chip">
                         <span>{n}</span>
-                        <button aria-label={`Remove ${n}`} onClick={() => removeNick(n)} title={`Remove ${n}`}>
-                          ×
-                        </button>
+                        <button aria-label={`Remove ${n}`} onClick={() => removeNick(n)} title={`Remove ${n}`}>×</button>
                       </span>
                     ))}
                   </div>
@@ -1044,28 +1051,18 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   value={customNicks}
                   onChange={(e) => setCustomNicks(e.target.value)}
                   placeholder="Add custom nicknames (comma-separated)…"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") addCustomFromInput();
-                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") addCustomFromInput(); }}
                   style={{ flex: 1, minWidth: 0 }}
                 />
-                <button className="btn-soft" onClick={addCustomFromInput}>
-                  Add
-                </button>
-                <button className="btn-soft" onClick={() => setConfirmResetOpen(true)} title="Clear all nicknames">
-                  Reset
-                </button>
+                <button className="btn-soft" onClick={addCustomFromInput}>Add</button>
+                <button className="btn-soft" onClick={() => setConfirmResetOpen(true)} title="Clear all nicknames">Reset</button>
               </div>
 
               {err && <div style={{ color: "red" }}>{err}</div>}
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-                <button className="btn-soft" onClick={() => setProfileOpen(false)}>
-                  Cancel
-                </button>
-                <button className="btn-primary" onClick={saveProfile} disabled={savingProfile}>
-                  {savingProfile ? "Saving…" : "Save"}
-                </button>
+                <button className="btn-soft" onClick={() => setProfileOpen(false)}>Cancel</button>
+                <button className="btn-primary" onClick={saveProfile} disabled={savingProfile}>{savingProfile ? "Saving…" : "Save"}</button>
               </div>
             </div>
           </div>
@@ -1083,27 +1080,16 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 width={28}
                 height={28}
                 style={{ display: "block", objectFit: "contain", borderRadius: 6, border: `1px solid ${TOAST_BORDER}`, background: "#fff" }}
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.display = "none";
-                }}
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
               />
-              <div id="confirm-reset-title" style={{ fontWeight: 800, fontSize: 18 }}>
-                Reset nicknames?
-              </div>
+              <div id="confirm-reset-title" style={{ fontWeight: 800, fontSize: 18 }}>Reset nicknames?</div>
             </div>
-            <p className="muted" style={{ marginTop: 0 }}>
-              This will clear your selected and custom nicknames.
-            </p>
+            <p className="muted" style={{ marginTop: 0 }}>This will clear your selected and custom nicknames.</p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn-soft" onClick={() => setConfirmResetOpen(false)}>
-                Cancel
-              </button>
+              <button className="btn-soft" onClick={() => setConfirmResetOpen(false)}>Cancel</button>
               <button
                 className="btn-primary"
-                onClick={() => {
-                  setPoolInput([]);
-                  setConfirmResetOpen(false);
-                }}
+                onClick={() => { setPoolInput([]); setConfirmResetOpen(false); }}
                 style={{ background: "#ef4444" }}
               >
                 Reset
