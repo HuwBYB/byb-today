@@ -592,27 +592,35 @@ export default function TodayScreen({ externalDateISO }: Props) {
   /* ===== Profile helpers ===== */
   async function loadProfileIntoForm() {
     try {
-      // Try DB first
       if (userId) {
+        // Be schema-flexible: select all, then read what exists
         const { data, error } = await supabase
           .from("profiles")
-          .select("display_name, display_pool")
+          .select("*")
           .eq("id", userId)
           .maybeSingle();
         if (!error && data) {
-          setNameInput((data as any).display_name || localStorage.getItem(LS_NAME) || "");
-          const pool = (data as any).display_pool || JSON.parse(localStorage.getItem(LS_POOL) || "[]");
-          setPoolInput(Array.isArray(pool) ? pool : []);
+          // name
+          const dn = (data as any).display_name ?? localStorage.getItem(LS_NAME) ?? "";
+          setNameInput(dn);
+          // pool can be jsonb array, JSON string, or absent
+          const raw = (data as any).display_pool;
+          if (Array.isArray(raw)) {
+            setPoolInput(raw as string[]);
+          } else if (typeof raw === "string") {
+            try { setPoolInput(JSON.parse(raw)); } catch { setPoolInput([]); }
+          } else {
+            try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
+          }
           return;
         }
       }
-      // Fallback to local
+      // Fallback to local only
       setNameInput(localStorage.getItem(LS_NAME) || "");
-      try {
-        setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]"));
-      } catch { setPoolInput([]); }
+      try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
     } catch {
-      // ignore; just use locals
+      setNameInput(localStorage.getItem(LS_NAME) || "");
+      try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
     }
   }
 
@@ -634,23 +642,37 @@ export default function TodayScreen({ externalDateISO }: Props) {
     const cleanName = (nameInput || "").trim() || "Friend";
     const chosenPool = poolInput || [];
     setSavingProfile(true);
+    let wroteToDB = false;
     try {
       if (userId) {
-        const payload: any = { display_name: cleanName, display_pool: chosenPool, onboarding_done: true };
-        const { error } = await supabase
-          .from("profiles")
-          .upsert({ id: userId, ...payload })
-          .select()
-          .limit(1);
-        if (error) throw error;
+        // First try including display_pool
+        try {
+          const payload: any = { display_name: cleanName, display_pool: chosenPool, onboarding_done: true };
+          const { error } = await supabase
+            .from("profiles")
+            .upsert({ id: userId, ...payload })
+            .select()
+            .limit(1);
+          if (error) throw error;
+          wroteToDB = true;
+        } catch (_) {
+          // Retry without display_pool for schemas that don't have the column
+          const { error: e2 } = await supabase
+            .from("profiles")
+            .upsert({ id: userId, display_name: cleanName, onboarding_done: true })
+            .select()
+            .limit(1);
+          if (!e2) wroteToDB = true; // we at least saved the name
+        }
       }
-      // Always mirror locally for instant UX
+      // Always mirror locally for instant UX + to keep the pool even if DB lacks the column
       try {
         localStorage.setItem(LS_NAME, cleanName);
         localStorage.setItem(LS_POOL, JSON.stringify(chosenPool));
       } catch {}
-      setGreetName(cleanName);
-      toast.show("Profile updated");
+      // Refresh greeting source so rotation picks from the latest pool
+      setGreetName(pickGreetingLabel());
+      toast.show(wroteToDB ? "Profile updated" : "Saved locally (no display_pool column)");
       setProfileOpen(false);
     } catch (e: any) {
       setErr(e.message || String(e));
