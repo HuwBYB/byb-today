@@ -14,6 +14,7 @@ type MenuItem = {
     | "notes"
     | "focus"
     | "meditation"
+    | "motivation" // ⬅️ NEW
     | "affirmations";
   label: string;
   icon: string; // emoji OR image path
@@ -34,6 +35,7 @@ const ITEMS: MenuItem[] = [
   { key: "notes",        label: "Notes / Journal", icon: "📝" },
   { key: "focus",        label: "Focus",           icon: "🎧" },
   { key: "meditation",   label: "Meditation",      icon: "📺" },
+  { key: "motivation",   label: "Motivation",      icon: "🚀" }, // ⬅️ NEW
   { key: "affirmations", label: "Affirmations",    icon: "✨" },
 ];
 
@@ -55,19 +57,44 @@ export default function MenuScreen({
         paddingBottom: "calc(24px + env(safe-area-inset-bottom, 0px))",
       }}
     >
-      {/* Today Page card right at the top */}
-      <div
+      {/* Today — long primary-style button with Home icon */}
+      <button
+        onClick={() => onOpenTab("today")}
         className="card"
         style={{
-          borderLeft: "6px solid #eef2ff",
-          padding: "16px",
-          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: 16,
+          borderRadius: 16,
+          borderLeft: "6px solid #c7d2fe",
+          background:
+            "linear-gradient(180deg, #eef2ff 0%, #ffffff 90%)",
         }}
-        onClick={() => onOpenTab("today")}
+        aria-label="Go to Today page"
+        title="Go to Today"
       >
-        <h2 style={{ margin: 0, fontSize: 18 }}>Today Page</h2>
-        <div className="muted">Jump straight back to your main view.</div>
-      </div>
+        <div
+          aria-hidden
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 12,
+            display: "grid",
+            placeItems: "center",
+            background: "#ffffff",
+            border: "1px solid var(--border)",
+            boxShadow: "0 6px 14px rgba(0,0,0,.06)",
+            flex: "0 0 auto",
+          }}
+        >
+          <span style={{ fontSize: 24, lineHeight: 1 }}>🏠</span>
+        </div>
+        <div style={{ display: "grid", gap: 2, textAlign: "left" }}>
+          <div style={{ fontWeight: 800, fontSize: 18 }}>Today</div>
+          <div className="muted">Jump straight back to your main view.</div>
+        </div>
+      </button>
 
       {/* Rest of the menu */}
       <div className="card" style={{ padding: 12, position: "relative", zIndex: 1 }}>
@@ -91,8 +118,10 @@ export default function MenuScreen({
                 alignContent: "center",
                 justifyItems: "center",
                 textAlign: "center",
-                minHeight: 120, // a touch more height for comfortable tap area
+                minHeight: 120, // comfortable tap area
               }}
+              title={it.label}
+              aria-label={it.label}
             >
               {/* Icon container for both emoji and image */}
               <div
@@ -109,14 +138,14 @@ export default function MenuScreen({
                   <img
                     src={it.icon}
                     alt=""
-                    style={{ maxWidth: "32px", maxHeight: "32px", objectFit: "contain" }}
+                    style={{ maxWidth: 32, maxHeight: 32, objectFit: "contain" }}
                   />
                 ) : (
                   <span style={{ fontSize: 28, lineHeight: 1 }}>{it.icon}</span>
                 )}
               </div>
 
-              {/* Label (uniform spacing from icon) */}
+              {/* Label */}
               <div style={{ fontWeight: 700, marginTop: 12 }}>{it.label}</div>
             </button>
           ))}
