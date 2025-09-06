@@ -11,32 +11,14 @@ const LS_NAME = "byb:display_name";
 const LS_POOL = "byb:display_pool";
 const LS_BIG_GOAL = "byb:big_goal";
 
-/** Default nickname suggestions */
+/** Default nickname suggestions (includes feminine-forward options) */
 const DEFAULT_NICKNAMES = [
   // Existing set
-  "King",
-  "Champ",
-  "Legend",
-  "Boss",
-  "Chief",
-  "Star",
-  "Ace",
-  "Hero",
-  "Captain",
-  "Tiger",
-  // New feminine-forward options
-  "Queen",
-  "Princess",
-  "Gurl",
-  "Boss Lady",
-  "Diva",
-  "Hot Stuff",
-  "Girlfriend",
-  "Chica",
-  "Darling",
-  "Babe",
-  "Bestie",
-  
+  "King", "Champ", "Legend", "Boss", "Chief", "Star", "Ace", "Hero", "Captain", "Tiger",
+  // Feminine-forward
+  "Queen", "Princess", "Gurl", "Boss Lady", "Diva", "Hot Stuff", "Girlfriend",
+  // Extra ones you listed
+  "Chica", "Darling", "Babe", "Bestie",
 ];
 
 /** Utilities */
@@ -62,30 +44,48 @@ function saveLocal(name: string, pool: string[], bigGoal?: string) {
   }
 }
 
+// \u26a0\ufe0f Schema-flexible upsert that works with jsonb, text, or missing display_pool column
 async function saveProfileToDB(userId: string, name: string, pool: string[]) {
-  // Expects a "profiles" table with columns:
-  // id (uuid), display_name (text), display_pool (json/text[]), onboarding_done (bool)
-  const payload = {
-    display_name: name,
-    display_pool: pool,
-    onboarding_done: true,
-  } as any;
+  // Some projects have display_pool jsonb, some text, some none.
+  // Try jsonb \u2192 stringified \u2192 omit field.
+  const base: any = { display_name: name, onboarding_done: true };
 
-  const { error } = await supabase
-    .from("profiles")
-    .upsert({ id: userId, ...payload })
-    .select()
-    .limit(1);
-
-  if (error) throw error;
+  // Attempt 1: json/array payload (jsonb column)
+  try {
+    const { error } = await supabase
+      .from("profiles")
+      .upsert({ id: userId, ...base, display_pool: pool })
+      .select()
+      .limit(1);
+    if (error) throw error;
+    return;
+  } catch {
+    // Attempt 2: stringified payload (text/varchar column)
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .upsert({ id: userId, ...base, display_pool: JSON.stringify(pool) })
+        .select()
+        .limit(1);
+      if (error) throw error;
+      return;
+    } catch {
+      // Attempt 3: no display_pool column \u2014 save name only
+      await supabase
+        .from("profiles")
+        .upsert({ id: userId, ...base })
+        .select()
+        .limit(1);
+    }
+  }
 }
 
 async function tryInsertBigGoal(userId: string, bigGoal: string) {
   const clean = bigGoal.trim();
   if (!clean) return;
 
-  // We’ll try a very lightweight insert. If the table/columns differ or
-  // don’t exist yet, we silently fall back to local storage.
+  // We\u2019ll try a very lightweight insert. If the table/columns differ or
+  // don\u2019t exist yet, we silently fall back to local storage.
   try {
     await supabase.from("goals").insert({
       user_id: userId,
@@ -187,20 +187,15 @@ export default function OnboardingScreen({ onDone }: Props) {
             await tryInsertBigGoal(userId, goal);
           }
         } catch {
-          // If DB not ready, fall back locally
-          saveLocal(cleanName, chosenPool, goal);
+          // ignore DB failures; we still mirror locally below
         }
-      } else {
-        // Not signed in (or offline): local only
-        saveLocal(cleanName, chosenPool, goal);
       }
 
+      // Always mirror locally for instant UX (even if DB succeeded)
+      saveLocal(cleanName, chosenPool, goal);
+
       // Also set the local flag so App.tsx can gate properly
-      try {
-        localStorage.setItem(LS_DONE, "1");
-      } catch {
-        // ignore
-      }
+      try { localStorage.setItem(LS_DONE, "1"); } catch {}
 
       if (onDone) onDone();
       else window.location.replace("/");
