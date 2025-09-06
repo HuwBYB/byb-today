@@ -5,10 +5,11 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
    Types & constants
 ========================= */
 type Video = { id: string; title: string; url: string };
-type View = "gallery" | "tv";
 
 const STORAGE_KEY = "byb.meditationCentre.videos";
 const MAX_VIDEOS = 10;
+const WIN_SECONDS = 180; // 3 minutes
+const TOAST_LOGO_SRC = "/LogoButterfly.png";
 
 /** Your starter videos */
 const SEEDS: Partial<Video>[] = [
@@ -56,20 +57,58 @@ function dedupeById(list: Video[]): Video[] {
 let ytPromise: Promise<any> | null = null;
 function loadYouTubeAPI(): Promise<any> {
   if (typeof window === "undefined") return Promise.resolve(null);
-  if ((window as any).YT?.Player) return Promise.resolve((window as any).YT);
+  const w = window as any;
+  if (w.YT?.Player) return Promise.resolve(w.YT);
   if (ytPromise) return ytPromise;
-
   ytPromise = new Promise((resolve) => {
-    const w = window as any;
     if (!document.getElementById("youtube-iframe-api")) {
       const tag = document.createElement("script");
       tag.id = "youtube-iframe-api";
       tag.src = "https://www.youtube.com/iframe_api";
       document.body.appendChild(tag);
     }
-    w.onYouTubeIframeAPIReady = () => resolve(w.YT);
+    (window as any).onYouTubeIframeAPIReady = () => resolve((window as any).YT);
   });
   return ytPromise;
+}
+
+/* =========================
+   Tiny BYB toast
+========================= */
+function useToast() {
+  const [msg, setMsg] = useState<string | null>(null);
+  function show(m: string) { setMsg(m); setTimeout(() => setMsg(null), 2600); }
+  const node = (
+    <div
+      aria-live="polite"
+      style={{
+        position: "fixed", left: 0, right: 0,
+        bottom: "calc(16px + env(safe-area-inset-bottom,0))",
+        display: "flex", justifyContent: "center",
+        pointerEvents: "none", zIndex: 3500
+      }}
+    >
+      {msg && (
+        <div
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 10,
+            background: "#D7F0FA", color: "#0f172a",
+            borderRadius: 14, padding: "10px 14px",
+            boxShadow: "0 8px 20px rgba(0,0,0,.10)",
+            border: "1px solid #bfe5f3", pointerEvents: "all"
+          }}
+        >
+          <img
+            src={TOAST_LOGO_SRC} alt="" width={22} height={22}
+            style={{ display: "block", objectFit: "contain", borderRadius: 6, border: "1px solid #bfe5f3", background: "#ffffff88" }}
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+          />
+          <span style={{ fontWeight: 700 }}>{msg}</span>
+        </div>
+      )}
+    </div>
+  );
+  return { node, show };
 }
 
 /* =========================
@@ -77,13 +116,25 @@ function loadYouTubeAPI(): Promise<any> {
 ========================= */
 export default function MeditationScreen() {
   const [videos, setVideos] = useState<Video[]>([]);
-  const [view, setView] = useState<View>("gallery");
-  const [active, setActive] = useState<Video | null>(null);
+  const [playingId, setPlayingId] = useState<string | null>(null);
 
   const [formOpen, setFormOpen] = useState(false);
   const [formTitle, setFormTitle] = useState("");
   const [formUrl, setFormUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  const toast = useToast();
+
+  // map videoId -> container div for inline player
+  const hostRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  // map videoId -> YT.Player
+  const playersRef = useRef<Record<string, any>>({});
+  // map videoId -> interval id
+  const timersRef = useRef<Record<string, number | null>>({});
+  // map videoId -> watched seconds
+  const secondsRef = useRef<Record<string, number>>({});
+  // track which video already triggered a win
+  const completedRef = useRef<Set<string>>(new Set());
 
   // Load saved list or seeds on first run
   useEffect(() => {
@@ -124,63 +175,108 @@ export default function MeditationScreen() {
   }
 
   function removeVideo(idx: number) {
+    const target = videos[idx];
+    if (target) {
+      destroyPlayer(target.id);
+    }
     setVideos((v) => v.filter((_, i) => i !== idx));
-    if (active && videos[idx]?.id === active.id) {
-      setActive(null);
-      setView("gallery");
+    if (playingId && target?.id === playingId) {
+      setPlayingId(null);
     }
   }
 
   function restoreStarters() {
+    Object.keys(playersRef.current).forEach(destroyPlayer);
     const starters: Video[] = SEEDS.map((s, i) => {
       const id = extractYouTubeId(s.url || "") || `seed-${i}`;
       return { id, title: s.title || `Video ${i + 1}`, url: s.url || "" } as Video;
     });
     setVideos(starters);
-    setActive(null);
-    setView("gallery");
+    setPlayingId(null);
   }
 
   /* =========================
-     TV player
+     Inline player plumbing
   ========================= */
-  const tvRef = useRef<HTMLDivElement | null>(null);
-  const playerRef = useRef<any>(null);
-
-  useEffect(() => {
-    if (view !== "tv" || !active?.id) return;
-
-    let disposed = false;
-    (async () => {
-      const YT = await loadYouTubeAPI();
-      if (disposed || !YT || !tvRef.current) return;
-
-      if (playerRef.current?.destroy) {
-        try { playerRef.current.destroy(); } catch {}
-        playerRef.current = null;
+  function stopTimer(id: string) {
+    const t = timersRef.current[id];
+    if (t != null) {
+      clearInterval(t);
+      timersRef.current[id] = null;
+    }
+  }
+  function startTimer(id: string, title: string) {
+    stopTimer(id);
+    timersRef.current[id] = window.setInterval(() => {
+      secondsRef.current[id] = (secondsRef.current[id] || 0) + 1;
+      const secs = secondsRef.current[id];
+      if (secs >= WIN_SECONDS && !completedRef.current.has(id)) {
+        completedRef.current.add(id);
+        toast.show(`Meditation done — ${title}`);
       }
+    }, 1000);
+  }
+  function destroyPlayer(id: string) {
+    stopTimer(id);
+    try { playersRef.current[id]?.destroy?.(); } catch {}
+    delete playersRef.current[id];
+  }
 
-      playerRef.current = new YT.Player(tvRef.current, {
+  // Create / swap inline player when playingId changes
+  useEffect(() => {
+    let disposed = false;
+
+    (async () => {
+      if (!playingId) return;
+      const host = hostRefs.current[playingId];
+      if (!host) return;
+
+      // Only one active player at a time: destroy others
+      Object.keys(playersRef.current).forEach((k) => {
+        if (k !== playingId) destroyPlayer(k);
+      });
+
+      const YT = await loadYouTubeAPI();
+      if (disposed || !YT) return;
+
+      const video = videos.find((v) => v.id === playingId);
+      if (!video) return;
+
+      // (Re)build the player in place
+      destroyPlayer(playingId);
+      const player = new YT.Player(host, {
         height: "100%",
         width: "100%",
-        videoId: active.id,
-        playerVars: { rel: 0, modestbranding: 1, playsinline: 1 },
-        events: { onReady: (e: any) => { try { e.target.playVideo(); } catch {} } },
+        videoId: playingId,
+        playerVars: { rel: 0, modestbranding: 1, playsinline: 1, autoplay: 1 },
+        events: {
+          onReady: (e: any) => { try { e.target.playVideo(); } catch {} },
+          onStateChange: (e: any) => {
+            const YTS = (YT as any).PlayerState;
+            if (e.data === YTS.PLAYING) {
+              startTimer(playingId, video.title);
+            } else if (e.data === YTS.PAUSED || e.data === YTS.BUFFERING) {
+              stopTimer(playingId);
+            } else if (e.data === YTS.ENDED) {
+              stopTimer(playingId);
+            }
+          }
+        }
       });
+      playersRef.current[playingId] = player;
     })();
 
-    return () => {
-      disposed = true;
-      if (playerRef.current?.destroy) {
-        try { playerRef.current.destroy(); } catch {}
-        playerRef.current = null;
-      }
-    };
-  }, [view, active?.id]);
+    return () => { disposed = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playingId, videos]);
 
-  function pauseVideo() { try { playerRef.current?.pauseVideo?.(); } catch {} }
-  function playVideo()  { try { playerRef.current?.playVideo?.(); }  catch {} }
-  function closeTV()    { try { playerRef.current?.stopVideo?.(); }   catch {} ; setView("gallery"); setActive(null); }
+  // Cleanup all players on unmount
+  useEffect(() => {
+    return () => {
+      Object.keys(playersRef.current).forEach(destroyPlayer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* =========================
      Layout helpers
@@ -197,7 +293,7 @@ export default function MeditationScreen() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">BYB Meditation Centre</h1>
-            <p className="text-xs text-slate-500">Motivation videos you trust</p>
+            {/* subtitle removed per request */}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -218,38 +314,60 @@ export default function MeditationScreen() {
           </button>
         </div>
 
-        {/* Gallery grid (mobile-first) */}
+        {/* Gallery grid (inline players) */}
         {videos.length === 0 ? (
           <div className="border rounded-xl bg-white p-8 text-center text-slate-500">
             No videos yet. Tap <strong>Add Video</strong> to save your first favourite.
           </div>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {videos.map((v, i) => (
-              <div key={`${v.id}-${i}`} className="relative group overflow-hidden rounded-xl border bg-white">
-                <button
-                  className="block w-full"
-                  title={v.title}
-                  onClick={() => { setActive(v); setView("tv"); }}
-                >
+            {videos.map((v, i) => {
+              const isPlaying = playingId === v.id;
+              return (
+                <div key={`${v.id}-${i}`} className="relative group overflow-hidden rounded-xl border bg-white">
+                  {/* Media area */}
                   <div className="aspect-video bg-black/10">
-                    <img src={thumbUrl(v.id)} alt={v.title} className="w-full h-full object-cover" />
+                    {isPlaying ? (
+                      <div
+                        ref={(el) => { hostRefs.current[v.id] = el; }}
+                        className="w-full h-full"
+                      />
+                    ) : (
+                      <button
+                        className="block w-full h-full"
+                        title={v.title}
+                        onClick={() => setPlayingId(v.id)}
+                      >
+                        <img src={thumbUrl(v.id)} alt={v.title} className="w-full h-full object-cover" />
+                      </button>
+                    )}
                   </div>
-                  <div className="p-2 text-left">
-                    <p className="text-sm font-medium line-clamp-2">{v.title}</p>
-                  </div>
-                </button>
 
-                {/* Delete button */}
-                <button
-                  onClick={() => removeVideo(i)}
-                  className="absolute top-2 right-2 px-2 py-1 rounded-md bg-white/90 border text-xs opacity-0 group-hover:opacity-100 transition"
-                  title="Delete"
-                >
-                  Delete
-                </button>
-              </div>
-            ))}
+                  {/* Title + controls */}
+                  <div className="p-2 text-left flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium line-clamp-2">{v.title}</p>
+                    <div className="flex items-center gap-1">
+                      {isPlaying && (
+                        <button
+                          className="px-2 py-1 rounded-md border text-xs"
+                          onClick={() => { destroyPlayer(v.id); setPlayingId(null); }}
+                          title="Stop"
+                        >
+                          Stop
+                        </button>
+                      )}
+                      <button
+                        onClick={() => removeVideo(i)}
+                        className="px-2 py-1 rounded-md border text-xs"
+                        title="Delete"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -300,55 +418,8 @@ export default function MeditationScreen() {
         </div>
       )}
 
-      {/* BYB TV page (full-screen overlay with TV bezel) */}
-      {view === "tv" && active && (
-        <div className="fixed inset-0 z-50 bg-black/80 overflow-auto" role="dialog" aria-modal="true">
-          <div className="mx-auto max-w-xl md:max-w-3xl px-4 py-8">
-            {/* Top bar */}
-            <div className="flex items-center justify-between text-white mb-4">
-              <button onClick={closeTV} className="px-3 py-2 rounded-md border border-white/30">
-                Close
-              </button>
-              <div className="text-sm font-medium line-clamp-1 text-center px-2">{active.title}</div>
-              <div style={{ width: 72 }} />
-            </div>
-
-            {/* TV Shell */}
-            <div className="relative mx-auto">
-              {/* Outer glossy bezel */}
-              <div className="rounded-[22px] bg-neutral-950 shadow-[0_30px_90px_rgba(0,0,0,0.7)] p-2 md:p-3 border border-neutral-800">
-                {/* Inner bezel */}
-                <div className="rounded-[18px] bg-black p-2 md:p-3">
-                  {/* Screen */}
-                  <div className="rounded-[10px] overflow-hidden bg-black aspect-video">
-                    <div ref={tvRef} className="w-full h-full" />
-                  </div>
-                </div>
-              </div>
-
-              {/* Stand (simple) */}
-              <div className="mx-auto mt-4 h-3 w-32 rounded-full bg-neutral-900 shadow-[0_10px_30px_rgba(0,0,0,0.6)]" />
-
-              {/* BYB TV badge */}
-              <div className="absolute left-1/2 -translate-x-1/2 -bottom-8">
-                <div className="px-5 py-1.5 rounded-full bg-neutral-900 border border-neutral-700 text-neutral-200 tracking-[0.35em] text-[11px] font-semibold">
-                  BYB TV
-                </div>
-              </div>
-            </div>
-
-            {/* Controls */}
-            <div className="mt-10 flex items-center justify-center gap-3">
-              <button onClick={playVideo} className="px-4 py-2 rounded-md border border-white/30 text-white">
-                Play
-              </button>
-              <button onClick={pauseVideo} className="px-4 py-2 rounded-md border border-white/30 text-white">
-                Pause
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Toast */}
+      {toast.node}
     </div>
   );
 }
