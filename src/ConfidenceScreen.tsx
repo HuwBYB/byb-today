@@ -17,8 +17,6 @@ function publicPath(p: string) {
   const withSlash = p.startsWith("/") ? p : `/${p}`;
   return `${base.replace(/\/$/, "")}${withSlash}`;
 }
-
-/* Use the new power pose image from public/ */
 const POWER_POSE_SRC = publicPath("/PowerPoseArtDoll.png");
 
 /* ---------- Modal ---------- */
@@ -237,15 +235,15 @@ export default function ConfidenceScreen() {
   return (
     <div className="page-confidence">
       <div className="container" style={{ display: "grid", gap: 12 }}>
-        {/* Title */}
+        {/* Title + help */}
         <div className="card" style={{ position: "relative" }}>
           <button
             onClick={() => setShowHelp(true)}
-            aria-label="Open help"
-            title="Open help"
-            style={{ position: "absolute", top: 8, right: 8, border: "none", background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10 }}
+            aria-label="Open Confidence help"
+            title="Help"
+            style={{ position: "absolute", top: 8, right: 8, border: "1px solid #e5e7eb", background: "#fff", padding: "6px 10px", borderRadius: 8, cursor: "pointer", lineHeight: 1 }}
           >
-            <span style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", width:36, height:36, borderRadius:999, border:"1px solid #d1d5db", background:"#f9fafb", fontWeight:700 }}>?</span>
+            Help
           </button>
 
           <h1 style={{ margin: 0 }}>Confidence</h1>
@@ -280,7 +278,7 @@ export default function ConfidenceScreen() {
         {/* Recent history snapshot */}
         <RecentHistory entries={entries.slice(0, 8)} />
 
-        {/* Help modal */}
+        {/* Help modal (no Alfred) */}
         <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Confidence — Help">
           <ConfidenceHelpContent />
         </Modal>
@@ -360,16 +358,22 @@ function StreakChip({ current, best }:{ current:number; best:number }) {
    Power Pose
    ========================================================= */
 function PowerPose({ onRep }:{ onRep: ()=>void|Promise<void> }) {
-  const [imgOk, setImgOk] = useState(true);
+  const [ok, setOk] = useState(true);
   return (
     <div className="card confidence-layout" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
       <div style={{ display: "grid", placeItems: "center", minHeight: 260, padding: 8 }}>
-        {imgOk ? (
+        {ok ? (
           <img
             src={POWER_POSE_SRC}
             alt="Power pose — art model"
-            style={{ width: "100%", maxWidth: 420, height: "auto", borderRadius: 12 }}
-            onError={() => setImgOk(false)}
+            onError={() => setOk(false)}
+            style={{
+              width: "100%",
+              maxWidth: 420,
+              height: "auto",
+              borderRadius: 12,
+              filter: "drop-shadow(0 8px 28px rgba(0,0,0,.15))",
+            }}
           />
         ) : (
           <PoseSVG />
@@ -578,7 +582,7 @@ function AffirmationsList({ running, onRep }:{ running:boolean; onRep:(text:stri
           i = (i + 1) % items.length;
           if (speak && running) sayNext();
         };
-        window.speechSynthesis.speak(u);
+        (window.speechSynthesis || {}).speak?.(u);
       } catch {}
     }
     if (running) sayNext();
