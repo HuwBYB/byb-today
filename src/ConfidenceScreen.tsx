@@ -1,3 +1,4 @@
+// src/ConfidenceScreen.tsx
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
@@ -16,7 +17,9 @@ function publicPath(p: string) {
   const withSlash = p.startsWith("/") ? p : `/${p}`;
   return `${base.replace(/\/$/, "")}${withSlash}`;
 }
-const CONF_ALFRED_SRC = publicPath("/alfred/Confidence_Alfred.png");
+
+/* Use the new power pose image from public/ */
+const POWER_POSE_SRC = publicPath("/PowerPoseArtDoll.png");
 
 /* ---------- Modal ---------- */
 function Modal({
@@ -159,7 +162,6 @@ export default function ConfidenceScreen() {
   const [celebrate, setCelebrate] = useState(false);
 
   const [showHelp, setShowHelp] = useState(false);
-  const [imgOk, setImgOk] = useState(true);
 
   const [userId, setUserId] = useState<string | null>(null);
   useEffect(() => { supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null)); }, []);
@@ -235,19 +237,15 @@ export default function ConfidenceScreen() {
   return (
     <div className="page-confidence">
       <div className="container" style={{ display: "grid", gap: 12 }}>
-        {/* Title with Alfred */}
+        {/* Title */}
         <div className="card" style={{ position: "relative" }}>
           <button
             onClick={() => setShowHelp(true)}
-            aria-label="Open Confidence help"
-            title="Need a hand? Ask Alfred"
+            aria-label="Open help"
+            title="Open help"
             style={{ position: "absolute", top: 8, right: 8, border: "none", background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10 }}
           >
-            {imgOk ? (
-              <img src={CONF_ALFRED_SRC} alt="Confidence Alfred — open help" style={{ width: 48, height: 48 }} onError={() => setImgOk(false)} />
-            ) : (
-              <span style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", width:36, height:36, borderRadius:999, border:"1px solid #d1d5db", background:"#f9fafb", fontWeight:700 }}>?</span>
-            )}
+            <span style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", width:36, height:36, borderRadius:999, border:"1px solid #d1d5db", background:"#f9fafb", fontWeight:700 }}>?</span>
           </button>
 
           <h1 style={{ margin: 0 }}>Confidence</h1>
@@ -284,12 +282,7 @@ export default function ConfidenceScreen() {
 
         {/* Help modal */}
         <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Confidence — Help">
-          <div style={{ display: "flex", gap: 16 }}>
-            {imgOk && <img src={CONF_ALFRED_SRC} alt="" aria-hidden="true" style={{ width: 72, height: 72, flex: "0 0 auto" }} />}
-            <div style={{ flex: 1 }}>
-              <ConfidenceHelpContent />
-            </div>
-          </div>
+          <ConfidenceHelpContent />
         </Modal>
 
         <Confetti show={celebrate} />
@@ -372,7 +365,12 @@ function PowerPose({ onRep }:{ onRep: ()=>void|Promise<void> }) {
     <div className="card confidence-layout" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
       <div style={{ display: "grid", placeItems: "center", minHeight: 260, padding: 8 }}>
         {imgOk ? (
-          <img src={CONF_ALFRED_SRC} alt="Power pose — Alfred" style={{ width: "100%", maxWidth: 420, height: "auto", borderRadius: 12 }} onError={() => setImgOk(false)} />
+          <img
+            src={POWER_POSE_SRC}
+            alt="Power pose — art model"
+            style={{ width: "100%", maxWidth: 420, height: "auto", borderRadius: 12 }}
+            onError={() => setImgOk(false)}
+          />
         ) : (
           <PoseSVG />
         )}
@@ -423,7 +421,7 @@ function PoseSVG() {
 }
 
 /* =========================================================
-   Breathing (Bloom pacer) — stacked layout (instructions top, flower centered)
+   Breathing (Bloom pacer)
    ========================================================= */
 function BloomBreath({ running, onRep }:{ running:boolean; onRep:(pattern: string)=>void|Promise<void> }) {
   const [patternKey, setPatternKey] = useState<BreathPatternKey>("box");
@@ -537,11 +535,11 @@ function PatternButton({ current, setKey, k, label }:{
 type TodayAff = { category?: string; text: string };
 
 const CAT_COLORS: Record<string, { bg: string; border: string; text: string }> = {
-  business:      { bg: "#FEF2F2", border: "#FECACA", text: "#7F1D1D" }, // pale red
-  financial:     { bg: "#ECFDF5", border: "#A7F3D0", text: "#065F46" }, // light green
-  relationships: { bg: "#F5F3FF", border: "#DDD6FE", text: "#4C1D95" }, // light purple
-  personal:      { bg: "#EFF6FF", border: "#BFDBFE", text: "#1E3A8A" }, // light blue
-  health:        { bg: "#ECFEFF", border: "#A5F3FC", text: "#164E63" }, // light teal
+  business:      { bg: "#FEF2F2", border: "#FECACA", text: "#7F1D1D" },
+  financial:     { bg: "#ECFDF5", border: "#A7F3D0", text: "#065F46" },
+  relationships: { bg: "#F5F3FF", border: "#DDD6FE", text: "#4C1D95" },
+  personal:      { bg: "#EFF6FF", border: "#BFDBFE", text: "#1E3A8A" },
+  health:        { bg: "#ECFEFF", border: "#A5F3FC", text: "#164E63" },
 };
 function colorFor(cat?: string) {
   return CAT_COLORS[(cat || "").toLowerCase()] || { bg: "#F8FAFC", border: "#E5E7EB", text: "#0F172A" };
