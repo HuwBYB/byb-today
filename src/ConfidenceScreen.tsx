@@ -7,22 +7,13 @@ const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(ma
 const toISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 const todayISO = () => toISO(new Date());
 
-/* ---------- Public path helper ---------- */
-function publicPath(p: string) {
-  // @ts-ignore
-  const base =
-    (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
-    (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
-    "";
-  const withSlash = p.startsWith("/") ? p : `/${p}`;
-  return `${base.replace(/\/$/, "")}${withSlash}`;
-}
-const POWER_POSE_SRC = publicPath("/PowerPoseArtDoll.png");
+/* Use the public image directly. The query string busts browser cache after deploy. */
+const POWER_POSE_SRC = "/PowerPoseArtDoll.png?v=2";
 
 /* ---------- Modal ---------- */
-function Modal({
-  open, onClose, title, children,
-}: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+function Modal({ open, onClose, title, children }:{
+  open: boolean; onClose: () => void; title: string; children: ReactNode;
+}) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     if (open) window.addEventListener("keydown", onKey);
@@ -207,7 +198,6 @@ export default function ConfidenceScreen() {
       setEntries(rows);
       const days: Record<string, boolean> = {};
       rows.forEach((r) => { if (["prompt","pose","breath","affirm","reflection"].includes(r.kind)) days[r.entry_date] = true; });
-      // compute current/best streak over last 120 days
       let current = 0, best = 0, run = 0;
       for (let i = 120; i >= 0; i--) {
         const d = toISO(new Date(new Date().setDate(new Date().getDate() - i)));
@@ -278,7 +268,7 @@ export default function ConfidenceScreen() {
         {/* Recent history snapshot */}
         <RecentHistory entries={entries.slice(0, 8)} />
 
-        {/* Help modal (no Alfred) */}
+        {/* Help modal */}
         <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Confidence — Help">
           <ConfidenceHelpContent />
         </Modal>
