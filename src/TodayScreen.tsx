@@ -262,6 +262,12 @@ function useToast() {
   return { node, show };
 }
 
+/* ===== Nickname options (match onboarding) ===== */
+const DEFAULT_NICKNAMES = [
+  "King","Champ","Legend","Boss","Chief","Star","Ace","Hero","Captain","Tiger",
+  "Queen","Princess","Gurl","Boss Lady","Diva","Hot Stuff","Girlfriend",
+];
+
 /* =============================================
    Component
    ============================================= */
@@ -306,6 +312,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
       li.item{ background:#fff; border:1px solid var(--border); border-radius:12px; padding:10px; box-shadow:var(--shadow); }
       .h-scroll{ display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:4px; }
       .h-scroll::-webkit-scrollbar{ display:none; }
+      .overlay{ position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 80; display: grid; place-items: center; padding: 16px; }
+      .sheet{ width: 100%; max-width: 640px; background: #fff; border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); padding: 16px; }
       @media (prefers-reduced-motion: reduce){
         *{ animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; }
       }
@@ -334,6 +342,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [greetName, setGreetName] = useState<string>("");
   const [missed, setMissed] = useState<boolean>(false);
   const [greetLine, setGreetLine] = useState<string>("");
+
+  // Profile editor state
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [poolInput, setPoolInput] = useState<string[]>([]);
+  const [customNicks, setCustomNicks] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
 
   // Responsive: <420px treated as compact
   const [isCompact, setIsCompact] = useState<boolean>(false);
@@ -574,6 +589,77 @@ export default function TodayScreen({ externalDateISO }: Props) {
     } catch (e: any) { setErr(e.message || String(e)); } finally { setAdding(false); }
   }
 
+  /* ===== Profile helpers ===== */
+  async function loadProfileIntoForm() {
+    try {
+      // Try DB first
+      if (userId) {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("display_name, display_pool")
+          .eq("id", userId)
+          .maybeSingle();
+        if (!error && data) {
+          setNameInput((data as any).display_name || localStorage.getItem(LS_NAME) || "");
+          const pool = (data as any).display_pool || JSON.parse(localStorage.getItem(LS_POOL) || "[]");
+          setPoolInput(Array.isArray(pool) ? pool : []);
+          return;
+        }
+      }
+      // Fallback to local
+      setNameInput(localStorage.getItem(LS_NAME) || "");
+      try {
+        setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]"));
+      } catch { setPoolInput([]); }
+    } catch {
+      // ignore; just use locals
+    }
+  }
+
+  function toggleNick(n: string) {
+    const v = n.trim();
+    if (!v) return;
+    setPoolInput((prev) => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v]);
+  }
+
+  function addCustomFromInput() {
+    const parts = customNicks.split(",").map(s => s.trim()).filter(Boolean);
+    if (parts.length === 0) return;
+    const merged = Array.from(new Set([...(poolInput || []), ...parts]));
+    setPoolInput(merged);
+    setCustomNicks("");
+  }
+
+  async function saveProfile() {
+    const cleanName = (nameInput || "").trim() || "Friend";
+    const chosenPool = poolInput || [];
+    setSavingProfile(true);
+    try {
+      if (userId) {
+        const payload: any = { display_name: cleanName, display_pool: chosenPool, onboarding_done: true };
+        const { error } = await supabase
+          .from("profiles")
+          .upsert({ id: userId, ...payload })
+          .select()
+          .limit(1);
+        if (error) throw error;
+      }
+      // Always mirror locally for instant UX
+      try {
+        localStorage.setItem(LS_NAME, cleanName);
+        localStorage.setItem(LS_POOL, JSON.stringify(chosenPool));
+      } catch {}
+      setGreetName(cleanName);
+      toast.show("Profile updated");
+      setProfileOpen(false);
+    } catch (e: any) {
+      setErr(e.message || String(e));
+      toast.show("Couldn’t save profile");
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+
   /* ===== Computed ===== */
   const niceDate = useMemo(() => formatNiceDate(dateISO), [dateISO]);
   const greeting = useMemo(() => (greetLine || timeGreeting(now)), [greetLine, now]);
@@ -746,7 +832,81 @@ export default function TodayScreen({ externalDateISO }: Props) {
         )}
       </Section>
 
-      {/* Bottom "Add Task" section removed per request */}
+      {/* Bottom action row */}
+      <div style={{ position: "fixed", right: 12, bottom: "calc(12px + env(safe-area-inset-bottom,0))", zIndex: 70 }}>
+        <button
+          className="btn-soft"
+          onClick={async () => { await loadProfileIntoForm(); setProfileOpen(true); }}
+          title="Edit name & nicknames"
+          style={{ borderRadius: 999, padding: "10px 14px", boxShadow: "0 8px 20px rgba(0,0,0,.08)" }}
+        >
+          Profile
+        </button>
+      </div>
+
+      {/* Profile Modal */}
+      {profileOpen && (
+        <div className="overlay" role="dialog" aria-modal="true" aria-label="Edit profile">
+          <div className="sheet">
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+              <div style={{ fontWeight: 800, fontSize: 18 }}>Edit your profile</div>
+              <button className="btn-ghost" onClick={() => setProfileOpen(false)} aria-label="Close profile">Close</button>
+            </div>
+
+            <div style={{ display: "grid", gap: 10 }}>
+              <label style={{ display: "grid", gap: 6 }}>
+                <div className="section-title">Your name</div>
+                <input type="text" value={nameInput} onChange={(e) => setNameInput(e.target.value)} placeholder="Enter your name" />
+              </label>
+
+              <div className="section-title">Pick nicknames</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {DEFAULT_NICKNAMES.map(n => {
+                  const on = poolInput.includes(n);
+                  return (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => toggleNick(n)}
+                      className="btn-soft"
+                      style={{
+                        borderRadius: 999,
+                        background: on ? "#e0f2fe" : "",
+                        border: on ? "1px solid #38bdf8" : "1px solid var(--border)",
+                      }}
+                    >
+                      {n}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <input
+                  type="text"
+                  value={customNicks}
+                  onChange={(e) => setCustomNicks(e.target.value)}
+                  placeholder="Add custom nicknames (comma-separated)…"
+                  onKeyDown={(e) => { if (e.key === 'Enter') addCustomFromInput(); }}
+                  style={{ flex: 1, minWidth: 0 }}
+                />
+                <button className="btn-soft" onClick={addCustomFromInput}>Add</button>
+              </div>
+
+              {poolInput.length > 0 && (
+                <div className="muted">Selected: {poolInput.join(" · ")}</div>
+              )}
+
+              {err && <div style={{ color: "red" }}>{err}</div>}
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                <button className="btn-soft" onClick={() => setProfileOpen(false)}>Cancel</button>
+                <button className="btn-primary" onClick={saveProfile} disabled={savingProfile}>{savingProfile ? 'Saving…' : 'Save'}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast node */}
       {toast.node}
