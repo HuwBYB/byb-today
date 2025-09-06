@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* =============================================
-   BYB — Today Screen (Simple + Defensive Filter)
+   BYB — Today Screen (Profile editor: removable customs + Reset)
    ============================================= */
 
 /* ===== Logo & Toast theme ===== */
@@ -178,13 +178,10 @@ function fireConfetti() {
     el.style.borderRadius = "2px";
     el.style.opacity = "0.9";
     el.style.transform = `rotate(${Math.random() * 360}deg)`;
-    el.animate(
-      [
-        { transform: `translateY(0) rotate(0deg)`, opacity: 1 },
-        { transform: `translateY(${window.innerHeight + 40}px) rotate(${360 + Math.random() * 360}deg)`, opacity: 0.6 }
-      ],
-      { duration: 1200 + Math.random() * 800, easing: "cubic-bezier(.2,.8,.2,1)" }
-    );
+    el.animate([
+      { transform: `translateY(0) rotate(0deg)`, opacity: 1 },
+      { transform: `translateY(${window.innerHeight + 40}px) rotate(${360 + Math.random() * 360}deg)`, opacity: 0.6 }
+    ], { duration: 1200 + Math.random() * 800, easing: "cubic-bezier(.2,.8,.2,1)" });
     container.appendChild(el);
   }
   setTimeout(() => container.remove(), 2200);
@@ -224,13 +221,12 @@ function useToast() {
     >
       {msg && (
         <div
-          // keep "card" for consistent radius/shadow, override colors below
           className="card"
           style={{
             display: "inline-flex",
             alignItems: "center",
             gap: 10,
-            background: TOAST_BG,                 // match banner
+            background: TOAST_BG,
             color: "var(--text)",
             borderRadius: 14,
             padding: "10px 14px",
@@ -262,7 +258,7 @@ function useToast() {
   return { node, show };
 }
 
-/* ===== Nickname options (match onboarding) ===== */
+/* ===== Nickname options (match onboarding core set) ===== */
 const DEFAULT_NICKNAMES = [
   "King","Champ","Legend","Boss","Chief","Star","Ace","Hero","Captain","Tiger",
   "Queen","Princess","Gurl","Boss Lady","Diva","Hot Stuff","Girlfriend",
@@ -314,6 +310,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
       .h-scroll::-webkit-scrollbar{ display:none; }
       .overlay{ position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 80; display: grid; place-items: center; padding: 16px; }
       .sheet{ width: 100%; max-width: 640px; background: #fff; border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); padding: 16px; }
+      .chip{ display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; background:#f1f5f9; border:1px solid var(--border); font-size:12px; }
+      .chip button{ border:0; background:transparent; cursor:pointer; color:#64748b; }
+      .chip button:focus{ outline: 2px solid #c7d2fe; outline-offset: 2px; border-radius: 8px; }
       @media (prefers-reduced-motion: reduce){
         *{ animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; }
       }
@@ -418,8 +417,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
     setLoading(true);
     setErr(null);
     try {
-      // Defensive: fetch the user's tasks (no date WHERE),
-      // then strictly filter on the client to avoid view/rule side-effects.
       const { data, error } = await supabase
         .from("tasks")
         .select("id,user_id,title,due_date,status,priority,source,goal_id,completed_at")
@@ -428,23 +425,19 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
       const raw = (data as Task[]) || [];
 
-      // Normalize due_date to YYYY-MM-DD
       const normalized: Task[] = raw.map(t => ({
         ...t,
         due_date: t.due_date ? t.due_date.slice(0, 10) : null,
-        completed_at: t.completed_at, // keep full ISO; we'll slice when comparing
+        completed_at: t.completed_at,
       }));
 
-      // STRICT client-side filter for visible lists: only (due today) OR (overdue & still open)
       const list = normalized.filter(t =>
-        t.due_date !== null &&
-        (
+        t.due_date !== null && (
           t.due_date === dateISO ||
           (t.due_date < dateISO && t.status !== "done")
         )
       );
 
-      // Sort: overdue first by oldest due date, then today's by id for stability
       list.sort((a, b) => {
         const aOver = a.due_date! < dateISO ? 0 : 1;
         const bOver = b.due_date! < dateISO ? 0 : 1;
@@ -457,7 +450,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
       setTasks(list);
 
-      // Load goal titles for visible tasks only
       const ids = Array.from(new Set(list.map(t => t.goal_id).filter((v): v is number => typeof v === "number")));
       if (ids.length) {
         const { data: gs, error: ge } = await supabase.from("goals").select("id,title").in("id", ids);
@@ -469,14 +461,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
         setGoalMap({});
       }
 
-      // ===== Summary counts =====
-      // 1) doneToday counts ANY task completed on the selected day (by completed_at),
-      //    even if it was originally overdue. This fixes the old glitch.
       const doneToday = normalized.filter(t => t.status === "done" && dateOnly(t.completed_at) === dateISO).length;
-
-      // 2) pendingToday is tasks due today and not done (regardless of when they were created)
       const pendingToday = normalized.filter(t => t.due_date === dateISO && t.status !== "done").length;
-
       const isWin = doneToday >= 3;
       setSummary(s => ({ ...s, doneToday, pendingToday, isWin }));
     } catch (e: any) {
@@ -593,17 +579,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
   async function loadProfileIntoForm() {
     try {
       if (userId) {
-        // Be schema-flexible: select all, then read what exists
         const { data, error } = await supabase
           .from("profiles")
           .select("*")
           .eq("id", userId)
           .maybeSingle();
         if (!error && data) {
-          // name
           const dn = (data as any).display_name ?? localStorage.getItem(LS_NAME) ?? "";
           setNameInput(dn);
-          // pool can be jsonb array, JSON string, or absent
           const raw = (data as any).display_pool;
           if (Array.isArray(raw)) {
             setPoolInput(raw as string[]);
@@ -615,7 +598,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
           return;
         }
       }
-      // Fallback to local only
       setNameInput(localStorage.getItem(LS_NAME) || "");
       try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
     } catch {
@@ -629,13 +611,20 @@ export default function TodayScreen({ externalDateISO }: Props) {
     if (!v) return;
     setPoolInput((prev) => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v]);
   }
-
+  function removeNick(n: string) {
+    setPoolInput(prev => prev.filter(x => x !== n));
+  }
   function addCustomFromInput() {
     const parts = customNicks.split(",").map(s => s.trim()).filter(Boolean);
     if (parts.length === 0) return;
     const merged = Array.from(new Set([...(poolInput || []), ...parts]));
     setPoolInput(merged);
     setCustomNicks("");
+  }
+  function resetNicknames() {
+    if (window.confirm("Reset all nicknames? This will clear your selected and custom nicknames.")) {
+      setPoolInput([]);
+    }
   }
 
   async function saveProfile() {
@@ -645,7 +634,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
     let wroteToDB = false;
     try {
       if (userId) {
-        // First try including display_pool
         try {
           const payload: any = { display_name: cleanName, display_pool: chosenPool, onboarding_done: true };
           const { error } = await supabase
@@ -656,21 +644,18 @@ export default function TodayScreen({ externalDateISO }: Props) {
           if (error) throw error;
           wroteToDB = true;
         } catch (_) {
-          // Retry without display_pool for schemas that don't have the column
           const { error: e2 } = await supabase
             .from("profiles")
             .upsert({ id: userId, display_name: cleanName, onboarding_done: true })
             .select()
             .limit(1);
-          if (!e2) wroteToDB = true; // we at least saved the name
+          if (!e2) wroteToDB = true;
         }
       }
-      // Always mirror locally for instant UX + to keep the pool even if DB lacks the column
       try {
         localStorage.setItem(LS_NAME, cleanName);
         localStorage.setItem(LS_POOL, JSON.stringify(chosenPool));
       } catch {}
-      // Refresh greeting source so rotation picks from the latest pool
       setGreetName(pickGreetingLabel());
       toast.show(wroteToDB ? "Profile updated" : "Saved locally (no display_pool column)");
       setProfileOpen(false);
@@ -875,7 +860,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
               <button className="btn-ghost" onClick={() => setProfileOpen(false)} aria-label="Close profile">Close</button>
             </div>
 
-            <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ display: "grid", gap: 12 }}>
               <label style={{ display: "grid", gap: 6 }}>
                 <div className="section-title">Your name</div>
                 <input type="text" value={nameInput} onChange={(e) => setNameInput(e.target.value)} placeholder="Enter your name" />
@@ -903,6 +888,23 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 })}
               </div>
 
+              {/* Selected chips incl. customs (removable) */}
+              <div>
+                <div className="section-title" style={{ marginBottom: 6 }}>Selected nicknames</div>
+                {poolInput.length === 0 ? (
+                  <div className="muted">None yet.</div>
+                ) : (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {poolInput.map(n => (
+                      <span key={n} className="chip">
+                        <span>{n}</span>
+                        <button aria-label={`Remove ${n}`} onClick={() => removeNick(n)} title={`Remove ${n}`}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <input
                   type="text"
@@ -913,11 +915,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   style={{ flex: 1, minWidth: 0 }}
                 />
                 <button className="btn-soft" onClick={addCustomFromInput}>Add</button>
+                <button className="btn-soft" onClick={resetNicknames} title="Clear all nicknames">Reset</button>
               </div>
-
-              {poolInput.length > 0 && (
-                <div className="muted">Selected: {poolInput.join(" · ")}</div>
-              )}
 
               {err && <div style={{ color: "red" }}>{err}</div>}
 
