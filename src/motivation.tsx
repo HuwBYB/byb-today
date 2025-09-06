@@ -20,7 +20,7 @@ const TOAST_LOGO_SRC = "/LogoButterfly.png";
 /** Starter set — includes your featured window (2:40 → 3:24) */
 const SEEDS: Partial<Video>[] = [
   {
-    title: "Coach Prime — WIN (2:40–3:24)",
+    title: "Rocky Balboa Motivation",
     url: "https://youtu.be/vyYDz_A6HO8?t=160", // 2:40
     // We pass explicit start/end so the player jumps to the segment
     // even if the URL params get stripped.
