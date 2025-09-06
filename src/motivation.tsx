@@ -361,7 +361,7 @@ export default function MotivationScreen() {
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">BYB Motivation Centre</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Motivation Centre</h1>
           </div>
           <div className="flex items-center gap-2">
             <button
