@@ -4,22 +4,22 @@ import type { ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* =============================================
-   BYB — Today Screen (Profile editor: removable customs + Reset)
+   BYB — Today Screen (Profile editor + pretty Reset confirm)
    ============================================= */
 
 /* ===== Logo & Toast theme ===== */
-const TOAST_LOGO_SRC = "/LogoButterfly.png";     // served from public/
-const TOAST_BG = "#D7F0FA";                       // match App banner
-const TOAST_BORDER = "#bfe5f3";                   // subtle border to suit the bg
+const TOAST_LOGO_SRC = "/LogoButterfly.png"; // served from public/
+const TOAST_BG = "#D7F0FA";                   // match App banner
+const TOAST_BORDER = "#bfe5f3";               // subtle border to suit the bg
 
 /* ===== Types ===== */
 type Task = {
   id: number;
   user_id: string;
   title: string;
-  due_date: string | null; // may come as full ISO; we normalize to YYYY-MM-DD
+  due_date: string | null;
   status: "pending" | "done" | string;
-  priority: number | null; // not used here
+  priority: number | null;
   source: string | null;
   goal_id: number | null;
   completed_at: string | null;
@@ -52,7 +52,7 @@ function addDays(iso: string, n: number) {
 }
 const dateOnly = (s?: string | null) => (s ? s.slice(0, 10) : null);
 
-/* ===== (Optional) Repeat helpers kept for Add ===== */
+/* ===== Repeat helpers ===== */
 type Repeat = "" | "daily" | "weekdays" | "weekly" | "monthly" | "annually";
 const REPEAT_COUNTS: Record<Exclude<Repeat, "">, number> = {
   daily: 14,
@@ -107,7 +107,9 @@ function pickGreetingLabel(): string {
     ];
     if (list.length === 0) return "";
     return list[Math.floor(Math.random() * list.length)];
-  } catch { return ""; }
+  } catch {
+    return "";
+  }
 }
 
 const POSITIVE_GREETS = [
@@ -152,7 +154,9 @@ function formatNiceDate(iso: string): string {
   try {
     const d = fromISO(iso);
     return d.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" });
-  } catch { return iso; }
+  } catch {
+    return iso;
+  }
 }
 
 /* ===== Confetti ===== */
@@ -178,16 +182,22 @@ function fireConfetti() {
     el.style.borderRadius = "2px";
     el.style.opacity = "0.9";
     el.style.transform = `rotate(${Math.random() * 360}deg)`;
-    el.animate([
-      { transform: `translateY(0) rotate(0deg)`, opacity: 1 },
-      { transform: `translateY(${window.innerHeight + 40}px) rotate(${360 + Math.random() * 360}deg)`, opacity: 0.6 }
-    ], { duration: 1200 + Math.random() * 800, easing: "cubic-bezier(.2,.8,.2,1)" });
+    el.animate(
+      [
+        { transform: `translateY(0) rotate(0deg)`, opacity: 1 },
+        {
+          transform: `translateY(${window.innerHeight + 40}px) rotate(${360 + Math.random() * 360}deg)`,
+          opacity: 0.6
+        }
+      ],
+      { duration: 1200 + Math.random() * 800, easing: "cubic-bezier(.2,.8,.2,1)" }
+    );
     container.appendChild(el);
   }
   setTimeout(() => container.remove(), 2200);
 }
 
-/* ===== Encouragements + Toast (no Alfred) ===== */
+/* ===== Encouragements + Toast ===== */
 const ENCOURAGE_LINES = [
   "Lovely momentum. Keep it rolling.",
   "One pebble at a time becomes a mountain.",
@@ -195,7 +205,9 @@ const ENCOURAGE_LINES = [
   "You’re doing Future You a favour.",
   "Mic drop. Onto the next."
 ];
-function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)] as T; }
+function pick<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)] as T;
+}
 
 function useToast() {
   const [msg, setMsg] = useState<string | null>(null);
@@ -247,7 +259,9 @@ function useToast() {
               border: `1px solid ${TOAST_BORDER}`,
               background: "#ffffff88"
             }}
-            onError={(e) => { e.currentTarget.style.display = "none"; }}
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).style.display = "none";
+            }}
           />
           <span style={{ fontWeight: 700 }}>{msg}</span>
         </div>
@@ -258,10 +272,25 @@ function useToast() {
   return { node, show };
 }
 
-/* ===== Nickname options (match onboarding core set) ===== */
+/* ===== Nickname options (match onboarding) ===== */
 const DEFAULT_NICKNAMES = [
-  "King","Champ","Legend","Boss","Chief","Star","Ace","Hero","Captain","Tiger",
-  "Queen","Princess","Gurl","Boss Lady","Diva","Hot Stuff","Girlfriend",
+  "King",
+  "Champ",
+  "Legend",
+  "Boss",
+  "Chief",
+  "Star",
+  "Ace",
+  "Hero",
+  "Captain",
+  "Tiger",
+  "Queen",
+  "Princess",
+  "Gurl",
+  "Boss Lady",
+  "Diva",
+  "Hot Stuff",
+  "Girlfriend"
 ];
 
 /* =============================================
@@ -318,7 +347,11 @@ export default function TodayScreen({ externalDateISO }: Props) {
       }
     `;
     document.head.appendChild(style);
-    return () => { try { document.head.removeChild(style); } catch {} };
+    return () => {
+      try {
+        document.head.removeChild(style);
+      } catch {}
+    };
   }, []);
 
   /* ===== State ===== */
@@ -331,7 +364,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Add task (top composer now has full functionality)
+  // Add task (top composer)
   const [newTitle, setNewTitle] = useState("");
   const [newRepeat, setNewRepeat] = useState<Repeat>("");
   const [adding, setAdding] = useState(false);
@@ -350,10 +383,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [savingProfile, setSavingProfile] = useState(false);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
-  // Responsive: <420px treated as compact
+  // Responsive
   const [isCompact, setIsCompact] = useState<boolean>(false);
   useEffect(() => {
-    function check() { setIsCompact(window.innerWidth < 420); }
+    function check() {
+      setIsCompact(window.innerWidth < 420);
+    }
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
@@ -383,12 +418,17 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const toast = useToast();
 
   // external date change
-  useEffect(() => { if (externalDateISO) setDateISO(externalDateISO); }, [externalDateISO]);
+  useEffect(() => {
+    if (externalDateISO) setDateISO(externalDateISO);
+  }, [externalDateISO]);
 
   // user + greeting + last-visit
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
-      if (error) { setErr(error.message); return; }
+      if (error) {
+        setErr(error.message);
+        return;
+      }
       const user = data.user;
       setUserId(user?.id ?? null);
 
@@ -396,7 +436,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
       try {
         const nowMs = Date.now();
         const lastMs = Number(localStorage.getItem(LS_LAST_VISIT) || "0");
-        const missedNow = lastMs > 0 ? (nowMs - lastMs) > 86400000 : false;
+        const missedNow = lastMs > 0 ? nowMs - lastMs > 86400000 : false;
         setMissed(missedNow);
         localStorage.setItem(LS_LAST_VISIT, String(nowMs));
       } catch {}
@@ -404,13 +444,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
   }, []);
 
   // clock
-  useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id); }, []);
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
-  // Overdue helper (DATE-SAFE)
+  // Overdue helper
   const isOverdueFn = (t: Task) =>
-    !!t.due_date &&
-    t.status !== "done" &&
-    fromISO(t.due_date.slice(0,10)).getTime() < fromISO(dateISO).getTime();
+    !!t.due_date && t.status !== "done" && fromISO(t.due_date.slice(0, 10)).getTime() < fromISO(dateISO).getTime();
 
   /* ===== Data loading (DEFENSIVE) ===== */
   async function load() {
@@ -426,24 +467,21 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
       const raw = (data as Task[]) || [];
 
-      const normalized: Task[] = raw.map(t => ({
+      const normalized: Task[] = raw.map((t) => ({
         ...t,
         due_date: t.due_date ? t.due_date.slice(0, 10) : null,
-        completed_at: t.completed_at,
+        completed_at: t.completed_at
       }));
 
-      const list = normalized.filter(t =>
-        t.due_date !== null && (
-          t.due_date === dateISO ||
-          (t.due_date < dateISO && t.status !== "done")
-        )
+      const list = normalized.filter(
+        (t) => t.due_date !== null && (t.due_date === dateISO || (t.due_date < dateISO && t.status !== "done"))
       );
 
       list.sort((a, b) => {
         const aOver = a.due_date! < dateISO ? 0 : 1;
         const bOver = b.due_date! < dateISO ? 0 : 1;
-        if (aOver !== bOver) return aOver - bOver;                        // overdue before today
-        if (aOver === 0) {                                                // both overdue: oldest first
+        if (aOver !== bOver) return aOver - bOver;
+        if (aOver === 0) {
           if (a.due_date! !== b.due_date!) return a.due_date! < b.due_date! ? -1 : 1;
         }
         return a.id - b.id;
@@ -451,32 +489,35 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
       setTasks(list);
 
-      const ids = Array.from(new Set(list.map(t => t.goal_id).filter((v): v is number => typeof v === "number")));
+      const ids = Array.from(new Set(list.map((t) => t.goal_id).filter((v): v is number => typeof v === "number")));
       if (ids.length) {
         const { data: gs, error: ge } = await supabase.from("goals").select("id,title").in("id", ids);
         if (ge) throw ge;
         const map: Record<number, string> = {};
-        (gs as GoalLite[]).forEach(g => (map[g.id] = g.title));
+        (gs as GoalLite[]).forEach((g) => (map[g.id] = g.title));
         setGoalMap(map);
       } else {
         setGoalMap({});
       }
 
-      const doneToday = normalized.filter(t => t.status === "done" && dateOnly(t.completed_at) === dateISO).length;
-      const pendingToday = normalized.filter(t => t.due_date === dateISO && t.status !== "done").length;
+      const doneToday = normalized.filter((t) => t.status === "done" && dateOnly(t.completed_at) === dateISO).length;
+      const pendingToday = normalized.filter((t) => t.due_date === dateISO && t.status !== "done").length;
       const isWin = doneToday >= 3;
-      setSummary(s => ({ ...s, doneToday, pendingToday, isWin }));
+      setSummary((s) => ({ ...s, doneToday, pendingToday, isWin }));
     } catch (e: any) {
       setErr(e.message || String(e));
       setTasks([]);
       setGoalMap({});
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function loadStreaks() {
     if (!userId) return;
     try {
-      const since = new Date(); since.setDate(since.getDate() - 180);
+      const since = new Date();
+      since.setDate(since.getDate() - 180);
       const { data, error } = await supabase
         .from("tasks")
         .select("completed_at,status,user_id")
@@ -492,11 +533,17 @@ export default function TodayScreen({ externalDateISO }: Props) {
         days.add(toISO(new Date(d.getFullYear(), d.getMonth(), d.getDate())));
       }
 
-      let streak = 0; let cursor = todayISO();
-      while (days.has(cursor)) { streak += 1; cursor = addDays(cursor, -1); }
+      let streak = 0;
+      let cursor = todayISO();
+      while (days.has(cursor)) {
+        streak += 1;
+        cursor = addDays(cursor, -1);
+      }
 
       const sorted = Array.from(days).sort();
-      let best = 0, run = 0; let prev: string | null = null;
+      let best = 0,
+        run = 0;
+      let prev: string | null = null;
       for (const d of sorted) {
         if (!prev) run = 1;
         else {
@@ -506,12 +553,19 @@ export default function TodayScreen({ externalDateISO }: Props) {
         best = Math.max(best, run);
         prev = d;
       }
-      setSummary(s => ({ ...s, streak, bestStreak: best }));
-    } catch { /* ignore */ }
+      setSummary((s) => ({ ...s, streak, bestStreak: best }));
+    } catch {
+      /* ignore */
+    }
   }
 
-  async function loadAll() { await load(); await loadStreaks(); }
-  useEffect(() => { if (userId && dateISO) loadAll(); }, [userId, dateISO]);
+  async function loadAll() {
+    await load();
+    await loadStreaks();
+  }
+  useEffect(() => {
+    if (userId && dateISO) loadAll();
+  }, [userId, dateISO]);
 
   // Recompute greeting line
   useEffect(() => {
@@ -534,24 +588,35 @@ export default function TodayScreen({ externalDateISO }: Props) {
         .eq("id", t.id);
       if (error) throw error;
       await loadAll();
-      if (markDone) { fireConfetti(); toast.show(pick(ENCOURAGE_LINES)); }
-    } catch (e: any) { setErr(e.message || String(e)); }
+      if (markDone) {
+        fireConfetti();
+        toast.show(pick(ENCOURAGE_LINES));
+      }
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    }
   }
 
   async function moveToSelectedDate(taskId: number) {
     try {
       const { error } = await supabase.from("tasks").update({ due_date: dateISO }).eq("id", taskId);
-      if (error) throw error; await loadAll();
-    } catch (e: any) { setErr(e.message || String(e)); }
+      if (error) throw error;
+      await loadAll();
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    }
   }
 
   async function moveAllOverdueHere() {
     try {
-      const overdueIds = tasks.filter(isOverdueFn).map(t => t.id);
+      const overdueIds = tasks.filter(isOverdueFn).map((t) => t.id);
       if (overdueIds.length === 0) return;
       const { error } = await supabase.from("tasks").update({ due_date: dateISO }).in("id", overdueIds);
-      if (error) throw error; await loadAll();
-    } catch (e: any) { setErr(e.message || String(e)); }
+      if (error) throw error;
+      await loadAll();
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    }
   }
 
   async function addTaskWithArgs(title: string, repeat: Repeat) {
@@ -559,8 +624,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
     const clean = title.trim();
     const occurrences = generateOccurrences(dateISO, repeat);
     const rows = occurrences.map((iso) => ({
-      user_id: userId, title: clean, due_date: iso, status: "pending",
-      priority: 0, source: repeat ? makeSeriesKey(repeat) : "manual"
+      user_id: userId,
+      title: clean,
+      due_date: iso,
+      status: "pending",
+      priority: 0,
+      source: repeat ? makeSeriesKey(repeat) : "manual"
     }));
     const { error } = await supabase.from("tasks").insert(rows as any);
     if (error) throw error;
@@ -568,23 +637,25 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
   async function addTask() {
     if (!userId || !newTitle.trim()) return;
-    setAdding(true); setErr(null);
+    setAdding(true);
+    setErr(null);
     try {
       await addTaskWithArgs(newTitle, newRepeat);
-      setNewTitle(""); setNewRepeat("");
+      setNewTitle("");
+      setNewRepeat("");
       await loadAll();
-    } catch (e: any) { setErr(e.message || String(e)); } finally { setAdding(false); }
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setAdding(false);
+    }
   }
 
   /* ===== Profile helpers ===== */
   async function loadProfileIntoForm() {
     try {
       if (userId) {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("id", userId)
-          .maybeSingle();
+        const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
         if (!error && data) {
           const dn = (data as any).display_name ?? localStorage.getItem(LS_NAME) ?? "";
           setNameInput(dn);
@@ -592,40 +663,51 @@ export default function TodayScreen({ externalDateISO }: Props) {
           if (Array.isArray(raw)) {
             setPoolInput(raw as string[]);
           } else if (typeof raw === "string") {
-            try { setPoolInput(JSON.parse(raw)); } catch { setPoolInput([]); }
+            try {
+              setPoolInput(JSON.parse(raw));
+            } catch {
+              setPoolInput([]);
+            }
           } else {
-            try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
+            try {
+              setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]"));
+            } catch {
+              setPoolInput([]);
+            }
           }
           return;
         }
       }
       setNameInput(localStorage.getItem(LS_NAME) || "");
-      try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
+      try {
+        setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]"));
+      } catch {
+        setPoolInput([]);
+      }
     } catch {
       setNameInput(localStorage.getItem(LS_NAME) || "");
-      try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
+      try {
+        setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]"));
+      } catch {
+        setPoolInput([]);
+      }
     }
   }
 
   function toggleNick(n: string) {
     const v = n.trim();
     if (!v) return;
-    setPoolInput((prev) => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v]);
+    setPoolInput((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]));
   }
   function removeNick(n: string) {
-    setPoolInput(prev => prev.filter(x => x !== n));
+    setPoolInput((prev) => prev.filter((x) => x !== n));
   }
   function addCustomFromInput() {
-    const parts = customNicks.split(",").map(s => s.trim()).filter(Boolean);
+    const parts = customNicks.split(",").map((s) => s.trim()).filter(Boolean);
     if (parts.length === 0) return;
     const merged = Array.from(new Set([...(poolInput || []), ...parts]));
     setPoolInput(merged);
     setCustomNicks("");
-  }
-  function resetNicknames() {
-    // Open pretty BYB-styled confirm dialog instead of window.confirm
-    setConfirmResetOpen(true);
-  }
   }
 
   async function saveProfile() {
@@ -637,14 +719,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
       if (userId) {
         try {
           const payload: any = { display_name: cleanName, display_pool: chosenPool, onboarding_done: true };
-          const { error } = await supabase
-            .from("profiles")
-            .upsert({ id: userId, ...payload })
-            .select()
-            .limit(1);
+          const { error } = await supabase.from("profiles").upsert({ id: userId, ...payload }).select().limit(1);
           if (error) throw error;
           wroteToDB = true;
-        } catch (_) {
+        } catch {
           const { error: e2 } = await supabase
             .from("profiles")
             .upsert({ id: userId, display_name: cleanName, onboarding_done: true })
@@ -677,14 +755,28 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const todayPending = tasks.filter((t) => t.due_date === dateISO && t.status !== "done");
 
   /* ===== Section helper ===== */
-  function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode; }) {
+  function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode }) {
     return (
       <div className="card" style={{ marginBottom: 12, overflowX: "clip", borderRadius: 16 }}>
-        <div className="row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap", width: "100%", minWidth: 0 }}>
+        <div
+          className="row"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 8,
+            gap: 8,
+            flexWrap: "wrap",
+            width: "100%",
+            minWidth: 0
+          }}
+        >
           <h2 style={{ margin: 0, fontSize: 18, wordBreak: "break-word", minWidth: 0 }}>{title}</h2>
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", minWidth: 0 }}>
             {right}
-            <button onClick={loadAll} disabled={loading} className="btn-soft">{loading ? "Refreshing…" : "Refresh"}</button>
+            <button onClick={loadAll} disabled={loading} className="btn-soft">
+              {loading ? "Refreshing…" : "Refresh"}
+            </button>
           </div>
         </div>
         {children}
@@ -701,7 +793,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         overflowX: "hidden",
         width: "100%",
         maxWidth: "100vw",
-        padding: "12px 12px calc(72px + env(safe-area-inset-bottom,0))",
+        padding: "12px 12px calc(72px + env(safe-area-inset-bottom,0))"
       }}
     >
       {/* Top app bar */}
@@ -718,15 +810,34 @@ export default function TodayScreen({ externalDateISO }: Props) {
           padding: 12
         }}
       >
-        <div className="row" style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap", width: "100%", minWidth: 0 }}>
+        <div
+          className="row"
+          style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap", width: "100%", minWidth: 0 }}
+        >
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
-            {/* Removed BYB label; show date only once here */}
-            <div className="muted" style={{ minWidth: 0 }}>{niceDate}</div>
+            <div className="muted" style={{ minWidth: 0 }}>
+              {niceDate}
+            </div>
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
-            <span className="badge" title="Win if 3+ tasks done" style={{ background: summary.isWin ? "var(--success-soft)" : "var(--danger-soft)", border: "1px solid var(--border)" }}>{summary.isWin ? "Win" : "Keep going"}</span>
-            <span className="badge" title="Tasks done today">Done: {summary.doneToday}</span>
-            <span className="badge" title="Current streak (best)" style={{ transform: streakPulse ? "scale(1.08)" : "scale(1)", transition: "transform .25s ease" }}>🔥 {summary.streak}{summary.bestStreak > 0 ? ` (best ${summary.bestStreak})` : ""}</span>
+            <span
+              className="badge"
+              title="Win if 3+ tasks done"
+              style={{ background: summary.isWin ? "var(--success-soft)" : "var(--danger-soft)", border: "1px solid var(--border)" }}
+            >
+              {summary.isWin ? "Win" : "Keep going"}
+            </span>
+            <span className="badge" title="Tasks done today">
+              Done: {summary.doneToday}
+            </span>
+            <span
+              className="badge"
+              title="Current streak (best)"
+              style={{ transform: streakPulse ? "scale(1.08)" : "scale(1)", transition: "transform .25s ease" }}
+            >
+              🔥 {summary.streak}
+              {summary.bestStreak > 0 ? ` (best ${summary.bestStreak})` : ""}
+            </span>
           </div>
         </div>
 
@@ -736,18 +847,19 @@ export default function TodayScreen({ externalDateISO }: Props) {
           </div>
         )}
 
-        {/* Composer row (top-only) */}
+        {/* Composer row */}
         <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%", minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
             <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: 1 }}>{timeStr}</div>
-            {/* Duplicate ISO date removed per request */}
           </div>
 
           <input
             type="text"
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && newTitle.trim() && !adding) addTask(); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && newTitle.trim() && !adding) addTask();
+            }}
             placeholder="Add a task for today…"
             style={{ flex: "1 1 220px", minWidth: 0, maxWidth: "100%" }}
             aria-label="Task title"
@@ -765,9 +877,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
             </select>
           </label>
 
-          <button className="btn-primary" onClick={addTask} disabled={!newTitle.trim() || adding} style={{ borderRadius: 10, flex: isCompact ? "1 1 100%" : undefined }}>{adding ? "Adding…" : "Add"}</button>
+          <button className="btn-primary" onClick={addTask} disabled={!newTitle.trim() || adding} style={{ borderRadius: 10, flex: isCompact ? "1 1 100%" : undefined }}>
+            {adding ? "Adding…" : "Add"}
+          </button>
         </div>
-        <div className="muted" style={{ marginTop: -4 }}>{`Will be created for ${dateISO}${newRepeat ? " + future repeats" : ""}`}</div>
+        <div className="muted" style={{ marginTop: -4 }}>
+          {`Will be created for ${dateISO}${newRepeat ? " + future repeats" : ""}`}
+        </div>
 
         {/* Date controls */}
         <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%", minWidth: 0 }}>
@@ -782,8 +898,15 @@ export default function TodayScreen({ externalDateISO }: Props) {
             </button>
           )}
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", flexWrap: "wrap", width: isCompact ? "100%" : "auto", minWidth: 0 }}>
-            <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} style={{ flex: isCompact ? "1 1 220px" : undefined, minWidth: 0, maxWidth: "100%" }} />
-            <button className="btn-soft" onClick={() => setDateISO(todayISO())} style={{ flex: isCompact ? "1 1 120px" : undefined }}>Today</button>
+            <input
+              type="date"
+              value={dateISO}
+              onChange={(e) => setDateISO(e.target.value)}
+              style={{ flex: isCompact ? "1 1 220px" : undefined, minWidth: 0, maxWidth: "100%" }}
+            />
+            <button className="btn-soft" onClick={() => setDateISO(todayISO())} style={{ flex: isCompact ? "1 1 120px" : undefined }}>
+              Today
+            </button>
           </div>
         </div>
         {err && <div style={{ color: "red" }}>{err}</div>}
@@ -801,7 +924,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
-                      <span style={{ minWidth:0 }}>{displayTitle(t)}</span>
+                      <span style={{ minWidth: 0 }}>{displayTitle(t)}</span>
                     </div>
                   </div>
                 </label>
@@ -823,7 +946,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
-                      <span style={{ minWidth:0 }}>{displayTitle(t)}</span>
+                      <span style={{ minWidth: 0 }}>{displayTitle(t)}</span>
                       <span className="badge">Overdue</span>
                       <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => moveToSelectedDate(t.id)}>
                         Move to {dateISO}
@@ -844,7 +967,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
       <div style={{ position: "fixed", right: 12, bottom: "calc(12px + env(safe-area-inset-bottom,0))", zIndex: 70 }}>
         <button
           className="btn-soft"
-          onClick={async () => { await loadProfileIntoForm(); setProfileOpen(true); }}
+          onClick={async () => {
+            await loadProfileIntoForm();
+            setProfileOpen(true);
+          }}
           title="Edit name & nicknames"
           style={{ borderRadius: 999, padding: "10px 14px", boxShadow: "0 8px 20px rgba(0,0,0,.08)" }}
         >
@@ -858,7 +984,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
           <div className="sheet">
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
               <div style={{ fontWeight: 800, fontSize: 18 }}>Edit your profile</div>
-              <button className="btn-ghost" onClick={() => setProfileOpen(false)} aria-label="Close profile">Close</button>
+              <button className="btn-ghost" onClick={() => setProfileOpen(false)} aria-label="Close profile">
+                Close
+              </button>
             </div>
 
             <div style={{ display: "grid", gap: 12 }}>
@@ -869,7 +997,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
               <div className="section-title">Pick nicknames</div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {DEFAULT_NICKNAMES.map(n => {
+                {DEFAULT_NICKNAMES.map((n) => {
                   const on = poolInput.includes(n);
                   return (
                     <button
@@ -880,7 +1008,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                       style={{
                         borderRadius: 999,
                         background: on ? "#e0f2fe" : "",
-                        border: on ? "1px solid #38bdf8" : "1px solid var(--border)",
+                        border: on ? "1px solid #38bdf8" : "1px solid var(--border)"
                       }}
                     >
                       {n}
@@ -891,15 +1019,19 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
               {/* Selected chips incl. customs (removable) */}
               <div>
-                <div className="section-title" style={{ marginBottom: 6 }}>Selected nicknames</div>
+                <div className="section-title" style={{ marginBottom: 6 }}>
+                  Selected nicknames
+                </div>
                 {poolInput.length === 0 ? (
                   <div className="muted">None yet.</div>
                 ) : (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    {poolInput.map(n => (
+                    {poolInput.map((n) => (
                       <span key={n} className="chip">
                         <span>{n}</span>
-                        <button aria-label={`Remove ${n}`} onClick={() => removeNick(n)} title={`Remove ${n}`}>×</button>
+                        <button aria-label={`Remove ${n}`} onClick={() => removeNick(n)} title={`Remove ${n}`}>
+                          ×
+                        </button>
                       </span>
                     ))}
                   </div>
@@ -912,26 +1044,35 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   value={customNicks}
                   onChange={(e) => setCustomNicks(e.target.value)}
                   placeholder="Add custom nicknames (comma-separated)…"
-                  onKeyDown={(e) => { if (e.key === 'Enter') addCustomFromInput(); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") addCustomFromInput();
+                  }}
                   style={{ flex: 1, minWidth: 0 }}
                 />
-                <button className="btn-soft" onClick={addCustomFromInput}>Add</button>
-                <button className="btn-soft" onClick={() => setConfirmResetOpen(true)} title="Clear all nicknames">Reset</button>
+                <button className="btn-soft" onClick={addCustomFromInput}>
+                  Add
+                </button>
+                <button className="btn-soft" onClick={() => setConfirmResetOpen(true)} title="Clear all nicknames">
+                  Reset
+                </button>
               </div>
 
               {err && <div style={{ color: "red" }}>{err}</div>}
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-                <button className="btn-soft" onClick={() => setProfileOpen(false)}>Cancel</button>
-                <button className="btn-primary" onClick={saveProfile} disabled={savingProfile}>{savingProfile ? 'Saving…' : 'Save'}</button>
+                <button className="btn-soft" onClick={() => setProfileOpen(false)}>
+                  Cancel
+                </button>
+                <button className="btn-primary" onClick={saveProfile} disabled={savingProfile}>
+                  {savingProfile ? "Saving…" : "Save"}
+                </button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Toast node */}
-      {/* Confirm Reset (BYB styled) */}
+      {/* Pretty Confirm Reset */}
       {confirmResetOpen && (
         <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-reset-title">
           <div className="sheet" style={{ maxWidth: 420 }}>
@@ -941,17 +1082,28 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 alt=""
                 width={28}
                 height={28}
-                style={{ display: "block", objectFit: "contain", borderRadius: 6, border: `1px solid ${TOAST_BORDER}`, background: "#ffffff" }}
-                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                style={{ display: "block", objectFit: "contain", borderRadius: 6, border: `1px solid ${TOAST_BORDER}`, background: "#fff" }}
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                }}
               />
-              <div id="confirm-reset-title" style={{ fontWeight: 800, fontSize: 18 }}>Reset nicknames?</div>
+              <div id="confirm-reset-title" style={{ fontWeight: 800, fontSize: 18 }}>
+                Reset nicknames?
+              </div>
             </div>
-            <p className="muted" style={{ marginTop: 0 }}>This will clear your selected and custom nicknames.</p>
+            <p className="muted" style={{ marginTop: 0 }}>
+              This will clear your selected and custom nicknames.
+            </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn-soft" onClick={() => setConfirmResetOpen(false)}>Cancel</button>
+              <button className="btn-soft" onClick={() => setConfirmResetOpen(false)}>
+                Cancel
+              </button>
               <button
                 className="btn-primary"
-                onClick={() => { setPoolInput([]); setConfirmResetOpen(false); }}
+                onClick={() => {
+                  setPoolInput([]);
+                  setConfirmResetOpen(false);
+                }}
                 style={{ background: "#ef4444" }}
               >
                 Reset
@@ -961,6 +1113,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
+      {/* Toast node */}
       {toast.node}
     </div>
   );
