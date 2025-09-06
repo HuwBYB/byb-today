@@ -324,17 +324,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Add task
+  // Add task (top composer now has full functionality)
   const [newTitle, setNewTitle] = useState("");
   const [newRepeat, setNewRepeat] = useState<Repeat>("");
   const [adding, setAdding] = useState(false);
 
-  // Quick capture
+  // Greetings / clock
   const [now, setNow] = useState<Date>(new Date());
-  const [quickTitle, setQuickTitle] = useState("");
-  const [savingQuick, setSavingQuick] = useState(false);
-
-  // Greetings
   const [greetName, setGreetName] = useState<string>("");
   const [missed, setMissed] = useState<boolean>(false);
   const [greetLine, setGreetLine] = useState<string>("");
@@ -522,7 +518,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
   function displayTitle(t: Task) {
     const base = (t.title || "").trim();
-       const g = t.goal_id != null ? goalMap[t.goal_id] : "";
+    const g = t.goal_id != null ? goalMap[t.goal_id] : "";
     return g ? `${base} (${g})` : base;
   }
 
@@ -578,16 +574,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
     } catch (e: any) { setErr(e.message || String(e)); } finally { setAdding(false); }
   }
 
-  async function addQuick() {
-    if (!userId || !quickTitle.trim()) return;
-    setSavingQuick(true);
-    try {
-      await addTaskWithArgs(quickTitle, "");
-      setQuickTitle("");
-      await loadAll();
-    } catch (e: any) { setErr(e.message || String(e)); } finally { setSavingQuick(false); }
-  }
-
   /* ===== Computed ===== */
   const niceDate = useMemo(() => formatNiceDate(dateISO), [dateISO]);
   const greeting = useMemo(() => (greetLine || timeGreeting(now)), [greetLine, now]);
@@ -640,7 +626,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
       >
         <div className="row" style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap", width: "100%", minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
-            {/* Removed BYB label; show date only */}
+            {/* Removed BYB label; show date only once here */}
             <div className="muted" style={{ minWidth: 0 }}>{niceDate}</div>
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
@@ -656,23 +642,38 @@ export default function TodayScreen({ externalDateISO }: Props) {
           </div>
         )}
 
-        {/* Quick row */}
+        {/* Composer row (top-only) */}
         <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%", minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
             <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: 1 }}>{timeStr}</div>
-            <div className="muted" style={{ whiteSpace: "nowrap" }}>{dateISO}</div>
+            {/* Duplicate ISO date removed per request */}
           </div>
 
           <input
             type="text"
-            value={quickTitle}
-            onChange={(e) => setQuickTitle(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && quickTitle.trim() && !savingQuick) addQuick(); }}
-            placeholder="Quick add a task for today…"
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && newTitle.trim() && !adding) addTask(); }}
+            placeholder="Add a task for today…"
             style={{ flex: "1 1 220px", minWidth: 0, maxWidth: "100%" }}
+            aria-label="Task title"
           />
-          <button className="btn-primary" onClick={addQuick} disabled={!quickTitle.trim() || savingQuick} style={{ borderRadius: 10, flex: isCompact ? "1 1 100%" : undefined }}>{savingQuick ? "Adding…" : "Add"}</button>
+
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+            <span className="muted">Repeat</span>
+            <select value={newRepeat} onChange={(e) => setNewRepeat(e.target.value as Repeat)} title="Repeat (optional)">
+              <option value="">No repeat</option>
+              <option value="daily">Daily</option>
+              <option value="weekdays">Daily (Mon–Fri)</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="annually">Annually</option>
+            </select>
+          </label>
+
+          <button className="btn-primary" onClick={addTask} disabled={!newTitle.trim() || adding} style={{ borderRadius: 10, flex: isCompact ? "1 1 100%" : undefined }}>{adding ? "Adding…" : "Add"}</button>
         </div>
+        <div className="muted" style={{ marginTop: -4 }}>{`Will be created for ${dateISO}${newRepeat ? " + future repeats" : ""}`}</div>
 
         {/* Date controls */}
         <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%", minWidth: 0 }}>
@@ -745,42 +746,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         )}
       </Section>
 
-      {/* Add Task */}
-      <div className="card" style={{ display: "grid", gap: 8, overflowX: "clip", borderRadius: 16 }}>
-        <h2 style={{ margin: 0 }}>Add Task</h2>
-        <label style={{ display: "grid", gap: 6 }}>
-          <div className="section-title">Task title</div>
-          <input
-            type="text"
-            placeholder="Enter task…"
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && newTitle.trim() && !adding) addTask(); }}
-          />
-        </label>
-
-        <div className="row" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
-            <span className="muted">Repeat</span>
-            <select value={newRepeat} onChange={(e) => setNewRepeat(e.target.value as Repeat)} title="Repeat (optional)">
-              <option value="">No repeat</option>
-              <option value="daily">Daily</option>
-              <option value="weekdays">Daily (Mon–Fri)</option>
-              <option value="weekly">Weekly</option>
-              <option value="monthly">Monthly</option>
-              <option value="annually">Annually</option>
-            </select>
-          </label>
-
-          <div className="muted" style={{ minWidth: 0, wordBreak: "break-word" }}>
-            Will be created for {dateISO}{newRepeat ? " + future repeats" : ""}
-          </div>
-
-          <button onClick={addTask} disabled={!newTitle.trim() || adding} className="btn-primary" style={{ marginLeft: "auto", borderRadius: 10 }}>{adding ? "Adding…" : "Add"}</button>
-        </div>
-
-        {err && <div style={{ color: "red" }}>{err}</div>}
-      </div>
+      {/* Bottom "Add Task" section removed per request */}
 
       {/* Toast node */}
       {toast.node}
