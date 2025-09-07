@@ -2,16 +2,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-/* -------- categories + colours (match DB constraint) -------- */
-const CATS = [
-  { key: "business",      label: "Business",      color: "#C7D2FE" },
-  { key: "financial",     label: "Financial",     color: "#A7F3D0" },
-  { key: "health",        label: "Health",        color: "#99F6E4" },
-  { key: "personal",      label: "Personal",      color: "#E9D5FF" },
-  { key: "relationships", label: "Relationships", color: "#FECDD3" },
-] as const;
-export type AllowedCategory = typeof CATS[number]["key"];
-const colorOf = (k: AllowedCategory) => CATS.find(c => c.key === k)?.color || "#6b7280";
+/* -------- Unified categories + pastel colours -------- */
+export type AllowedCategory =
+  | "business"
+  | "financial"
+  | "health"
+  | "personal"
+  | "relationships";
+
+const CATS: ReadonlyArray<{ key: AllowedCategory; label: string; color: string }> = [
+  { key: "business",      label: "Business",      color: "#C7D2FE" }, // pastel indigo
+  { key: "financial",     label: "Financial",     color: "#A7F3D0" }, // pastel mint
+  { key: "health",        label: "Health",        color: "#99F6E4" }, // pastel teal
+  { key: "personal",      label: "Personal",      color: "#E9D5FF" }, // pastel purple
+  { key: "relationships", label: "Relationships", color: "#FECDD3" }, // pastel rose
+];
+const colorOf = (k: AllowedCategory) => CATS.find(c => c.key === k)?.color || "#e5e7eb";
 
 /* -------- date helpers -------- */
 function toISO(d: Date) {
@@ -28,142 +34,37 @@ function addMonthsClamped(base: Date, months: number, anchorDay?: number) {
   const ld = lastDayOfMonth(first.getFullYear(), first.getMonth());
   return new Date(first.getFullYear(), first.getMonth(), Math.min(anchor, ld));
 }
-function daysInMonth(year:number, m0:number){ return lastDayOfMonth(year,m0); }
 
-/* -------- task source keys (shared) -------- */
-export const BIG_GOAL_SOURCES = {
-  target: "big_goal_target",
-  midpointReview: "big_goal_midpoint_review",
-  midpointChoice: "big_goal_midpoint_choice", // show BYB popup on this date
-  monthly: "big_goal_monthly",
-  weekly: "big_goal_weekly",
-  daily: "big_goal_daily",
-} as const;
-
-/* -------- external helpers (seed second half later) -------- */
-export type SecondHalfPlan = {
-  monthlyCommit?: string;
-  weeklyCommit?: string;
-  dailyCommit?: string;
-};
-
-/**
- * Seed the SECOND half (day after halfway → target) with the same plan.
- * Call this from your Today screen when the user taps “Yes, continue” on the midpoint popup.
- */
-export async function seedSecondHalfForGoal(opts: {
-  userId: string;
-  goalId: number;
-  category: AllowedCategory;
-  categoryColor: string;
-  startDateISO: string;
-  targetDateISO: string;
-  halfwayISO: string;           // computed midpoint
-  plan: SecondHalfPlan;
-}) {
-  const {
-    userId, goalId, category, categoryColor,
-    startDateISO, targetDateISO, halfwayISO,
-    plan: { monthlyCommit = "", weeklyCommit = "", dailyCommit = "" }
-  } = opts;
-
-  const start = fromISO(startDateISO);
-  const half  = fromISO(halfwayISO);
-  const end   = fromISO(targetDateISO);
-
-  const inSecondHalf = (d: Date) => d > half && d <= end;
-  const tasks: any[] = [];
-
-  // Monthly
-  if (monthlyCommit.trim()) {
-    let d = addMonthsClamped(start, 1, start.getDate());
-    while (d <= end) {
-      if (inSecondHalf(d)) {
-        tasks.push({
-          user_id: userId, goal_id: goalId,
-          title: `BIG GOAL — Monthly: ${monthlyCommit.trim()}`,
-          due_date: toISO(d), source: BIG_GOAL_SOURCES.monthly, priority: 2,
-          category, category_color: categoryColor
-        });
-      }
-      d = addMonthsClamped(d, 1, start.getDate());
-    }
-  }
-  // Weekly
-  if (weeklyCommit.trim()) {
-    let d = new Date(start); d.setDate(d.getDate() + 7);
-    while (d <= end) {
-      if (inSecondHalf(d)) {
-        tasks.push({
-          user_id: userId, goal_id: goalId,
-          title: `BIG GOAL — Weekly: ${weeklyCommit.trim()}`,
-          due_date: toISO(d), source: BIG_GOAL_SOURCES.weekly, priority: 2,
-          category, category_color: categoryColor
-        });
-      }
-      d.setDate(d.getDate() + 7);
-    }
-  }
-  // Daily
-  if (dailyCommit.trim()) {
-    const startDaily = clampDay(new Date(Math.max(half.getTime() + 24*3600*1000, Date.now()))); // day after half
-    let d = startDaily;
-    while (d <= end) {
-      tasks.push({
-        user_id: userId, goal_id: goalId,
-        title: `BIG GOAL — Daily: ${dailyCommit.trim()}`,
-        due_date: toISO(d), source: BIG_GOAL_SOURCES.daily, priority: 2,
-        category, category_color: categoryColor
-      });
-      d.setDate(d.getDate() + 1);
-    }
-  }
-
-  for (let i = 0; i < tasks.length; i += 500) {
-    const slice = tasks.slice(i, i + 500);
-    const { error } = await supabase.from("tasks").insert(slice);
-    if (error) throw error;
-  }
-}
-
-/* -------- wizard props -------- */
-export type ExistingGoal = {
-  id: number;
-  title: string;
-  category: AllowedCategory;
-  start_date: string;
-  target_date: string;
-  halfway_note?: string | null;
-};
-
+/* -------- props -------- */
 export type BigGoalWizardProps = {
   onClose?: () => void;
   onCreated?: () => void;
-  /** Optional: re-plan an existing goal (prefills fields). */
-  existingGoal?: ExistingGoal | null;
 };
 
 /* -------- steps -------- */
 type StepKey = "title" | "category" | "dates" | "halfway" | "monthly" | "weekly" | "daily" | "review";
 const STEP_ORDER: StepKey[] = ["title","category","dates","halfway","monthly","weekly","daily","review"];
 
+/* -------- Assets -------- */
+const BYB_LOGO = "/LogoButterfly.png";
+
 /* ========================= Component ========================= */
 
-export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigGoalWizardProps) {
+export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps) {
   const rootRef = useRef<HTMLDivElement>(null);
 
   const todayISO = useMemo(() => toISO(new Date()), []);
   const [step, setStep] = useState<StepKey>("title");
 
   // form state
-  const [title, setTitle] = useState<string>(existingGoal?.title ?? "");
-  const [category, setCategory] = useState<AllowedCategory>(existingGoal?.category ?? "other");
-  const [startDate, setStartDate] = useState<string>(existingGoal?.start_date ?? todayISO);
-  const [targetDate, setTargetDate] = useState<string>(existingGoal?.target_date ?? "");
-  const [halfwayNote, setHalfwayNote] = useState<string>(existingGoal?.halfway_note ?? "");
-  const [monthlyCommit, setMonthlyCommit] = useState<string>("");
-  const [weeklyCommit, setWeeklyCommit] = useState<string>("");
-  const [dailyCommit, setDailyCommit] = useState<string>("");
+  const [title, setTitle] = useState("");
+  const [category, setCategory] = useState<AllowedCategory>("personal"); // default changed from "other"
+  const [startDate, setStartDate] = useState(todayISO);
+  const [targetDate, setTargetDate] = useState("");
+  const [halfwayNote, setHalfwayNote] = useState("");
+  const [monthlyCommit, setMonthlyCommit] = useState("");
+  const [weeklyCommit, setWeeklyCommit] = useState("");
+  const [dailyCommit, setDailyCommit] = useState("");
 
   // ux / system
   const [err, setErr] = useState<string | null>(null);
@@ -172,13 +73,15 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
 
   const catColor = colorOf(category);
 
-  // Focus handling nicety for mobile
+  // Focus handling
   const titleRef = useRef<HTMLInputElement>(null);
   const lastFocusedEl = useRef<HTMLInputElement | null>(null);
-  const pointerWindow = useRef<number | null>(null);
+  const pointerWindow = useRef<number | null>(null); // allow focus change briefly after pointer
 
+  // Autofocus on mount (no scroll)
   useEffect(() => { titleRef.current?.focus({ preventScroll: true }); }, []);
 
+  // ===== Event quarantine + focus lock (mobile safe) =====
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -190,6 +93,7 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
         pointerWindow.current = window.setTimeout(() => { pointerWindow.current = null; }, 250);
       }
     };
+
     const onFocusIn = (ev: FocusEvent) => {
       const t = ev.target as HTMLElement | null;
       if (!t) return;
@@ -197,6 +101,7 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
         lastFocusedEl.current = t as HTMLInputElement;
       }
     };
+
     const onFocusOut = (ev: FocusEvent) => {
       const next = ev.relatedTarget as Node | null;
       const pointerActive = pointerWindow.current !== null;
@@ -210,6 +115,7 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
         }, 0);
       }
     };
+
     root.addEventListener("focusin", onFocusIn, true);
     root.addEventListener("focusout", onFocusOut, true);
     window.addEventListener("touchstart", onPointerStart, { capture: true, passive: true });
@@ -238,11 +144,12 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
     };
   }, []);
 
-  // midpoint
+  // midpoint date
   const computedHalfDate = useMemo(() => {
     if (!targetDate) return "";
     const a = fromISO(startDate), b = fromISO(targetDate);
     if (b < a) return "";
+    // exact time midpoint, but clamp to date
     return toISO(new Date((a.getTime() + b.getTime()) / 2));
   }, [startDate, targetDate]);
 
@@ -271,7 +178,6 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
     if (prev) setStep(prev);
   }
 
-  /* ---------- creation & seeding (FIRST HALF) ---------- */
   async function create() {
     setErr(null);
     if (!title.trim()) { setErr("Please enter a goal title."); return; }
@@ -283,93 +189,95 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
       const userId = userData.user?.id;
       if (!userId) throw new Error("Not signed in.");
 
-      let goalId: number;
-      let goalStart = startDate;
-      let goalTarget = targetDate;
+      // 1) create goal
+      const { data: goal, error: gerr } = await supabase.from("goals")
+        .insert({
+          user_id: userId,
+          title: title.trim(),
+          goal_type: "big",
+          category,
+          category_color: catColor,
+          start_date: startDate,
+          target_date: targetDate,
+          halfway_note: halfwayNote || null,
+          halfway_date: computedHalfDate || null,
+          status: "active",
+        })
+        .select()
+        .single();
+      if (gerr) throw gerr;
 
-      if (!existingGoal) {
-        // 1) create goal
-        const { data: goal, error: gerr } = await supabase.from("goals")
-          .insert({
-            user_id: userId,
-            title: title.trim(),
-            goal_type: "big",
-            category,
-            category_color: catColor,
-            start_date: startDate,
-            target_date: targetDate,
-            halfway_note: halfwayNote || null,
-            halfway_date: computedHalfDate || null,
-            status: "active",
-          })
-          .select()
-          .single();
-        if (gerr) throw gerr;
-        goalId = (goal as any).id as number;
-      } else {
-        // 1b) update existing goal (re-plan)
-        const { data: goal, error: gerr } = await supabase.from("goals")
-          .update({
-            title: title.trim(),
-            category,
-            category_color: catColor,
-            start_date: startDate,
-            target_date: targetDate,
-            halfway_note: halfwayNote || null,
-            halfway_date: computedHalfDate || null,
-            status: "active",
-          })
-          .eq("id", existingGoal.id)
-          .select()
-          .single();
-        if (gerr) throw gerr;
-        goalId = (goal as any).id as number;
-      }
+      // 2) seed tasks — ENTIRE span (so midpoint "Yes" means continue with current steps)
+      const start = fromISO(startDate);
+      const end   = fromISO(targetDate);
+      if (end < start) throw new Error("Target date is before start date.");
 
-      // 2) milestones & midpoint choice
-      const milestoneRows: any[] = [];
-      milestoneRows.push({
-        user_id: userId, goal_id: goalId,
-        title: `BIG GOAL — Target: ${title.trim()}`,
-        due_date: goalTarget, source: BIG_GOAL_SOURCES.target, priority: 2,
-        category, category_color: catColor
+      const tasks: any[] = [];
+      const cat = goal.category as AllowedCategory;
+      const col = goal.category_color as string;
+
+      // Milestones
+      tasks.push({
+        user_id: userId, goal_id: goal.id,
+        title: `BIG GOAL — Target: ${goal.title}`,
+        due_date: targetDate, source: "big_goal_target", priority: 2,
+        category: cat, category_color: col
       });
       if (computedHalfDate) {
-        milestoneRows.push({
-          user_id: userId, goal_id: goalId,
+        tasks.push({
+          user_id: userId, goal_id: goal.id,
           title: `BIG GOAL — Midpoint Review${halfwayNote.trim() ? `: ${halfwayNote.trim()}` : ""}`,
-          due_date: computedHalfDate, source: BIG_GOAL_SOURCES.midpointReview, priority: 2,
-          category, category_color: catColor
-        });
-        milestoneRows.push({
-          user_id: userId, goal_id: goalId,
-          title: `Midpoint check-in: Happy with the current steps?`,
-          due_date: computedHalfDate, source: BIG_GOAL_SOURCES.midpointChoice, priority: 2,
-          category, category_color: catColor
+          due_date: computedHalfDate, source: "big_goal_midpoint_review", priority: 2,
+          category: cat, category_color: col
         });
       }
-      if (milestoneRows.length) {
-        const { error: merr } = await supabase.from("tasks").insert(milestoneRows);
-        if (merr) throw merr;
+
+      // Monthly commits
+      if (monthlyCommit.trim()) {
+        let d = addMonthsClamped(start, 1, start.getDate());
+        while (d <= end) {
+          tasks.push({
+            user_id: userId, goal_id: goal.id,
+            title: `BIG GOAL — Monthly: ${monthlyCommit.trim()}`,
+            due_date: toISO(d), source: "big_goal_monthly", priority: 2,
+            category: cat, category_color: col
+          });
+          d = addMonthsClamped(d, 1, start.getDate());
+        }
+      }
+      // Weekly commits
+      if (weeklyCommit.trim()) {
+        let d = new Date(start); d.setDate(d.getDate() + 7);
+        while (d <= end) {
+          tasks.push({
+            user_id: userId, goal_id: goal.id,
+            title: `BIG GOAL — Weekly: ${weeklyCommit.trim()}`,
+            due_date: toISO(d), source: "big_goal_weekly", priority: 2,
+            category: cat, category_color: col
+          });
+          d.setDate(d.getDate() + 7);
+        }
+      }
+      // Daily commits
+      if (dailyCommit.trim()) {
+        let d = clampDay(new Date(Math.max(Date.now(), start.getTime())));
+        while (d <= end) {
+          tasks.push({
+            user_id: userId, goal_id: goal.id,
+            title: `BIG GOAL — Daily: ${dailyCommit.trim()}`,
+            due_date: toISO(d), source: "big_goal_daily", priority: 2,
+            category: cat, category_color: col
+          });
+          d.setDate(d.getDate() + 1);
+        }
       }
 
-      // 3) seed FIRST HALF recurring work
-      await seedFirstHalf({
-        userId,
-        goalId,
-        category,
-        categoryColor: catColor,
-        startDateISO: goalStart,
-        targetDateISO: goalTarget,
-        halfwayISO: computedHalfDate || goalTarget,
-        plan: {
-          monthlyCommit,
-          weeklyCommit,
-          dailyCommit,
-        },
-      });
+      for (let i = 0; i < tasks.length; i += 500) {
+        const slice = tasks.slice(i, i + 500);
+        const { error: terr } = await supabase.from("tasks").insert(slice);
+        if (terr) throw terr;
+      }
 
-      // Success toast
       setShowSuccess(true);
       window.setTimeout(() => {
         onCreated?.();
@@ -379,81 +287,6 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
       setErr(e.message || String(e));
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function seedFirstHalf(opts: {
-    userId: string;
-    goalId: number;
-    category: AllowedCategory;
-    categoryColor: string;
-    startDateISO: string;
-    targetDateISO: string;
-    halfwayISO: string;
-    plan: SecondHalfPlan & { monthlyCommit?: string; weeklyCommit?: string; dailyCommit?: string };
-  }) {
-    const {
-      userId, goalId, category, categoryColor,
-      startDateISO, targetDateISO, halfwayISO,
-      plan: { monthlyCommit = "", weeklyCommit = "", dailyCommit = "" }
-    } = opts;
-
-    const start = fromISO(startDateISO);
-    const half  = fromISO(halfwayISO);
-    const end   = fromISO(targetDateISO);
-
-    const inFirst = (d: Date) => d <= half && d >= start && d <= end;
-    const tasks: any[] = [];
-
-    // Monthly
-    if (monthlyCommit.trim()) {
-      let d = addMonthsClamped(start, 1, start.getDate());
-      while (d <= half) {
-        if (inFirst(d)) {
-          tasks.push({
-            user_id: userId, goal_id: goalId,
-            title: `BIG GOAL — Monthly: ${monthlyCommit.trim()}`,
-            due_date: toISO(d), source: BIG_GOAL_SOURCES.monthly, priority: 2,
-            category, category_color: categoryColor
-          });
-        }
-        d = addMonthsClamped(d, 1, start.getDate());
-      }
-    }
-    // Weekly
-    if (weeklyCommit.trim()) {
-      let d = new Date(start); d.setDate(d.getDate() + 7);
-      while (d <= half) {
-        if (inFirst(d)) {
-          tasks.push({
-            user_id: userId, goal_id: goalId,
-            title: `BIG GOAL — Weekly: ${weeklyCommit.trim()}`,
-            due_date: toISO(d), source: BIG_GOAL_SOURCES.weekly, priority: 2,
-            category, category_color: categoryColor
-          });
-        }
-        d.setDate(d.getDate() + 7);
-      }
-    }
-    // Daily
-    if (dailyCommit.trim()) {
-      const startDaily = clampDay(new Date(Math.max(Date.now(), start.getTime())));
-      let d = startDaily;
-      while (d <= half) {
-        tasks.push({
-          user_id: userId, goal_id: goalId,
-          title: `BIG GOAL — Daily: ${dailyCommit.trim()}`,
-          due_date: toISO(d), source: BIG_GOAL_SOURCES.daily, priority: 2,
-          category, category_color: categoryColor
-        });
-        d.setDate(d.getDate() + 1);
-      }
-    }
-
-    for (let i = 0; i < tasks.length; i += 500) {
-      const slice = tasks.slice(i, i + 500);
-      const { error } = await supabase.from("tasks").insert(slice);
-      if (error) throw error;
     }
   }
 
@@ -471,7 +304,7 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
           </button>
         ) : (
           <button type="button" className="btn-primary" onClick={create} disabled={busy} style={{ borderRadius: 8 }}>
-            {busy ? "Creating…" : (existingGoal ? "Re-plan Big Goal" : "Create Big Goal")}
+            {busy ? "Creating…" : "Create Big Goal"}
           </button>
         )}
       </div>
@@ -507,6 +340,7 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
     const [m, setM] = useState(base.getMonth());
     const [d, setD] = useState(base.getDate());
 
+    const daysInMonth = (yy:number, mm0:number) => lastDayOfMonth(yy, mm0);
     const dim = daysInMonth(y, m);
     const safeD = Math.min(d, dim);
 
@@ -640,6 +474,7 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
                   boxShadow: category === c.key ? "0 0 0 4px rgba(0,0,0,0.03)" : "none",
                   display: "flex", alignItems: "center", gap: 8, justifyContent: "center",
                   fontWeight: category === c.key ? 700 : 500,
+                  background: category === c.key ? `${c.color}55` : "#fff",
                 }}
               >
                 <span style={{ width: 12, height: 12, borderRadius: 999, background: c.color }} />
@@ -705,7 +540,7 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
           placeholder="e.g., Close 2 new customers"
           style={{ width: "100%" }}
         />
-        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>We’ll schedule these each month in the first half.</div>
+        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>We’ll schedule these monthly until your target date.</div>
         <Nav showSkip />
       </Card>
     );
@@ -725,7 +560,7 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
           placeholder="e.g., Book 5 prospect calls"
           style={{ width: "100%" }}
         />
-        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>We’ll schedule these weekly in the first half.</div>
+        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>We’ll schedule these weekly until your target date.</div>
         <Nav showSkip />
       </Card>
     );
@@ -745,7 +580,7 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
           placeholder="e.g., Reach out to 15 people"
           style={{ width: "100%" }}
         />
-        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>We’ll seed daily tasks up to the halfway date.</div>
+        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>We’ll seed daily tasks up to your target date.</div>
         <Nav showSkip />
       </Card>
     );
@@ -753,7 +588,7 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
 
   function StepReview() {
     return (
-      <Card title="Review & launch 🚀" subtitle="Here’s your plan for the first half. Ready to make it real?">
+      <Card title="Review & launch 🚀" subtitle="Here’s your plan. Ready to make it real?">
         <div style={{ display: "grid", gap: 10 }}>
           <Row label="Goal" value={title || "—"} />
           <Row label="Category" value={CATS.find(c => c.key === category)?.label || "—"} dotColor={catColor} />
@@ -769,7 +604,7 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
           <button type="button" onClick={goBack} disabled={busy}>Back</button>
           <div style={{ flex: 1 }} />
           <button type="button" className="btn-primary" onClick={create} disabled={busy} style={{ borderRadius: 8 }}>
-            {busy ? "Creating…" : (existingGoal ? "Re-plan Big Goal" : "Create Big Goal")}
+            {busy ? "Creating…" : "Create Big Goal"}
           </button>
         </div>
       </Card>
@@ -812,7 +647,7 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
         {step === "review"   && <StepReview />}
       </div>
 
-      {/* Success toast (BYB) */}
+      {/* Success toast */}
       {showSuccess && (
         <div
           role="status"
@@ -825,25 +660,82 @@ export default function BigGoalWizard({ onClose, onCreated, existingGoal }: BigG
           }}
         >
           <div style={{
-            width: 40, height: 40, borderRadius: 12, background: "#f0f9ff",
-            display: "grid", placeItems: "center", border: "1px solid #bae6fd", flex: "0 0 auto"
+            width: 40, height: 40, borderRadius: 12, background: "#f5f3ff",
+            display: "grid", placeItems: "center", border: "1px solid #e9d5ff", flex: "0 0 auto"
           }}>
-            <img src="/LogoButterfly.png" alt="" width={22} height={22} style={{ display: "block" }}
-                 onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+            <img
+              src={BYB_LOGO}
+              alt=""
+              width={22}
+              height={22}
+              style={{ display: "block", objectFit: "contain", borderRadius: 6, border: "1px solid #e9d5ff", background: "#fff" }}
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+            />
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 800, color: "#0ea5e9" }}>Big Goal set</div>
-            <div className="muted">First-half plan scheduled. Midpoint check-in is on your calendar.</div>
+            <div style={{ fontWeight: 800, color: "#6d28d9" }}>Goal set</div>
+            <div className="muted">This is a perfect start.</div>
           </div>
         </div>
       )}
 
       <style>{`
         @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
-        .btn-primary { background:#6d28d9; border:1px solid #5b21b6; color:#fff; padding:10px 14px; font-weight:700; border-radius:10px; }
+        .btn-primary { background:#6d28d9; border:1px solid #5b21b6; color:#fff; padding:10px 14px; font-weight:700; }
         .btn-soft { background:#fff; border:1px solid #e5e7eb; }
         .muted { color:#6b7280; }
       `}</style>
+    </div>
+  );
+}
+
+/* =========================================================
+   Midpoint confirmation modal (BYB style)
+   Exported because Today screen imports it.
+   ========================================================= */
+export function BigGoalMidpointModal({
+  open,
+  title,
+  onYes,
+  onNo,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  onYes: () => void;
+  onNo: () => void;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="overlay" role="dialog" aria-modal="true" aria-label="Midpoint review"
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "grid", placeItems: "center", padding: 16, zIndex: 3000 }}>
+      <div className="sheet" style={{ width: "100%", maxWidth: 520, background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", padding: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <img
+              src={BYB_LOGO}
+              alt=""
+              width={32}
+              height={32}
+              style={{ display: "block", objectFit: "contain", borderRadius: 8, border: "1px solid #bfe5f3", background: "#fff" }}
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+            />
+            <div style={{ fontWeight: 800, fontSize: 18 }}>Halfway check-in</div>
+          </div>
+          <button className="btn-ghost" onClick={onClose} aria-label="Close">Close</button>
+        </div>
+
+        <div className="card" style={{ background: "#D7F0FA", borderRadius: 12, border: "1px solid #bfe5f3", padding: 12 }}>
+          <div style={{ fontWeight: 800, marginBottom: 4 }}>{title || "Your Big Goal"}</div>
+          <div style={{ color: "#334155" }}>Happy with the current steps? Keep going, or replan from here.</div>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          <button onClick={onNo} className="btn-soft">Replan goal</button>
+          <button onClick={onYes} className="btn-primary" style={{ borderRadius: 10 }}>Continue</button>
+        </div>
+      </div>
     </div>
   );
 }
