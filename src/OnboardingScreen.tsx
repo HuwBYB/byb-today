@@ -141,7 +141,7 @@ export default function OnboardingScreen({ onDone }: Props) {
     setInputNick("");
   }
 
-  async function completeOnboarding(skip: boolean = false) {
+  async function completeOnboarding() {
     const cleanName = name.trim() || "Friend";
     const chosenPool = pool;
 
@@ -204,7 +204,7 @@ export default function OnboardingScreen({ onDone }: Props) {
           <div style={{ fontWeight: 800, fontSize: 18 }}>Welcome to BYB</div>
           <button
             className="btn-ghost"
-            onClick={() => completeOnboarding(true)}
+            onClick={() => completeOnboarding()}
             disabled={busy}
             title="Skip setup"
           >
@@ -241,7 +241,7 @@ export default function OnboardingScreen({ onDone }: Props) {
             {err && <div style={{ color: "red" }}>{err}</div>}
 
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-              <button onClick={() => completeOnboarding(true)} disabled={busy}>
+              <button onClick={() => completeOnboarding()} disabled={busy}>
                 Skip
               </button>
               <button className="btn-primary" onClick={next} disabled={busy}>
@@ -315,12 +315,12 @@ export default function OnboardingScreen({ onDone }: Props) {
                 Back
               </button>
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => completeOnboarding(true)} disabled={busy}>
+                <button onClick={() => completeOnboarding()} disabled={busy}>
                   Skip
                 </button>
                 <button
                   className="btn-primary"
-                  onClick={() => completeOnboarding(false)}
+                  onClick={() => completeOnboarding()}
                   disabled={busy}
                   style={{ borderRadius: 8 }}
                 >
