@@ -269,6 +269,50 @@ function useToast() {
   return { node, show };
 }
 
+// at top:
+import BigGoalWizard, { BigGoalMidpointModal } from "./BigGoalWizard";
+
+// in component state:
+const [midModalOpen, setMidModalOpen] = useState(false);
+const [midGoal, setMidGoal] = useState<{ id:number; title:string; category?: "personal"|"health"|"career"|"financial"|"other"; start_date?:string; target_date?:string }|null>(null);
+const [replanOpen, setReplanOpen] = useState(false);
+
+// after you load tasks (you already have `tasks`):
+useEffect(() => {
+  const today = new Date(); const iso = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
+  const mid = tasks.find(t => t.source === "big_goal_midpoint_review" && t.due_date === iso && t.status !== "done");
+  if (!mid) { setMidModalOpen(false); return; }
+  // fetch goal details for the modal + replan prefill
+  (async () => {
+    const { data } = await supabase.from("goals").select("id,title,category,start_date,target_date").eq("id", mid.goal_id).maybeSingle();
+    if (data) { setMidGoal(data as any); setMidModalOpen(true); }
+  })();
+}, [tasks]);
+
+// in JSX (near bottom):
+<BigGoalMidpointModal
+  open={midModalOpen}
+  title={midGoal?.title || "Your Big Goal"}
+  onYes={() => { setMidModalOpen(false); /* nothing else needed — second half already scheduled */ }}
+  onNo={() => { setMidModalOpen(false); setReplanOpen(true); }}
+  onClose={() => setMidModalOpen(false)}
+/>
+
+{replanOpen && midGoal && (
+  <div className="overlay" role="dialog" aria-modal="true" aria-label="Replan Big Goal">
+    <div className="sheet" style={{ maxWidth: 720 }}>
+      <BigGoalWizard
+        mode="replan"
+        existingGoal={{ id: midGoal.id, title: midGoal.title, category: (midGoal as any).category, start_date: (midGoal as any).start_date, target_date: (midGoal as any).target_date }}
+        onCreated={() => setReplanOpen(false)}
+        onClose={() => setReplanOpen(false)}
+      />
+    </div>
+  </div>
+)}
+
+
+
 /* ===== Nickname options (match onboarding) ===== */
 const DEFAULT_NICKNAMES = [
   "King","Champ","Legend","Boss","Chief","Star","Ace","Hero","Captain","Tiger",
@@ -1162,4 +1206,5 @@ export default function TodayScreen({ externalDateISO }: Props) {
     </div>
   );
 }
+
 
