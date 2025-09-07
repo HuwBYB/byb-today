@@ -1,16 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-/* ---------- Life areas (sections) ---------- */
-const SECTIONS = [
-  { key: "personal",  label: "Personal",  color: "#a855f7" },
-  { key: "health",    label: "Health",    color: "#22c55e" },
-  { key: "career",    label: "Business",  color: "#3b82f6" }, // stored as 'career'
-  { key: "financial", label: "Finance",   color: "#f59e0b" }, // stored as 'financial'
-  { key: "other",     label: "Other",     color: "#6b7280" },
+/* ---------- Categories (banked) ---------- */
+export type AllowedCategory = "business" | "financial" | "health" | "personal" | "relationships";
+
+const CATS: ReadonlyArray<{ key: AllowedCategory; label: string; color: string }> = [
+  { key: "business",      label: "Business",      color: "#C7D2FE" }, // pastel indigo
+  { key: "financial",     label: "Financial",     color: "#A7F3D0" }, // pastel mint
+  { key: "health",        label: "Health",        color: "#99F6E4" }, // pastel teal
+  { key: "personal",      label: "Personal",      color: "#E9D5FF" }, // pastel purple
+  { key: "relationships", label: "Relationships", color: "#FECDD3" }, // pastel rose
 ] as const;
-type SectionKey = typeof SECTIONS[number]["key"];
-const colorOf = (k: SectionKey) => SECTIONS.find(s => s.key === k)?.color || "#6b7280";
+
+const colorOf = (k: AllowedCategory) => CATS.find(s => s.key === k)?.color || "#E5E7EB";
+
+/** Map any legacy/free-text section to our 5 allowed categories */
+function normalizeCat(x: string | null | undefined): AllowedCategory {
+  const s = (x || "").toLowerCase().trim();
+  if (s === "career") return "business";
+  if (s === "finance") return "financial";
+  if (s === "relationship") return "relationships";
+  if (s === "other" || s === "" || !s) return "personal";
+  if ((["business","financial","health","personal","relationships"] as const).includes(s as any)) {
+    return s as AllowedCategory;
+  }
+  return "personal";
+}
 
 /* ---------- Storage ---------- */
 const VISION_BUCKET = "vision";
@@ -33,11 +48,11 @@ function writeLocalOrder(uid: string, map: Record<string, number>) {
 
 /* ---------- Types ---------- */
 type VBImage = {
-  path: string;        // storage path
-  url: string;         // public URL
-  caption: string;     // affirmation
-  section: SectionKey; // life area
-  order_index: number; // for sorting
+  path: string;             // storage path
+  url: string;              // public URL
+  caption: string;          // affirmation
+  section: AllowedCategory; // life area
+  order_index: number;      // for sorting
   created_at?: string;
 };
 
@@ -86,15 +101,13 @@ async function idbGetBlob(path: string): Promise<Blob | null> {
   return out;
 }
 
-
 /* ========================== MAIN SCREEN ========================== */
-
 export default function VisionBoardScreen() {
   const [userId, setUserId] = useState<string | null>(null);
 
   const [images, setImages] = useState<VBImage[]>([]);
-  const [activeSection, setActiveSection] = useState<SectionKey | "all">("all");
-  const [defaultSection, setDefaultSection] = useState<SectionKey>("personal");
+  const [activeSection, setActiveSection] = useState<AllowedCategory | "all">("all");
+  const [defaultSection, setDefaultSection] = useState<AllowedCategory>("personal");
 
   const [selectedIdx, setSelectedIdx] = useState<number>(0);
   const [playing, setPlaying] = useState(false);
@@ -106,7 +119,7 @@ export default function VisionBoardScreen() {
   const fileRef = useRef<HTMLInputElement>(null);
   const dragFrom = useRef<number | null>(null);
 
-  // ⬆️ Increased from 6 → 10 (kept)
+  // ⬆️ supports up to 10
   const MAX_IMAGES = 10;
 
   /* ----- inline CSS (mobile-first) ----- */
@@ -123,7 +136,7 @@ export default function VisionBoardScreen() {
       .vb-viewer {
         position:relative;
         width:100%;
-        height: min(70vw, 520px);  /* tall on phones, capped on large screens */
+        height: min(70vw, 520px);
         min-height: 280px;
         border:1px solid var(--border);
         border-radius:12px;
@@ -166,7 +179,7 @@ export default function VisionBoardScreen() {
       const ping = await supabase.storage.from(VISION_BUCKET).list(undefined, { limit: 1 });
       if (ping.error) throw ping.error;
 
-      // choose folder: prefer userId/ if exists else root
+      // prefer userId/ folder if present
       let underUser = true;
       const testUser = await supabase.storage.from(VISION_BUCKET).list(userId, { limit: 1 });
       if (testUser.error || (testUser.data || []).length === 0) {
@@ -185,29 +198,31 @@ export default function VisionBoardScreen() {
       const baseRows: VBImage[] = files.map((f: any, i: number) => {
         const path = underUser ? `${userId}/${f.name}` : f.name;
         const { data: pub } = supabase.storage.from(VISION_BUCKET).getPublicUrl(path);
-        return { path, url: pub.publicUrl, caption: "", section: "other", order_index: i, created_at: (f as any)?.created_at };
+        return { path, url: pub.publicUrl, caption: "", section: "personal", order_index: i, created_at: (f as any)?.created_at };
       });
 
+      // hydrate from DB meta
       try {
         const { data: rows, error } = await supabase
           .from("vision_images")
           .select("path, caption, section, order_index")
           .eq("user_id", userId);
         if (!error && rows && Array.isArray(rows)) {
-          const map = new Map<string, { caption?: string; section?: SectionKey; order_index?: number }>(
-            rows.map((r: any) => [r.path, { caption: r.caption || "", section: (r.section as SectionKey) || "other", order_index: Number(r.order_index ?? 0) }])
+          const map = new Map<string, { caption?: string; section?: AllowedCategory; order_index?: number }>(
+            rows.map((r: any) => [r.path, { caption: r.caption || "", section: normalizeCat(r.section), order_index: Number(r.order_index ?? 0) }])
           );
           baseRows.forEach(r => {
             const m = map.get(r.path);
             if (m) {
               r.caption = m.caption ?? "";
-              r.section = (m.section as SectionKey) ?? "other";
+              r.section = normalizeCat(m.section as any);
               r.order_index = Number.isFinite(m.order_index) ? (m.order_index as number) : r.order_index;
             }
           });
         }
       } catch {}
 
+      // local fallbacks
       const lc = readLocalCaps(userId);
       const lo = readLocalOrder(userId);
       baseRows.forEach(r => {
@@ -220,7 +235,7 @@ export default function VisionBoardScreen() {
       setImages(next);
       setSelectedIdx(0);
 
-      // If offline, try to hydrate offline blob URLs
+      // Offline hydration
       if (!navigator.onLine) {
         await hydrateOfflineURLs(next);
       }
@@ -251,7 +266,7 @@ export default function VisionBoardScreen() {
     objectURLsRef.current = [];
   }
   useEffect(() => {
-    const onOnline = () => { /* when back online, prefer network URLs */ setOfflineURLs({}); };
+    const onOnline = () => { setOfflineURLs({}); };
     const onOffline = () => { hydrateOfflineURLs(images); };
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
@@ -281,7 +296,13 @@ export default function VisionBoardScreen() {
   async function upsertMetaMany(rows: Array<Pick<VBImage, "path" | "caption" | "section" | "order_index">>) {
     if (!userId) return;
     try {
-      const payload = rows.map(r => ({ user_id: userId, path: r.path, caption: r.caption, section: r.section, order_index: r.order_index }));
+      const payload = rows.map(r => ({
+        user_id: userId,
+        path: r.path,
+        caption: r.caption,
+        section: normalizeCat(r.section as any),
+        order_index: r.order_index
+      }));
       const { error } = await supabase.from("vision_images").upsert(payload, { onConflict: "user_id,path" } as any);
       if (error) throw error;
     } catch {
@@ -304,7 +325,7 @@ export default function VisionBoardScreen() {
     if (row) await upsertMetaMany([{ path: row.path, caption, section: row.section, order_index: row.order_index }]);
   }
 
-  async function changeSection(idxInAll: number, section: SectionKey) {
+  async function changeSection(idxInAll: number, section: AllowedCategory) {
     setImages(prev => {
       const next = prev.slice();
       next[idxInAll] = { ...next[idxInAll], section };
@@ -325,7 +346,7 @@ export default function VisionBoardScreen() {
 
       for (const file of toUpload) {
         const safeName = `${Date.now()}-${file.name.replace(/\s+/g, "_")}`;
-        const path = `${userId}/${safeName}`; // always under user/
+        const path = `${userId}/${safeName}`;
         const up = await supabase.storage.from(VISION_BUCKET).upload(path, file, { upsert: false });
         if (up.error) throw up.error;
 
@@ -334,7 +355,7 @@ export default function VisionBoardScreen() {
         const row: VBImage = { path, url: pub.publicUrl, caption: "", section: defaultSection, order_index };
         added.push(row);
 
-        // Also drop into IDB so it’s immediately available offline
+        // cache for offline
         await idbPutBlob(path, file);
       }
 
@@ -551,7 +572,6 @@ export default function VisionBoardScreen() {
       const map: Record<string, string> = {};
       revokeObjectURLs();
       for (const it of images) {
-        // Fetch as blob (prefer network if online; if offline and already cached, skip)
         if (!navigator.onLine) {
           const cached = await idbGetBlob(it.path);
           if (cached) {
@@ -616,15 +636,15 @@ export default function VisionBoardScreen() {
           <div style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
             <span className="muted">View</span>
             <select value={activeSection} onChange={e => setActiveSection(e.target.value as any)}>
-              <option value="all">All sections</option>
-              {SECTIONS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+              <option value="all">All areas</option>
+              {CATS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
           </div>
 
           <div style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
             <span className="muted">New uploads →</span>
-            <select value={defaultSection} onChange={e => setDefaultSection(e.target.value as SectionKey)}>
-              {SECTIONS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+            <select value={defaultSection} onChange={e => setDefaultSection(e.target.value as AllowedCategory)}>
+              {CATS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
             <span className="vb-dot" title="Color" style={{ background: colorOf(defaultSection) }} />
           </div>
@@ -717,12 +737,12 @@ export default function VisionBoardScreen() {
 
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-                <span className="muted">Section</span>
+                <span className="muted">Area</span>
                 <select
                   value={current.section}
-                  onChange={e => changeSection(selectedIdx, e.target.value as SectionKey)}
+                  onChange={e => changeSection(selectedIdx, e.target.value as AllowedCategory)}
                 >
-                  {SECTIONS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                  {CATS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
                 </select>
               </label>
               <button onClick={() => saveToDevice(current)} className="btn-soft">
@@ -739,7 +759,7 @@ export default function VisionBoardScreen() {
       {/* Thumbnails (filtered), drag + drop reorder */}
       <div className="card">
         {filtered.length === 0 ? (
-          <div className="muted">No images{activeSection !== "all" ? ` in ${SECTIONS.find(s=>s.key===activeSection)?.label}` : ""} yet.</div>
+          <div className="muted">No images{activeSection !== "all" ? ` in ${CATS.find(s=>s.key===activeSection)?.label}` : ""} yet.</div>
         ) : (
           <div className="vb-grid">
             {filtered.map((img, i) => {
