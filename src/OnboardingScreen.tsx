@@ -9,7 +9,6 @@ type Props = { onDone?: () => void };
 const LS_DONE = "byb:onboarding_done";
 const LS_NAME = "byb:display_name";
 const LS_POOL = "byb:display_pool";
-const LS_BIG_GOAL = "byb:big_goal";
 
 /** Default nickname suggestions (includes feminine-forward options) */
 const DEFAULT_NICKNAMES = [
@@ -31,23 +30,20 @@ function pickDefaultName(email?: string | null, fullName?: string | null) {
   return handle.charAt(0).toUpperCase() + handle.slice(1);
 }
 
-function saveLocal(name: string, pool: string[], bigGoal?: string) {
+function saveLocal(name: string, pool: string[]) {
   try {
     localStorage.setItem(LS_NAME, name);
     localStorage.setItem(LS_POOL, JSON.stringify(pool));
-    if (bigGoal && bigGoal.trim()) {
-      localStorage.setItem(LS_BIG_GOAL, bigGoal.trim());
-    }
     localStorage.setItem(LS_DONE, "1");
   } catch {
     // ignore storage errors
   }
 }
 
-// \u26a0\ufe0f Schema-flexible upsert that works with jsonb, text, or missing display_pool column
+// ⚠️ Schema-flexible upsert that works with jsonb, text, or missing display_pool column
 async function saveProfileToDB(userId: string, name: string, pool: string[]) {
   // Some projects have display_pool jsonb, some text, some none.
-  // Try jsonb \u2192 stringified \u2192 omit field.
+  // Try jsonb → stringified → omit field.
   const base: any = { display_name: name, onboarding_done: true };
 
   // Attempt 1: json/array payload (jsonb column)
@@ -70,7 +66,7 @@ async function saveProfileToDB(userId: string, name: string, pool: string[]) {
       if (error) throw error;
       return;
     } catch {
-      // Attempt 3: no display_pool column \u2014 save name only
+      // Attempt 3: no display_pool column — save name only
       await supabase
         .from("profiles")
         .upsert({ id: userId, ...base })
@@ -80,37 +76,18 @@ async function saveProfileToDB(userId: string, name: string, pool: string[]) {
   }
 }
 
-async function tryInsertBigGoal(userId: string, bigGoal: string) {
-  const clean = bigGoal.trim();
-  if (!clean) return;
-
-  // We\u2019ll try a very lightweight insert. If the table/columns differ or
-  // don\u2019t exist yet, we silently fall back to local storage.
-  try {
-    await supabase.from("goals").insert({
-      user_id: userId,
-      title: clean,
-      status: "active",
-      // Optional columns may exist in your schema; include only safe ones.
-    } as any);
-  } catch {
-    // swallow; local storage already handled by saveLocal
-  }
-}
-
 export default function OnboardingScreen({ onDone }: Props) {
   const [userId, setUserId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Multi-step state: 0=name, 1=nicknames, 2=big goal
-  const [step, setStep] = useState<0 | 1 | 2>(0);
+  // Multi-step state: 0 = name, 1 = nicknames
+  const [step, setStep] = useState<0 | 1>(0);
 
   // Form state
   const [name, setName] = useState<string>("");
   const [pool, setPool] = useState<string[]>([]);
   const [inputNick, setInputNick] = useState("");
-  const [bigGoal, setBigGoal] = useState("");
 
   // Prefill sensible defaults
   useEffect(() => {
@@ -153,20 +130,13 @@ export default function OnboardingScreen({ onDone }: Props) {
   function toggleNick(n: string) {
     const v = n.trim();
     if (!v) return;
-    if (pool.includes(v)) {
-      setPool(pool.filter((x) => x !== v));
-    } else {
-      setPool([...pool, v]);
-    }
+    setPool(prev => (prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v]));
   }
 
   function addFromInput() {
-    const parts = inputNick
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const parts = inputNick.split(",").map((s) => s.trim()).filter(Boolean);
     if (parts.length === 0) return;
-    const merged = Array.from(new Set([...pool, ...parts]));
+    const merged = Array.from(new Set([...(pool || []), ...parts]));
     setPool(merged);
     setInputNick("");
   }
@@ -174,7 +144,6 @@ export default function OnboardingScreen({ onDone }: Props) {
   async function completeOnboarding(skip: boolean = false) {
     const cleanName = name.trim() || "Friend";
     const chosenPool = pool;
-    const goal = skip ? "" : bigGoal.trim();
 
     setBusy(true);
     setErr(null);
@@ -183,16 +152,13 @@ export default function OnboardingScreen({ onDone }: Props) {
       if (userId) {
         try {
           await saveProfileToDB(userId, cleanName, chosenPool);
-          if (goal) {
-            await tryInsertBigGoal(userId, goal);
-          }
         } catch {
           // ignore DB failures; we still mirror locally below
         }
       }
 
       // Always mirror locally for instant UX (even if DB succeeded)
-      saveLocal(cleanName, chosenPool, goal);
+      saveLocal(cleanName, chosenPool);
 
       // Also set the local flag so App.tsx can gate properly
       try { localStorage.setItem(LS_DONE, "1"); } catch {}
@@ -214,27 +180,17 @@ export default function OnboardingScreen({ onDone }: Props) {
       }
       setErr(null);
       setStep(1);
-    } else if (step === 1) {
-      setStep(2);
     }
   }
   function back() {
     setErr(null);
-    setStep((s) => (s === 0 ? 0 : ((s - 1) as 0 | 1 | 2)));
+    setStep(0);
   }
 
   /* ---------- UI ---------- */
   return (
     <div style={{ maxWidth: 620, margin: "0 auto", padding: 16 }}>
-      <div
-        className="card"
-        style={{
-          display: "grid",
-          gap: 12,
-          padding: 16,
-          borderRadius: 16,
-        }}
-      >
+      <div className="card" style={{ display: "grid", gap: 12, padding: 16, borderRadius: 16 }}>
         {/* Header row with step + skip */}
         <div
           style={{
@@ -259,13 +215,7 @@ export default function OnboardingScreen({ onDone }: Props) {
         {/* Step pills */}
         <div style={{ display: "flex", gap: 6 }}>
           <StepPill num={1} label="Name" active={step === 0} done={step > 0} />
-          <StepPill
-            num={2}
-            label="Nicknames"
-            active={step === 1}
-            done={step > 1}
-          />
-          <StepPill num={3} label="Big Goal" active={step === 2} done={false} />
+          <StepPill num={2} label="Nicknames" active={step === 1} done={false} />
         </div>
 
         {/* Step content */}
@@ -290,14 +240,7 @@ export default function OnboardingScreen({ onDone }: Props) {
 
             {err && <div style={{ color: "red" }}>{err}</div>}
 
-            <div
-              style={{
-                display: "flex",
-                gap: 8,
-                justifyContent: "flex-end",
-                flexWrap: "wrap",
-              }}
-            >
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
               <button onClick={() => completeOnboarding(true)} disabled={busy}>
                 Skip
               </button>
@@ -311,17 +254,10 @@ export default function OnboardingScreen({ onDone }: Props) {
         {step === 1 && (
           <div style={{ display: "grid", gap: 12 }}>
             <p className="muted" style={{ margin: 0 }}>
-              Optional: pick a few nicknames you like. We’ll rotate greetings
-              using your name and these.
+              Optional: pick a few nicknames you like. We’ll rotate greetings using your name and these.
             </p>
 
-            <div
-              style={{
-                display: "flex",
-                gap: 6,
-                flexWrap: "wrap",
-              }}
-            >
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {DEFAULT_NICKNAMES.map((n) => {
                 const on = pool.includes(n);
                 return (
@@ -342,7 +278,7 @@ export default function OnboardingScreen({ onDone }: Props) {
               })}
             </div>
 
-            <div className="row">
+            <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <input
                 value={inputNick}
                 onChange={(e) => setInputNick(e.target.value)}
@@ -358,61 +294,11 @@ export default function OnboardingScreen({ onDone }: Props) {
             </div>
 
             {pool.length > 0 && (
-              <div className="muted">
-                Selected: {pool.join(" · ")}
-              </div>
+              <div className="muted">Selected: {pool.join(" · ")}</div>
             )}
 
             <PreviewCard title="Example greeting">
               <div>{exampleGreeting}</div>
-            </PreviewCard>
-
-            {err && <div style={{ color: "red" }}>{err}</div>}
-
-            <div
-              style={{
-                display: "flex",
-                gap: 8,
-                justifyContent: "space-between",
-                flexWrap: "wrap",
-              }}
-            >
-              <button onClick={back} disabled={busy}>
-                Back
-              </button>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => completeOnboarding(true)} disabled={busy}>
-                  Skip
-                </button>
-                <button className="btn-primary" onClick={next} disabled={busy}>
-                  Next
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {step === 2 && (
-          <div style={{ display: "grid", gap: 12 }}>
-            <p className="muted" style={{ margin: 0 }}>
-              What’s your <b>big goal</b> right now? (You can change it later.)
-            </p>
-            <label style={{ display: "grid", gap: 6 }}>
-              <div className="section-title">Big Goal (optional)</div>
-              <input
-                type="text"
-                value={bigGoal}
-                onChange={(e) => setBigGoal(e.target.value)}
-                placeholder="e.g. Run a 5k, Launch my side hustle, Lose 5kg"
-              />
-            </label>
-
-            <PreviewCard title="You’ll see something like this on your Today screen">
-              <div>
-                {bigGoal.trim()
-                  ? `Your Big Goal: ${bigGoal.trim()}`
-                  : "You can set a Big Goal any time."}
-              </div>
             </PreviewCard>
 
             {err && <div style={{ color: "red" }}>{err}</div>}
