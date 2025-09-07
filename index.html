@@ -2,12 +2,41 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + React + TS</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+
+    <!-- Basic PWA meta -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#111827" />
+
+    <!-- App name (used by iOS standalone mode) -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="BYB" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <title>BYB</title>
+
+    <!-- Favicons (tab icon) -->
+    <link rel="icon" type="image/png" href="/icons/app-icon-192.png" />
+    <link rel="icon" sizes="192x192" href="/icons/app-icon-192.png" />
+    <link rel="icon" sizes="512x512" href="/icons/app-icon-512.png" />
+
+    <!-- iOS home-screen icon -->
+    <link rel="apple-touch-icon" href="/icons/app-icon-180.png" />
+    <!-- Optional extra iOS sizes (you already have these files) -->
+    <link rel="apple-touch-icon" sizes="120x120" href="/icons/app-icon-120.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/app-icon-152.png" />
+    <link rel="apple-touch-icon" sizes="167x167" href="/icons/app-icon-167.png" />
+
+    <!-- The PWA plugin will also inject manifest automatically, but adding this is fine -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
     <div id="root"></div>
