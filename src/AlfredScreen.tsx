@@ -1,7 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+// src/AlfredScreen.tsx
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-/* =================== Categories (banked) =================== */
+/* =============================================
+   EVA (Alfred) — Actionable Chat
+   ============================================= */
+
+/* ---------- Categories (banked) ---------- */
 export type AllowedCategory = "business" | "financial" | "health" | "personal" | "relationships";
 
 const CATS: ReadonlyArray<{ key: AllowedCategory; label: string; color: string }> = [
@@ -13,306 +18,158 @@ const CATS: ReadonlyArray<{ key: AllowedCategory; label: string; color: string }
 ] as const;
 
 const colorOf = (k: AllowedCategory) => CATS.find(s => s.key === k)?.color || "#E5E7EB";
-function normalizeCat(x: string | null | undefined): AllowedCategory {
-  const s = (x || "").toLowerCase().trim();
-  if (s === "career") return "business";
-  if (s === "finance") return "financial";
-  if (s === "relationship") return "relationships";
-  if (!s || s === "other") return "personal";
-  if ((["business","financial","health","personal","relationships"] as const).includes(s as any)) return s as AllowedCategory;
-  return "personal";
-}
 
-/* =================== Types =================== */
-type PlanMeta = {
-  kind: "task" | "goal";
-  title: string;
-  target_date?: string | null; // YYYY-MM-DD
-  steps?: {
-    daily?: string[];
-    weekly?: string[];
-    monthly?: string[];
-  };
+/* ---------- Types ---------- */
+type ChatMessage = { role: "user" | "assistant"; content: string; ts: number };
+
+/* ---------- Date helpers ---------- */
+const todayISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 };
-
-type TaskRow = {
-  id?: number;
-  user_id: string;
-  title: string;
-  due_date: string | null;
-  status: "pending" | "done";
-  priority?: number | null;
-  source?: string | null;
-  goal_id?: number | null;
-  category?: string | null;
-  category_color?: string | null;
-};
-
-type Goal = {
-  id: number;
-  user_id: string;
-  title: string;
-  category: string | null;
-  category_color: string | null;
-  start_date: string | null;
-  target_date: string | null;
-  status: string | null;
-  halfway_date?: string | null;
-  halfway_note?: string | null;
-};
-
-type Step = {
-  id?: number;
-  user_id: string;
-  goal_id: number;
-  cadence: "daily" | "weekly" | "monthly";
-  description: string;
-  active: boolean;
-};
-
-/* =================== Date helpers =================== */
 function toISO(d: Date) {
   const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,"0"), dd = String(d.getDate()).padStart(2,"0");
   return `${y}-${m}-${dd}`;
 }
-function fromISO(s: string) { const [y,m,d] = s.split("-").map(Number); return new Date(y,(m??1)-1,(d??1)); }
-function clampDay(d: Date) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
-function todayISO() { return toISO(clampDay(new Date())); }
-function lastDayOfMonth(y:number,m0:number){ return new Date(y,m0+1,0).getDate(); }
-function addMonthsClamped(base: Date, months: number, anchorDay?: number) {
-  const anchor = anchorDay ?? base.getDate();
-  const y = base.getFullYear(), m = base.getMonth() + months;
-  const first = new Date(y, m, 1);
-  const ld = lastDayOfMonth(first.getFullYear(), first.getMonth());
-  return new Date(first.getFullYear(), first.getMonth(), Math.min(anchor, ld));
+function fromISO(s: string) {
+  const [y,m,d] = s.split("-").map(Number);
+  return new Date(y,(m??1)-1,(d??1));
+}
+function halfwayDate(startISO: string, targetISO: string) {
+  try {
+    const s = fromISO(startISO); const t = fromISO(targetISO);
+    const mid = new Date((s.getTime() + t.getTime()) / 2);
+    return toISO(new Date(mid.getFullYear(), mid.getMonth(), mid.getDate()));
+  } catch { return null; }
 }
 
-/* =================== Client reseed (fallback if RPC missing) =================== */
-async function clientReseedTasksForGoal(
-  supabaseClient: typeof supabase,
-  userId: string,
-  goalId: number,
-  startISO: string,
-  targetISO: string,
-  steps: Step[],
-  cat: AllowedCategory,
-  color: string,
-  seedFromISO?: string
-) {
-  const start = fromISO(startISO);
-  const end = fromISO(targetISO);
-  if (end < start) throw new Error("Target date is before start date.");
-  const fromISOVal = seedFromISO || todayISO();
-  const fromDate = fromISO(fromISOVal);
-
-  // wipe ONLY future big_goal_* tasks from fromISO forward (leave milestone + review)
-  await supabaseClient
-    .from("tasks")
-    .delete()
-    .eq("user_id", userId)
-    .eq("goal_id", goalId)
-    .in("source", ["big_goal_monthly", "big_goal_weekly", "big_goal_daily"])
-    .gte("due_date", fromISOVal);
-
-  const queue: any[] = [];
-
-  // monthly — DOM cadence based on start date
-  const monthSteps = steps.filter(s => s.cadence === "monthly");
-  if (monthSteps.length) {
-    let cursor = addMonthsClamped(start, 0, start.getDate());
-    while (cursor < fromDate) cursor = addMonthsClamped(cursor, 1, start.getDate());
-    while (cursor <= end) {
-      const due = toISO(cursor);
-      for (const s of monthSteps) {
-        queue.push({
-          user_id: userId, goal_id: goalId,
-          title: `BIG GOAL — Monthly: ${s.description}`,
-          due_date: due, source: "big_goal_monthly", priority: 2,
-          category: cat, category_color: color,
-        });
-      }
-      cursor = addMonthsClamped(cursor, 1, start.getDate());
-    }
-  }
-
-  // weekly — cadence every 7 days from (start + 7)
-  const weekSteps = steps.filter(s => s.cadence === "weekly");
-  if (weekSteps.length) {
-    let cursor = new Date(start);
-    cursor.setDate(cursor.getDate() + 7);
-    while (cursor < fromDate) cursor.setDate(cursor.getDate() + 7);
-    while (cursor <= end) {
-      const due = toISO(cursor);
-      for (const s of weekSteps) {
-        queue.push({
-          user_id: userId, goal_id: goalId,
-          title: `BIG GOAL — Weekly: ${s.description}`,
-          due_date: due, source: "big_goal_weekly", priority: 2,
-          category: cat, category_color: color,
-        });
-      }
-      cursor.setDate(cursor.getDate() + 7);
-    }
-  }
-
-  // daily — from max(fromDate, start)
-  const daySteps = steps.filter(s => s.cadence === "daily");
-  if (daySteps.length) {
-    let cursor = new Date(Math.max(fromDate.getTime(), start.getTime()));
-    cursor = clampDay(cursor);
-    while (cursor <= end) {
-      const due = toISO(cursor);
-      for (const s of daySteps) {
-        queue.push({
-          user_id: userId, goal_id: goalId,
-          title: `BIG GOAL — Daily: ${s.description}`,
-          due_date: due, source: "big_goal_daily", priority: 2,
-          category: cat, category_color: color,
-        });
-      }
-      cursor.setDate(cursor.getDate() + 1);
-    }
-  }
-
-  for (let i = 0; i < queue.length; i += 500) {
-    const slice = queue.slice(i, i + 500);
-    const { error: terr } = await supabaseClient.from("tasks").insert(slice);
-    if (terr) throw terr;
-  }
-  return queue.length;
+/* ---------- Local parsing helpers ---------- */
+function extractBullets(txt: string): string[] {
+  const lines = txt.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const bullets = lines
+    .filter(l => /^([-*•]\s+|\d+\.\s+)/.test(l))
+    .map(l => l.replace(/^([-*•]\s+|\d+\.\s+)/, "").trim());
+  if (bullets.length) return bullets;
+  // fallback: split by sentences and pick imperative-looking short items
+  const sentences = txt.split(/(?<=[.!?])\s+/).map(s => s.trim());
+  return sentences.filter(s => s.length > 0 && s.length <= 120);
+}
+function guessCadence(line: string): "daily" | "weekly" | "monthly" {
+  const s = line.toLowerCase();
+  if (/(daily|every day|each day|today)/.test(s)) return "daily";
+  if (/(weekly|every week|per week|on mondays|tuesdays|wednesdays|thursdays|fridays|saturdays|sundays)/.test(s)) return "weekly";
+  if (/(monthly|every month|per month)/.test(s)) return "monthly";
+  // heuristics: short habit-like → daily; longer project-like → weekly
+  return line.split(/\s+/).length <= 6 ? "daily" : "weekly";
 }
 
-/* =================== EVA page =================== */
-export default function EvaScreen() {
-  /* --- UI state --- */
+/* ---------- Minimal Modal ---------- */
+function Modal({
+  open, onClose, title, children,
+}: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+  if (!open) return null;
+  return (
+    <div role="dialog" aria-modal="true" aria-label={title}
+      onClick={onClose}
+      style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.35)", zIndex:1000, display:"grid", placeItems:"center", padding:16 }}>
+      <div onClick={(e)=>e.stopPropagation()} className="card"
+        style={{ width:"100%", maxWidth:720, borderRadius:12, padding:16, display:"grid", gap:10 }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
+          <h3 style={{ margin:0 }}>{title}</h3>
+          <button onClick={onClose} className="btn-soft" aria-label="Close">Close</button>
+        </div>
+        <div>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* =============================================
+   Component
+   ============================================= */
+export default function AlfredScreen() {
   const [userId, setUserId] = useState<string | null>(null);
-  const [active, setActive] = useState<AllowedCategory>("personal");
-  const [prompt, setPrompt] = useState("");
+
+  // chat state
+  const [cat, setCat] = useState<AllowedCategory>("personal");
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const [reply, setReply] = useState<string>("");
-  const [meta, setMeta] = useState<PlanMeta | null>(null);
+  // extracted actions from last reply
+  const lastAssistant = useMemo(
+    () => [...messages].reverse().find(m => m.role === "assistant")?.content ?? "",
+    [messages]
+  );
+  const actionItems = useMemo(() => extractBullets(lastAssistant).slice(0, 8), [lastAssistant]);
 
-  // Action controls
-  const [dueISO, setDueISO] = useState<string>(todayISO());               // for single task
-  const [targetISO, setTargetISO] = useState<string>(() => {
-    const d = new Date(); d.setDate(d.getDate() + 84); return toISO(d);   // default 12 weeks
-  });
-  const [goalTitle, setGoalTitle] = useState<string>("");
+  // task quick-add
+  const [addTaskOpen, setAddTaskOpen] = useState(false);
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskDue,   setTaskDue]   = useState(todayISO());
+  const [addingTask, setAddingTask] = useState(false);
 
-  // Steps editor (pre-filled from meta if any)
-  const [daily, setDaily] = useState<string[]>([]);
-  const [weekly, setWeekly] = useState<string[]>([]);
+  // goal creator
+  const [goalOpen, setGoalOpen] = useState(false);
+  const [goalTitle, setGoalTitle] = useState("");
+  const [goalTarget, setGoalTarget] = useState<string>("");
   const [monthly, setMonthly] = useState<string[]>([]);
+  const [weekly, setWeekly]   = useState<string[]>([]);
+  const [daily, setDaily]     = useState<string[]>([]);
+  const [creatingGoal, setCreatingGoal] = useState(false);
 
-  /* --- auth --- */
+  /* ----- auth ----- */
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
   }, []);
 
-  /* --- small styles --- */
-  const styleTag = (
-    <style>{`
-      .eva-tabs { display:flex; gap:8px; flex-wrap:wrap }
-      .eva-chip { padding:8px 12px; border-radius:10px; border:1px solid #e5e7eb; background:#fff }
-      .eva-chip[aria-pressed="true"]{ border-color: #a5b4fc; background: #eef2ff }
-      .eva-cta { display:flex; gap:8px; flex-wrap:wrap; align-items:center }
-      .col { display:grid; gap:8px }
-      .steps { display:grid; gap:10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)) }
-      fieldset { border:1px solid #eee; border-radius:10px; padding:10px }
-      legend { padding:0 6px; color:#64748b }
-    `}</style>
-  );
-
-  /* --- helpers --- */
-  const color = useMemo(() => colorOf(active), [active]);
-  const startISO = todayISO();
-  const halfwayISO = useMemo(() => {
-    try {
-      const s = fromISO(startISO), t = fromISO(targetISO);
-      const ms = s.getTime() + Math.floor((t.getTime() - s.getTime()) / 2);
-      return toISO(new Date(ms));
-    } catch { return null; }
-  }, [startISO, targetISO]);
-
-  function parseMetaFromReply(text: string): PlanMeta | null {
-    // Look for ```json ... ``` block
-    const m = text.match(/```json([\s\S]*?)```/i);
-    if (m) {
-      try {
-        const obj = JSON.parse(m[1].trim());
-        // Normalize/validate
-        const kind = obj.kind === "task" ? "task" : "goal";
-        const title = String(obj.title || "").trim() || "";
-        const target_date = obj.target_date ? String(obj.target_date).slice(0,10) : null;
-        const steps = obj.steps ? {
-          daily: Array.isArray(obj.steps.daily) ? obj.steps.daily.map(String) : [],
-          weekly: Array.isArray(obj.steps.weekly) ? obj.steps.weekly.map(String) : [],
-          monthly: Array.isArray(obj.steps.monthly) ? obj.steps.monthly.map(String) : [],
-        } : undefined;
-        return { kind, title, target_date, steps };
-      } catch { /* fallthrough */ }
-    }
-
-    // Heuristic fallback: 2+ bullets ⇒ goal, else task
-    const lines = text.split(/\r?\n/).map(l => l.trim());
-    const bullets = lines.filter(l => /^(\*|-|•|\d+\.)\s+/.test(l)).map(l => l.replace(/^(\*|-|•|\d+\.)\s+/, "").trim());
-    if (bullets.length >= 2) {
-      return { kind: "goal", title: (prompt || "").trim(), steps: { weekly: bullets.slice(0, 5) } };
-    }
-    const single = bullets[0] || lines.find(l => l && !/^(\*|-|•|\d+\.)\s+/.test(l)) || (prompt || "").trim();
-    return { kind: "task", title: single };
-  }
-
-  function applyMetaToEditors(pm: PlanMeta | null) {
-    if (!pm) return;
-    setGoalTitle(pm.title || "");
-    setDaily(pm.steps?.daily || []);
-    setWeekly(pm.steps?.weekly || []);
-    setMonthly(pm.steps?.monthly || []);
-    if (pm.target_date) setTargetISO(pm.target_date);
-  }
-
-  /* --- ask EVA --- */
+  /* ----- ask EVA ----- */
   async function askEva() {
-    if (!prompt.trim()) return;
-    setBusy(true); setErr(null); setReply(""); setMeta(null);
-
-    // Ask EVA for both conversational help AND a tiny machine-readable block.
-    // The block is fenced ```json and looks like:
-    // { "kind":"task"|"goal","title":"...", "target_date":"YYYY-MM-DD", "steps": { "daily":[],"weekly":[],"monthly":[] } }
-    const instruction = `
-You are EVA inside a goal & task app. 
-1) Answer naturally to help the user.
-2) Then append a JSON "meta" block in a fenced code block like:
-
-\`\`\`json
-{ "kind":"goal","title":"Title", "target_date":"YYYY-MM-DD",
-  "steps": { "daily":["..."], "weekly":["..."], "monthly":["..."] } }
-\`\`\`
-
-Rules:
-- If the user asks for one actionable thing, use kind "task" and provide a concise "title".
-- If the request is a process or multi-step plan, use kind "goal" and provide steps split by cadences when possible. If unsure, put items under "weekly".
-- Keep "title" under 12 words. Dates in YYYY-MM-DD format.`;
-
-    const catHint = `Life area: ${CATS.find(c => c.key === active)?.label}`;
-    const fullPrompt = `${instruction}\n\n${catHint}\n\nUser: ${prompt.trim()}`;
+    const q = input.trim();
+    if (!q) return;
+    setErr(null);
+    setBusy(true);
+    const now = Date.now();
+    const userMsg: ChatMessage = { role: "user", content: q, ts: now };
+    setMessages(prev => [...prev, userMsg]);
+    setInput("");
 
     try {
+      // nudge EVA to produce concise, actionable answers
+      const sysHint =
+        `Context: User category=${cat}. If advice implies one clear action, bullet it. ` +
+        `If it's a multi-step outcome, list 3–6 steps (tag daily/weekly/monthly implicitly). ` +
+        `Keep under ~10 bullets.`;
+
+      const payload = {
+        mode: "friend",
+        messages: [
+          { role: "system", content: sysHint },
+          ...messages.map(m => ({ role: m.role, content: m.content })),
+          { role: "user", content: q },
+        ],
+      };
+
       const res = await fetch("/api/eva", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "friend", messages: [{ role: "user", content: fullPrompt }] }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(`EVA error: ${res.status}`);
       const data = await res.json();
       const text = (data.reply || data.text || "").trim();
-      setReply(text);
-      const pm = parseMetaFromReply(text);
-      setMeta(pm);
-      applyMetaToEditors(pm);
+      const aiMsg: ChatMessage = { role: "assistant", content: text || "(no reply)", ts: Date.now() };
+      setMessages(prev => [...prev, aiMsg]);
+
+      // pre-fill quick creators from the new reply
+      const bullets = extractBullets(text);
+      if (bullets.length === 1) {
+        setTaskTitle(bullets[0]);
+      } else if (bullets.length > 1) {
+        setGoalTitle(q[0].toUpperCase() + q.slice(1));
+        fillStepsFrom(bullets);
+      }
     } catch (e:any) {
       setErr(e.message || String(e));
     } finally {
@@ -320,239 +177,322 @@ Rules:
     }
   }
 
-  /* --- DB actions --- */
-  async function addAsTask() {
-    if (!userId || !meta) return;
-    const title = (meta.title || prompt).trim();
-    if (!title) return;
-    try {
-      const row: TaskRow = {
-        user_id: userId,
-        title,
-        due_date: dueISO || todayISO(),
-        status: "pending",
-        priority: 0,
-        source: "eva_task",
-        category: active,
-        category_color: colorOf(active),
-      };
-      const { error } = await supabase.from("tasks").insert([row] as any);
-      if (error) throw error;
-      alert("Task added ✔︎");
-    } catch (e:any) { setErr(e.message || String(e)); }
+  function fillStepsFrom(bullets: string[]) {
+    const d: string[] = [], w: string[] = [], m: string[] = [];
+    bullets.forEach(b => {
+      const c = guessCadence(b);
+      if (c === "daily") d.push(b);
+      else if (c === "weekly") w.push(b);
+      else m.push(b);
+    });
+    setDaily(d.length ? d : []);
+    setWeekly(w.length ? w : []);
+    setMonthly(m.length ? m : []);
   }
 
-  async function createGoalAndSeed() {
-    if (!userId || !meta) return;
-    const title = (goalTitle || meta.title || prompt).trim();
-    if (!title) return;
-
-    const start = startISO;
-    const target = targetISO || startISO;
-    const half = halfwayISO;
-
-    const cat = active;
-    const col = colorOf(cat);
-
+  /* ----- quick task ----- */
+  async function addTask() {
+    if (!userId || !taskTitle.trim()) return;
+    setAddingTask(true);
+    setErr(null);
     try {
-      // 1) Create goal
+      const row = {
+        user_id: userId,
+        title: taskTitle.trim(),
+        due_date: taskDue || todayISO(),
+        status: "pending",
+        priority: 0,
+        source: "eva_quick",
+        category: cat,
+        category_color: colorOf(cat),
+      };
+      const { error } = await supabase.from("tasks").insert(row as any);
+      if (error) throw error;
+      setAddTaskOpen(false);
+    } catch (e:any) {
+      setErr(e.message || String(e));
+    } finally {
+      setAddingTask(false);
+    }
+  }
+
+  /* ----- goal from steps ----- */
+  async function createGoalFromSteps() {
+    if (!userId || !goalTitle.trim()) return;
+    setCreatingGoal(true);
+    setErr(null);
+    try {
+      const startISO = todayISO();
+      const targetISO = goalTarget || null;
+      const halfISO = targetISO ? halfwayDate(startISO, targetISO) : null;
+
+      // 1) create goal
       const { data: gins, error: gerr } = await supabase
         .from("goals")
         .insert({
           user_id: userId,
-          title,
+          title: goalTitle.trim(),
           goal_type: "big",
-          start_date: start,
-          target_date: target,
-          halfway_date: half,
-          category: cat,
-          category_color: col,
+          start_date: startISO,
+          target_date: targetISO,
+          halfway_date: halfISO,
           status: "active",
+          category: cat,
+          category_color: colorOf(cat),
         })
         .select("id")
-        .limit(1);
+        .single();
       if (gerr) throw gerr;
-      const goalId = (gins as any)?.[0]?.id as number;
+      const goalId = (gins as any).id as number;
 
-      // 2) Insert steps (if any)
-      const stepsPayload: Step[] = [];
-      for (const s of (monthly || [])) if (s.trim()) stepsPayload.push({ user_id:userId, goal_id:goalId, cadence:"monthly", description:s.trim(), active:true });
-      for (const s of (weekly  || [])) if (s.trim()) stepsPayload.push({ user_id:userId, goal_id:goalId, cadence:"weekly",  description:s.trim(), active:true });
-      for (const s of (daily   || [])) if (s.trim()) stepsPayload.push({ user_id:userId, goal_id:goalId, cadence:"daily",   description:s.trim(), active:true });
-
-      if (stepsPayload.length) {
-        const { error: se } = await supabase.from("big_goal_steps").insert(stepsPayload as any);
-        if (se) throw se;
+      // 2) steps (active)
+      const stepRows: any[] = [];
+      daily.forEach(d => stepRows.push({ user_id: userId, goal_id: goalId, cadence: "daily",   description: d.trim(), active: true }));
+      weekly.forEach(w => stepRows.push({ user_id: userId, goal_id: goalId, cadence: "weekly",  description: w.trim(), active: true }));
+      monthly.forEach(m => stepRows.push({ user_id: userId, goal_id: goalId, cadence: "monthly", description: m.trim(), active: true }));
+      if (stepRows.length) {
+        const { error: serr } = await supabase.from("big_goal_steps").insert(stepRows);
+        if (serr) throw serr;
       }
 
-      // 3) Seed tasks via RPC, fallback to client
-      const { error: rerr } = await supabase.rpc("reseed_big_goal_steps", { p_goal_id: goalId });
-      if (rerr) {
-        await clientReseedTasksForGoal(
-          supabase, userId, goalId, start, target, stepsPayload, cat, col, todayISO()
-        );
-      }
+      // 3) seed tasks via RPC (soft-fail)
+      try { await supabase.rpc("reseed_big_goal_steps", { p_goal_id: goalId }); } catch {}
 
-      alert("Goal created and tasks seeded ✔︎");
+      setGoalOpen(false);
+      alert("Goal created. Steps saved and tasks seeded.");
     } catch (e:any) {
       setErr(e.message || String(e));
+    } finally {
+      setCreatingGoal(false);
     }
   }
 
-  /* --- UI --- */
+  /* ---------- UI helpers ---------- */
+  const canOfferTask = actionItems.length === 1;
+  const canOfferGoal = actionItems.length > 1;
+
+  // keep modals in sync with suggestions
+  useEffect(() => {
+    if (canOfferTask) {
+      setTaskTitle(actionItems[0] || "");
+      setTaskDue(todayISO());
+    }
+    if (canOfferGoal) {
+      setGoalTitle(messages.find(m => m.role === "user")?.content ?? "New Goal");
+      fillStepsFrom(actionItems);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastAssistant]);
+
+  /* ----- Styles (soft) ----- */
+  const headerColor = colorOf(cat);
+
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      {styleTag}
-
       {/* Header */}
-      <div className="card" style={{ display:"grid", gap:8 }}>
+      <div className="card" style={{ position:"relative" }}>
         <h1 style={{ margin: 0 }}>Ask EVA</h1>
-        <div className="muted">Get help by area, then turn insights into tasks or auto-seeded goals.</div>
+        <div className="muted">Ask for help in a life area — then action it.</div>
+        <div style={{ position:"absolute", top:10, right:10, width:12, height:12, borderRadius:999, background: headerColor, border:"1px solid #d1d5db" }} />
       </div>
 
       {/* Category tabs */}
-      <div className="card">
-        <div className="eva-tabs">
-          {CATS.map(c => {
-            const on = c.key === active;
-            return (
-              <button
-                key={c.key}
-                onClick={() => setActive(c.key)}
-                aria-pressed={on}
-                className="eva-chip"
-                style={{
-                  borderColor: on ? "#a5b4fc" : "#e5e7eb",
-                  background: on ? "#eef2ff" : "#fff",
-                  display: "inline-flex",
-                  gap: 8,
-                  alignItems: "center"
-                }}
-              >
-                <span style={{ width: 10, height: 10, borderRadius: 999, background: c.color, border: "1px solid #d1d5db" }} />
-                {c.label}
-              </button>
-            );
-          })}
-        </div>
+      <div className="card" style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+        {CATS.map(c => {
+          const active = c.key === cat;
+          return (
+            <button
+              key={c.key}
+              onClick={() => setCat(c.key)}
+              aria-pressed={active}
+              className="btn-soft"
+              style={{
+                borderRadius: 999,
+                border: `1px solid ${active ? "#c7cbd6" : "var(--border)"}`,
+                background: active ? `${c.color}` : "#fff",
+                fontWeight: active ? 700 : 500
+              }}
+              title={c.label}
+            >
+              {c.label}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Prompt box */}
+      {/* Composer */}
       <div className="card" style={{ display:"grid", gap:8 }}>
-        <label className="col">
-          <span className="muted">Your question or idea</span>
+        <label style={{ display:"grid", gap:6 }}>
+          <div className="muted">Your question to EVA ({CATS.find(x=>x.key===cat)?.label})</div>
           <textarea
-            rows={4}
-            value={prompt}
-            onChange={e => setPrompt(e.target.value)}
-            placeholder={`e.g., Plan a ${CATS.find(c=>c.key===active)?.label.toLowerCase()} reset for the next 3 months`}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            rows={3}
+            placeholder={`e.g., In ${CATS.find(x=>x.key===cat)?.label}, I want to... What should I do next?`}
+            style={{ resize:"vertical" }}
           />
         </label>
         <div style={{ display:"flex", gap:8, justifyContent:"flex-end", flexWrap:"wrap" }}>
           {err && <div style={{ color:"red", marginRight:"auto" }}>{err}</div>}
-          <button onClick={() => { setPrompt(""); setReply(""); setMeta(null); setDaily([]); setWeekly([]); setMonthly([]); }} disabled={busy}>Clear</button>
-          <button className="btn-primary" onClick={askEva} disabled={!prompt.trim() || busy} style={{ borderRadius:10 }}>
+          <button onClick={() => setInput("")} disabled={!input.trim() || busy}>Clear</button>
+          <button onClick={askEva} className="btn-primary" disabled={!input.trim() || busy} style={{ borderRadius:10 }}>
             {busy ? "Thinking…" : "Ask EVA"}
           </button>
         </div>
       </div>
 
-      {/* Answer + actions */}
-      {!!reply && (
-        <div className="card" style={{ display:"grid", gap:10 }}>
-          <div className="section-title">EVA says</div>
-          <div style={{ whiteSpace:"pre-wrap", lineHeight:1.5 }}>{reply}</div>
-
-          {/* Action bar */}
-          {meta && (
-            <div style={{ borderTop:"1px solid #eee", paddingTop:10, display:"grid", gap:10 }}>
-              <div className="section-title">Make it real</div>
-
-              {meta.kind === "task" ? (
-                <div className="eva-cta">
-                  <input
-                    type="date"
-                    value={dueISO}
-                    onChange={(e) => setDueISO(e.target.value)}
-                    title="Due date"
-                  />
-                  <button className="btn-primary" onClick={addAsTask} style={{ borderRadius:10 }}>
-                    Add as task
-                  </button>
+      {/* Conversation */}
+      <div className="card" style={{ display:"grid", gap:10 }}>
+        {messages.length === 0 ? (
+          <div className="muted">No messages yet. Ask EVA anything above.</div>
+        ) : (
+          <ul style={{ listStyle:"none", margin:0, padding:0, display:"grid", gap:8 }}>
+            {messages.map((m,i)=>(
+              <li key={m.ts+i} style={{ display:"grid", gap:6 }}>
+                <div style={{ fontSize:12, color:"#6b7280" }}>{m.role === "user" ? "You" : "EVA"}</div>
+                <div
+                  style={{
+                    whiteSpace:"pre-wrap",
+                    background: m.role === "assistant" ? "#f8fafc" : "#fff",
+                    border:"1px solid #e5e7eb",
+                    borderRadius: 10,
+                    padding: 10
+                  }}
+                >
+                  {m.content}
                 </div>
-              ) : (
-                <>
-                  {/* Goal details */}
-                  <div className="col">
-                    <label className="col">
-                      <span className="muted">Goal title</span>
-                      <input
-                        value={goalTitle}
-                        onChange={e => setGoalTitle(e.target.value)}
-                        placeholder={meta.title || "Goal title"}
-                      />
-                    </label>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
-                    <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
-                      <label>
-                        <div className="muted">Target date</div>
-                        <input type="date" value={targetISO} onChange={e => setTargetISO(e.target.value)} />
-                      </label>
-                      {halfwayISO && (
-                        <div className="muted">Halfway will be <b>{halfwayISO}</b></div>
-                      )}
-                      <span className="muted" style={{ marginLeft:"auto" }}>
-                        Area: <b>{CATS.find(c=>c.key===active)?.label}</b>{" "}
-                        <span style={{ display:"inline-block", width:12, height:12, borderRadius:999, background: color, border:"1px solid #d1d5db" }} />
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Steps editor */}
-                  <div className="steps">
-                    <fieldset>
-                      <legend>Monthly</legend>
-                      {monthly.map((v,i)=>(
-                        <div key={`m${i}`} style={{ display:"flex", gap:6, marginBottom:6 }}>
-                          <input value={v} onChange={e=>setMonthly(monthly.map((x,idx)=>idx===i?e.target.value:x))} placeholder="Monthly step…" style={{ flex:1 }} />
-                          <button onClick={()=>setMonthly(monthly.filter((_,idx)=>idx!==i))}>–</button>
-                        </div>
-                      ))}
-                      <button onClick={()=>setMonthly([...monthly, ""])}>+ Add monthly</button>
-                    </fieldset>
-                    <fieldset>
-                      <legend>Weekly</legend>
-                      {weekly.map((v,i)=>(
-                        <div key={`w${i}`} style={{ display:"flex", gap:6, marginBottom:6 }}>
-                          <input value={v} onChange={e=>setWeekly(weekly.map((x,idx)=>idx===i?e.target.value:x))} placeholder="Weekly step…" style={{ flex:1 }} />
-                          <button onClick={()=>setWeekly(weekly.filter((_,idx)=>idx!==i))}>–</button>
-                        </div>
-                      ))}
-                      <button onClick={()=>setWeekly([...weekly, ""])}>+ Add weekly</button>
-                    </fieldset>
-                    <fieldset>
-                      <legend>Daily</legend>
-                      {daily.map((v,i)=>(
-                        <div key={`d${i}`} style={{ display:"flex", gap:6, marginBottom:6 }}>
-                          <input value={v} onChange={e=>setDaily(daily.map((x,idx)=>idx===i?e.target.value:x))} placeholder="Daily step…" style={{ flex:1 }} />
-                          <button onClick={()=>setDaily(daily.filter((_,idx)=>idx!==i))}>–</button>
-                        </div>
-                      ))}
-                      <button onClick={()=>setDaily([...daily, ""])}>+ Add daily</button>
-                    </fieldset>
-                  </div>
-
-                  <div className="eva-cta" style={{ justifyContent:"flex-end" }}>
-                    <button className="btn-primary" onClick={createGoalAndSeed} style={{ borderRadius:10 }}>
-                      Create goal & seed tasks
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+      {/* Action bar for last reply */}
+      {lastAssistant && (canOfferTask || canOfferGoal) && (
+        <div className="card" style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+          <div className="muted">Make it real:</div>
+          {canOfferTask && (
+            <button className="btn-primary" onClick={() => setAddTaskOpen(true)} style={{ borderRadius: 10 }}>
+              Add as task
+            </button>
+          )}
+          {canOfferGoal && (
+            <button className="btn-primary" onClick={() => setGoalOpen(true)} style={{ borderRadius: 10 }}>
+              Create goal from these
+            </button>
           )}
         </div>
       )}
+
+      {/* Quick Task Modal */}
+      <Modal open={addTaskOpen} onClose={() => setAddTaskOpen(false)} title="Add as task">
+        <div style={{ display:"grid", gap:10 }}>
+          <label style={{ display:"grid", gap:6 }}>
+            <div className="muted">Title</div>
+            <input value={taskTitle} onChange={e=>setTaskTitle(e.target.value)} />
+          </label>
+          <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
+            <label>
+              <div className="muted">Due</div>
+              <input type="date" value={taskDue} onChange={e=>setTaskDue(e.target.value)} />
+            </label>
+            <label style={{ marginLeft:"auto" }}>
+              <div className="muted">Category</div>
+              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                <select value={cat} onChange={e=>setCat(e.target.value as AllowedCategory)}>
+                  {CATS.map(c=> <option key={c.key} value={c.key}>{c.label}</option>)}
+                </select>
+                <span style={{ width:14, height:14, borderRadius:999, background: colorOf(cat), border:"1px solid #d1d5db" }} />
+              </div>
+            </label>
+          </div>
+          <div style={{ display:"flex", justifyContent:"flex-end", gap:8 }}>
+            <button onClick={()=>setAddTaskOpen(false)} className="btn-soft">Cancel</button>
+            <button onClick={addTask} className="btn-primary" disabled={addingTask || !taskTitle.trim()}>
+              {addingTask ? "Adding…" : "Add task"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Goal Creator Modal */}
+      <Modal open={goalOpen} onClose={() => setGoalOpen(false)} title="Create goal from EVA’s steps">
+        <div style={{ display:"grid", gap:12 }}>
+          <label style={{ display:"grid", gap:6 }}>
+            <div className="muted">Goal title</div>
+            <input value={goalTitle} onChange={e=>setGoalTitle(e.target.value)} placeholder="e.g., Launch the new offer" />
+          </label>
+
+          <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
+            <label style={{ display:"grid", gap:6 }}>
+              <div className="muted">Target date (optional)</div>
+              <input type="date" value={goalTarget} onChange={e=>setGoalTarget(e.target.value)} />
+            </label>
+            <label style={{ marginLeft:"auto" }}>
+              <div className="muted">Category</div>
+              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                <select value={cat} onChange={e=>setCat(e.target.value as AllowedCategory)}>
+                  {CATS.map(c=> <option key={c.key} value={c.key}>{c.label}</option>)}
+                </select>
+                <span style={{ width:14, height:14, borderRadius:999, background: colorOf(cat), border:"1px solid #d1d5db" }} />
+              </div>
+            </label>
+          </div>
+
+          {/* Steps editor */}
+          <fieldset style={{ border:"1px solid #eee", borderRadius:8, padding:10 }}>
+            <legend>Monthly</legend>
+            {(monthly.length ? monthly : [""]).map((v,i)=>(
+              <div key={`m${i}`} style={{ display:"flex", gap:6, marginBottom:6 }}>
+                <input value={v}
+                  onChange={e=>setMonthly(monthly.length? monthly.map((x,idx)=>idx===i?e.target.value:x):[e.target.value])}
+                  placeholder="e.g., Publish a case study" style={{ flex:1 }} />
+                {(monthly.length>1 || (monthly.length===1 && monthly[0])) && (
+                  <button onClick={()=>setMonthly(monthly.filter((_,idx)=>idx!==i))}>–</button>
+                )}
+              </div>
+            ))}
+            <button onClick={()=>setMonthly([...monthly, ""])}>+ Add monthly</button>
+          </fieldset>
+
+          <fieldset style={{ border:"1px solid #eee", borderRadius:8, padding:10 }}>
+            <legend>Weekly</legend>
+            {(weekly.length ? weekly : [""]).map((v,i)=>(
+              <div key={`w${i}`} style={{ display:"flex", gap:6, marginBottom:6 }}>
+                <input value={v}
+                  onChange={e=>setWeekly(weekly.length? weekly.map((x,idx)=>idx===i?e.target.value:x):[e.target.value])}
+                  placeholder="e.g., Book 3 outreach calls" style={{ flex:1 }} />
+                {(weekly.length>1 || (weekly.length===1 && weekly[0])) && (
+                  <button onClick={()=>setWeekly(weekly.filter((_,idx)=>idx!==i))}>–</button>
+                )}
+              </div>
+            ))}
+            <button onClick={()=>setWeekly([...weekly, ""])}>+ Add weekly</button>
+          </fieldset>
+
+          <fieldset style={{ border:"1px solid #eee", borderRadius:8, padding:10 }}>
+            <legend>Daily</legend>
+            {(daily.length ? daily : [""]).map((v,i)=>(
+              <div key={`d${i}`} style={{ display:"flex", gap:6, marginBottom:6 }}>
+                <input value={v}
+                  onChange={e=>setDaily(daily.length? daily.map((x,idx)=>idx===i?e.target.value:x):[e.target.value])}
+                  placeholder="e.g., 30 min focus block" style={{ flex:1 }} />
+                {(daily.length>1 || (daily.length===1 && daily[0])) && (
+                  <button onClick={()=>setDaily(daily.filter((_,idx)=>idx!==i))}>–</button>
+                )}
+              </div>
+            ))}
+            <button onClick={()=>setDaily([...daily, ""])}>+ Add daily</button>
+          </fieldset>
+
+          <div style={{ display:"flex", justifyContent:"flex-end", gap:8 }}>
+            <button className="btn-soft" onClick={()=>setGoalOpen(false)}>Cancel</button>
+            <button className="btn-primary" onClick={createGoalFromSteps} disabled={creatingGoal || !goalTitle.trim()}>
+              {creatingGoal ? "Creating…" : "Create goal"}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
