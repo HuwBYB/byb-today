@@ -10,7 +10,8 @@ export default defineConfig({
       devOptions: { enabled: true }, // lets you test install while developing
       workbox: {
         navigateFallbackDenylist: [/^\/api\//],
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,webp}"],
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,webp,jpg,jpeg}"],
+        maximumFileSizeToCacheInBytes: 3_000_000, // allow up to ~3MB assets to be precached (temporary)
       },
       // Files that should be copied as-is (iOS uses the apple-touch icon tag)
       includeAssets: [
