@@ -1,17 +1,35 @@
+// src/GoalsScreen.tsx
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 import BigGoalWizard from "./BigGoalWizard";
 
-/* ---------- Categories + colours (match DB constraint) ---------- */
+/* ---------- Categories + colours (palette + legacy normalization) ---------- */
 const CATS = [
-  { key: "personal",  label: "Personal",  color: "#a855f7" },
-  { key: "health",    label: "Health",    color: "#22c55e" },
-  { key: "career",    label: "Business",  color: "#3b82f6" },   // stored as 'career'
-  { key: "financial", label: "Finance",   color: "#f59e0b" },   // stored as 'financial'
-  { key: "other",     label: "Other",     color: "#6b7280" },
+  { key: "business",      label: "Business",      color: "#C7D2FE" }, // pastel indigo
+  { key: "financial",     label: "Financial",     color: "#A7F3D0" }, // pastel mint
+  { key: "health",        label: "Health",        color: "#99F6E4" }, // pastel teal
+  { key: "personal",      label: "Personal",      color: "#E9D5FF" }, // pastel purple
+  { key: "relationships", label: "Relationships", color: "#FECDD3" }, // pastel rose
 ] as const;
 type CatKey = typeof CATS[number]["key"];
-const colorOf = (k: CatKey) => CATS.find(c => c.key === k)?.color || "#6b7280";
+const colorOf = (k: CatKey) => CATS.find(c => c.key === k)?.color || "#E5E7EB";
+const labelOf = (k: CatKey) => CATS.find(c => c.key === k)?.label || k;
+
+/** Map any stored/legacy/free-text category to one of our 5 keys */
+function normalizeCat(x: string | null | undefined): CatKey {
+  const s = (x || "").toLowerCase().trim();
+  if (s === "career") return "business";
+  if (s === "business") return "business";
+  if (s === "finance") return "financial";
+  if (s === "financial") return "financial";
+  if (s === "relationship") return "relationships";
+  if (s === "relationships") return "relationships";
+  if (s === "health") return "health";
+  if (s === "personal" || s === "personal_development") return "personal";
+  if (s === "other" || !s) return "personal"; // fold legacy/unknown into Personal
+  // default fallback
+  return "personal";
+}
 
 /* ---------- Types ---------- */
 type Goal = {
@@ -55,13 +73,6 @@ function isoToday() {
   const d = new Date();
   return toISO(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
 }
-/* Normalize any legacy keys to DB-allowed set */
-function normalizeCat(x: string | null | undefined): CatKey {
-  const s = (x || "").toLowerCase();
-  if (s === "business") return "career";
-  if (s === "finance")  return "financial";
-  return (["personal","health","career","financial","other"] as const).includes(s as any) ? (s as CatKey) : "other";
-}
 
 /* ---------- Modal ---------- */
 function Modal({
@@ -93,13 +104,12 @@ function Modal({
 }
 
 /* ---------- Balance helpers ---------- */
-
 const PROMPTS_BY_CAT: Record<CatKey, string[]> = {
-  personal:  ["Plan a weekend with family", "Start a creative hobby", "Reconnect with a friend weekly"],
-  health:    ["Walk 30 min, 5×/week", "Strength train 2×/week", "Lights out by 10:30pm"],
-  career:    ["Ship a portfolio case study", "Book 5 sales calls/week", "Launch a new offering"],
-  financial: ["Build a 3-month emergency fund", "Automate saving 10%", "Reduce one recurring cost"],
-  other:     ["Learn a new skill", "Volunteer monthly", "Declutter one room"],
+  business:      ["Ship a portfolio case study", "Book 5 sales calls/week", "Launch a new offering"],
+  financial:     ["Build a 3-month emergency fund", "Automate saving 10%", "Reduce one recurring cost"],
+  health:        ["Walk 30 min, 5×/week", "Strength train 2×/week", "Lights out by 10:30pm"],
+  personal:      ["Plan a weekend with family", "Start a creative hobby", "Declutter one room"],
+  relationships: ["Schedule a weekly catch-up", "Plan a date night", "Send a thoughtful message daily"],
 };
 
 type BalanceStats = {
@@ -113,9 +123,11 @@ type BalanceStats = {
 function computeBalance(goals: Goal[]): BalanceStats {
   const active = goals.filter(g => (g.status || "active") !== "archived");
   const total = active.length;
-  const counts: Record<CatKey, number> = { personal:0, health:0, career:0, financial:0, other:0 };
+  const counts: Record<CatKey, number> = {
+    business: 0, financial: 0, health: 0, personal: 0, relationships: 0
+  };
   for (const g of active) counts[normalizeCat(g.category)]++;
-  const percents = { personal:0, health:0, career:0, financial:0, other:0 } as Record<CatKey, number>;
+  const percents = { ...counts } as Record<CatKey, number>;
   (Object.keys(counts) as CatKey[]).forEach(k => { percents[k] = total ? counts[k] / total : 0; });
   const represented = (Object.keys(counts) as CatKey[]).filter(k => counts[k] > 0);
   let dominant: BalanceStats["dominant"] = null;
@@ -162,7 +174,7 @@ export default function GoalsScreen() {
   const [creatingSimple, setCreatingSimple] = useState(false);
 
   // category editor for selected
-  const [editCat, setEditCat] = useState<CatKey>("other");
+  const [editCat, setEditCat] = useState<CatKey>("personal");
 
   // Help modal
   const [showHelp, setShowHelp] = useState(false);
@@ -232,7 +244,7 @@ export default function GoalsScreen() {
 
     const queue: any[] = [];
 
-    // monthly — same DOM cadence, first >= fromDate
+    // monthly — first >= fromDate
     const monthSteps = (steps as Step[]).filter(s => s.cadence === "monthly");
     if (monthSteps.length) {
       let cursor = addMonthsClamped(start, 0, start.getDate());
@@ -480,23 +492,26 @@ export default function GoalsScreen() {
         <div className="section-title">Your goals</div>
         <ul className="list">
           {goals.length === 0 && <li className="muted">No goals yet.</li>}
-          {goals.map(g => (
-            <li key={g.id} className="item">
-              <button style={{ width: "100%", textAlign: "left", display: "flex", gap: 8, alignItems: "center" }} onClick={() => openGoal(g)}>
-                <span
-                  title={g.category || "No category"}
-                  style={{ width: 10, height: 10, borderRadius: 999, background: g.category_color || "#e5e7eb", border: "1px solid #d1d5db", flex: "0 0 auto" }}
-                />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600 }}>{g.title}</div>
-                  <div className="muted">
-                    {(g.category ? `${g.category}` : "uncategorised")}
-                    {g.target_date ? ` • target ${g.target_date}` : ""}
+          {goals.map(g => {
+            const k = normalizeCat(g.category);
+            return (
+              <li key={g.id} className="item">
+                <button style={{ width: "100%", textAlign: "left", display: "flex", gap: 8, alignItems: "center" }} onClick={() => openGoal(g)}>
+                  <span
+                    title={labelOf(k)}
+                    style={{ width: 10, height: 10, borderRadius: 999, background: g.category_color || colorOf(k), border: "1px solid #d1d5db", flex: "0 0 auto" }}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600 }}>{g.title}</div>
+                    <div className="muted">
+                      {labelOf(k)}
+                      {g.target_date ? ` • target ${g.target_date}` : ""}
+                    </div>
                   </div>
-                </div>
-              </button>
-            </li>
-          ))}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </div>
 
@@ -548,12 +563,12 @@ export default function GoalsScreen() {
           <div style={{ display: "grid", gap: 12 }}>
             {/* Header */}
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <span style={{ width: 14, height: 14, borderRadius: 999, background: selected.category_color || "#e5e7eb", border: "1px solid #d1d5db" }} />
+              <span style={{ width: 14, height: 14, borderRadius: 999, background: selected.category_color || colorOf(normalizeCat(selected.category)), border: "1px solid #d1d5db" }} />
               <div>
                 <h2 style={{ margin: 0 }}>{selected.title}</h2>
                 <div className="muted">
                   {selected.start_date || "-"} → {selected.target_date || "-"}
-                  {selected.category ? ` • ${selected.category}` : ""}
+                  {" • "}{labelOf(normalizeCat(selected.category))}
                 </div>
               </div>
             </div>
@@ -706,7 +721,7 @@ function BalanceInsight({ balance }: { balance: BalanceStats }) {
           <ul className="list">
             {missing.slice(0, 2).map(k => {
               const label = CATS.find(c=>c.key===k)?.label || k;
-              const prompt = PROMPTS_BY_CAT[k][0];
+              const prompt = (PROMPTS_BY_CAT[k] && PROMPTS_BY_CAT[k][0]) || "";
               return <li key={k} className="item"><span style={{ fontWeight: 600 }}>{label}:</span> {prompt}</li>;
             })}
           </ul>
