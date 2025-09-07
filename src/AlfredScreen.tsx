@@ -1,453 +1,558 @@
-// EvaScreen.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-/* ========================= Types & constants ========================= */
-type Mode = "business" | "finance" | "health" | "friend";
-type Msg = { role: "user" | "assistant"; content: string };
+/* =================== Categories (banked) =================== */
+export type AllowedCategory = "business" | "financial" | "health" | "personal" | "relationships";
 
-type SectionKey = "general" | "big_goal" | "exercise" | "gratitude";
-const SECTION_LABELS: Record<SectionKey, string> = {
-  general: "General",
-  big_goal: "Big Goal",
-  exercise: "Exercise",
-  gratitude: "Gratitude",
+const CATS: ReadonlyArray<{ key: AllowedCategory; label: string; color: string }> = [
+  { key: "business",      label: "Business",      color: "#C7D2FE" }, // pastel indigo
+  { key: "financial",     label: "Financial",     color: "#A7F3D0" }, // pastel mint
+  { key: "health",        label: "Health",        color: "#99F6E4" }, // pastel teal
+  { key: "personal",      label: "Personal",      color: "#E9D5FF" }, // pastel purple
+  { key: "relationships", label: "Relationships", color: "#FECDD3" }, // pastel rose
+] as const;
+
+const colorOf = (k: AllowedCategory) => CATS.find(s => s.key === k)?.color || "#E5E7EB";
+function normalizeCat(x: string | null | undefined): AllowedCategory {
+  const s = (x || "").toLowerCase().trim();
+  if (s === "career") return "business";
+  if (s === "finance") return "financial";
+  if (s === "relationship") return "relationships";
+  if (!s || s === "other") return "personal";
+  if ((["business","financial","health","personal","relationships"] as const).includes(s as any)) return s as AllowedCategory;
+  return "personal";
+}
+
+/* =================== Types =================== */
+type PlanMeta = {
+  kind: "task" | "goal";
+  title: string;
+  target_date?: string | null; // YYYY-MM-DD
+  steps?: {
+    daily?: string[];
+    weekly?: string[];
+    monthly?: string[];
+  };
 };
 
-const MODES: { key: Mode; label: string; emoji: string }[] = [
-  { key: "business", label: "Business Advisor", emoji: "💼" },
-  { key: "finance",  label: "Financial Advisor", emoji: "💷" },
-  { key: "health",   label: "Health Advisor",    emoji: "💪" },
-  { key: "friend",   label: "Friendly Coach",    emoji: "🧑‍🤝‍🧑" },
-];
-
-const TONES: Record<Mode, { opener: string; signoff: string }> = {
-  business: { opener: "Direct plan, minimal fluff.",             signoff: "Onward. — EVA" },
-  finance:  { opener: "Caution + clarity. Numbers first.",       signoff: "Steady as we go. — EVA" },
-  health:   { opener: "Warm + practical. Sustainable > extreme.", signoff: "You've got this. — EVA" },
-  friend:   { opener: "Empathy first. Then tiny wins.",           signoff: "Proud of you. — EVA" },
+type TaskRow = {
+  id?: number;
+  user_id: string;
+  title: string;
+  due_date: string | null;
+  status: "pending" | "done";
+  priority?: number | null;
+  source?: string | null;
+  goal_id?: number | null;
+  category?: string | null;
+  category_color?: string | null;
 };
 
-/* ========================= Small utilities ========================= */
+type Goal = {
+  id: number;
+  user_id: string;
+  title: string;
+  category: string | null;
+  category_color: string | null;
+  start_date: string | null;
+  target_date: string | null;
+  status: string | null;
+  halfway_date?: string | null;
+  halfway_note?: string | null;
+};
+
+type Step = {
+  id?: number;
+  user_id: string;
+  goal_id: number;
+  cadence: "daily" | "weekly" | "monthly";
+  description: string;
+  active: boolean;
+};
+
+/* =================== Date helpers =================== */
 function toISO(d: Date) {
   const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,"0"), dd = String(d.getDate()).padStart(2,"0");
   return `${y}-${m}-${dd}`;
 }
+function fromISO(s: string) { const [y,m,d] = s.split("-").map(Number); return new Date(y,(m??1)-1,(d??1)); }
+function clampDay(d: Date) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function todayISO() { return toISO(clampDay(new Date())); }
+function lastDayOfMonth(y:number,m0:number){ return new Date(y,m0+1,0).getDate(); }
+function addMonthsClamped(base: Date, months: number, anchorDay?: number) {
+  const anchor = anchorDay ?? base.getDate();
+  const y = base.getFullYear(), m = base.getMonth() + months;
+  const first = new Date(y, m, 1);
+  const ld = lastDayOfMonth(first.getFullYear(), first.getMonth());
+  return new Date(first.getFullYear(), first.getMonth(), Math.min(anchor, ld));
+}
 
-// Fallback instead of Array.prototype.findLast (keeps older lib targets happy)
-function lastUserMessageContent(msgs: Msg[]): string | undefined {
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i].role === "user") return msgs[i].content;
+/* =================== Client reseed (fallback if RPC missing) =================== */
+async function clientReseedTasksForGoal(
+  supabaseClient: typeof supabase,
+  userId: string,
+  goalId: number,
+  startISO: string,
+  targetISO: string,
+  steps: Step[],
+  cat: AllowedCategory,
+  color: string,
+  seedFromISO?: string
+) {
+  const start = fromISO(startISO);
+  const end = fromISO(targetISO);
+  if (end < start) throw new Error("Target date is before start date.");
+  const fromISOVal = seedFromISO || todayISO();
+  const fromDate = fromISO(fromISOVal);
+
+  // wipe ONLY future big_goal_* tasks from fromISO forward (leave milestone + review)
+  await supabaseClient
+    .from("tasks")
+    .delete()
+    .eq("user_id", userId)
+    .eq("goal_id", goalId)
+    .in("source", ["big_goal_monthly", "big_goal_weekly", "big_goal_daily"])
+    .gte("due_date", fromISOVal);
+
+  const queue: any[] = [];
+
+  // monthly — DOM cadence based on start date
+  const monthSteps = steps.filter(s => s.cadence === "monthly");
+  if (monthSteps.length) {
+    let cursor = addMonthsClamped(start, 0, start.getDate());
+    while (cursor < fromDate) cursor = addMonthsClamped(cursor, 1, start.getDate());
+    while (cursor <= end) {
+      const due = toISO(cursor);
+      for (const s of monthSteps) {
+        queue.push({
+          user_id: userId, goal_id: goalId,
+          title: `BIG GOAL — Monthly: ${s.description}`,
+          due_date: due, source: "big_goal_monthly", priority: 2,
+          category: cat, category_color: color,
+        });
+      }
+      cursor = addMonthsClamped(cursor, 1, start.getDate());
+    }
   }
-  return undefined;
+
+  // weekly — cadence every 7 days from (start + 7)
+  const weekSteps = steps.filter(s => s.cadence === "weekly");
+  if (weekSteps.length) {
+    let cursor = new Date(start);
+    cursor.setDate(cursor.getDate() + 7);
+    while (cursor < fromDate) cursor.setDate(cursor.getDate() + 7);
+    while (cursor <= end) {
+      const due = toISO(cursor);
+      for (const s of weekSteps) {
+        queue.push({
+          user_id: userId, goal_id: goalId,
+          title: `BIG GOAL — Weekly: ${s.description}`,
+          due_date: due, source: "big_goal_weekly", priority: 2,
+          category: cat, category_color: color,
+        });
+      }
+      cursor.setDate(cursor.getDate() + 7);
+    }
+  }
+
+  // daily — from max(fromDate, start)
+  const daySteps = steps.filter(s => s.cadence === "daily");
+  if (daySteps.length) {
+    let cursor = new Date(Math.max(fromDate.getTime(), start.getTime()));
+    cursor = clampDay(cursor);
+    while (cursor <= end) {
+      const due = toISO(cursor);
+      for (const s of daySteps) {
+        queue.push({
+          user_id: userId, goal_id: goalId,
+          title: `BIG GOAL — Daily: ${s.description}`,
+          due_date: due, source: "big_goal_daily", priority: 2,
+          category: cat, category_color: color,
+        });
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  }
+
+  for (let i = 0; i < queue.length; i += 500) {
+    const slice = queue.slice(i, i + 500);
+    const { error: terr } = await supabaseClient.from("tasks").insert(slice);
+    if (terr) throw terr;
+  }
+  return queue.length;
 }
 
-// Heuristic action extraction from assistant text
-function extractActions(text: string): string[] {
-  const lines: string[] = text.split(/\r?\n/).map((l: string) => l.trim());
-  const bullets: string[] = lines
-    .filter((l: string) => /^([-*•]|\d+\.)\s+/.test(l))
-    .map((l: string) => l.replace(/^([-*•]|\d+\.)\s+/, "").trim());
-
-  if (bullets.length) return bullets.slice(0, 12);
-
-  // fallback: sentence-split first 8 imperative-ish lines
-  const sentences: string[] = text
-    .split(/[.;]\s+/)
-    .filter((s: string) => s.length > 0 && /\b(prepare|email|call|draft|review|log|plan|write|send|schedule|clean|walk|hydrate|stretch|update|research|set up|create)\b/i.test(s));
-  return sentences.slice(0, 8);
-}
-
-// Naive section guesser
-function guessSection(s: string): SectionKey {
-  const t = s.toLowerCase();
-  if (/(deadlift|squat|run|km|gym|workout|warm[- ]?up|sets?)/.test(t)) return "exercise";
-  if (/(gratitude|thankful|appreciate|3 things)/.test(t)) return "gratitude";
-  if (/(milestone|big goal|phase|roadmap|deliverable|stage)/.test(t)) return "big_goal";
-  return "general";
-}
-
-/* ========================= Mini coach flows ========================= */
-type FlowKey = "sales" | "money" | "health" | "reset";
-const FLOWS: Record<FlowKey, { label: string; prompt: string; persona: Mode }> = {
-  sales: {
-    label: "Sales Sprint (15m)",
-    persona: "business",
-    prompt: "Create a compact 3-step sales sprint for today: 1) 3 ICP leads to reach 2) one follow-up 3) one nurture touch. Each step 1 sentence, actionable, starting with a verb. End with a brief pep line.",
-  },
-  money: {
-    label: "Money Check-in (10m)",
-    persona: "finance",
-    prompt: "Give me a 3-step 10-minute finance check-in for today: one expense to review, one saving to action, one number to update. Each step imperative, one line.",
-  },
-  health: {
-    label: "Health Micro-plan (20m)",
-    persona: "health",
-    prompt: "Design a simple 20-minute dumbbell-only workout: warm-up (1 line), 3 sets (each 1 line), cooldown (1 line). Include reps/time. Keep it encouraging.",
-  },
-  reset: {
-    label: "Reset Ritual (5m)",
-    persona: "friend",
-    prompt: "Create a 5-minute reset ritual: 1) 1 gratitude 2) 1 easy win (2 min) 3) 1 tidy/clear step. Keep calm and kind.",
-  },
-};
-
-/* ========================= Component ========================= */
+/* =================== EVA page =================== */
 export default function EvaScreen() {
+  /* --- UI state --- */
   const [userId, setUserId] = useState<string | null>(null);
-  const [mode, setMode] = useState<Mode>("business");
-  const [messages, setMessages] = useState<Msg[]>([]);
-  const [input, setInput] = useState("");
+  const [active, setActive] = useState<AllowedCategory>("personal");
+  const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Action extraction & selection pane
-  const [extracted, setExtracted] = useState<string[]>([]);
-  const [selected, setSelected] = useState<Record<number, boolean>>({});
-  const [section, setSection] = useState<SectionKey>("general");
-  const [celebrate, setCelebrate] = useState(false);
+  const [reply, setReply] = useState<string>("");
+  const [meta, setMeta] = useState<PlanMeta | null>(null);
 
-  // contextual hint
-  const hour = new Date().getHours();
-  const dayHint = hour >= 18 ? "Late? Park one thing for tomorrow and sleep well." :
-                   hour <= 9 ? "Morning momentum: one Big Goal step first." :
-                   "Keep it tight. Tiny steps count.";
+  // Action controls
+  const [dueISO, setDueISO] = useState<string>(todayISO());               // for single task
+  const [targetISO, setTargetISO] = useState<string>(() => {
+    const d = new Date(); d.setDate(d.getDate() + 84); return toISO(d);   // default 12 weeks
+  });
+  const [goalTitle, setGoalTitle] = useState<string>("");
 
-  /* ---------- Auth ---------- */
+  // Steps editor (pre-filled from meta if any)
+  const [daily, setDaily] = useState<string[]>([]);
+  const [weekly, setWeekly] = useState<string[]>([]);
+  const [monthly, setMonthly] = useState<string[]>([]);
+
+  /* --- auth --- */
   useEffect(() => {
-    supabase.auth.getUser().then(({ data, error }) => {
-      if (error) setErr(error.message);
-      setUserId(data.user?.id ?? null);
-    });
+    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
   }, []);
 
-  /* ---------- Persist conversations per mode ---------- */
-  useEffect(() => {
-    const saved = localStorage.getItem(lsKey(mode));
-    setMessages(saved ? (JSON.parse(saved) as Msg[]) : []);
-  }, [mode]);
+  /* --- small styles --- */
+  const styleTag = (
+    <style>{`
+      .eva-tabs { display:flex; gap:8px; flex-wrap:wrap }
+      .eva-chip { padding:8px 12px; border-radius:10px; border:1px solid #e5e7eb; background:#fff }
+      .eva-chip[aria-pressed="true"]{ border-color: #a5b4fc; background: #eef2ff }
+      .eva-cta { display:flex; gap:8px; flex-wrap:wrap; align-items:center }
+      .col { display:grid; gap:8px }
+      .steps { display:grid; gap:10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)) }
+      fieldset { border:1px solid #eee; border-radius:10px; padding:10px }
+      legend { padding:0 6px; color:#64748b }
+    `}</style>
+  );
 
-  useEffect(() => {
-    localStorage.setItem(lsKey(mode), JSON.stringify(messages));
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, mode]);
+  /* --- helpers --- */
+  const color = useMemo(() => colorOf(active), [active]);
+  const startISO = todayISO();
+  const halfwayISO = useMemo(() => {
+    try {
+      const s = fromISO(startISO), t = fromISO(targetISO);
+      const ms = s.getTime() + Math.floor((t.getTime() - s.getTime()) / 2);
+      return toISO(new Date(ms));
+    } catch { return null; }
+  }, [startISO, targetISO]);
 
-  function lsKey(m: Mode) { return `eva:conv:${m}`; }
+  function parseMetaFromReply(text: string): PlanMeta | null {
+    // Look for ```json ... ``` block
+    const m = text.match(/```json([\s\S]*?)```/i);
+    if (m) {
+      try {
+        const obj = JSON.parse(m[1].trim());
+        // Normalize/validate
+        const kind = obj.kind === "task" ? "task" : "goal";
+        const title = String(obj.title || "").trim() || "";
+        const target_date = obj.target_date ? String(obj.target_date).slice(0,10) : null;
+        const steps = obj.steps ? {
+          daily: Array.isArray(obj.steps.daily) ? obj.steps.daily.map(String) : [],
+          weekly: Array.isArray(obj.steps.weekly) ? obj.steps.weekly.map(String) : [],
+          monthly: Array.isArray(obj.steps.monthly) ? obj.steps.monthly.map(String) : [],
+        } : undefined;
+        return { kind, title, target_date, steps };
+      } catch { /* fallthrough */ }
+    }
 
-  /* ---------- Chat send ---------- */
-  async function send(customPrompt?: string) {
-    const q = (customPrompt ?? input).trim();
-    if (!q) return;
-    setErr(null);
-    setBusy(true);
+    // Heuristic fallback: 2+ bullets ⇒ goal, else task
+    const lines = text.split(/\r?\n/).map(l => l.trim());
+    const bullets = lines.filter(l => /^(\*|-|•|\d+\.)\s+/.test(l)).map(l => l.replace(/^(\*|-|•|\d+\.)\s+/, "").trim());
+    if (bullets.length >= 2) {
+      return { kind: "goal", title: (prompt || "").trim(), steps: { weekly: bullets.slice(0, 5) } };
+    }
+    const single = bullets[0] || lines.find(l => l && !/^(\*|-|•|\d+\.)\s+/.test(l)) || (prompt || "").trim();
+    return { kind: "task", title: single };
+  }
 
-    const preface = `${TONES[mode].opener}\nUser: ${q}\nAssistant style: ${mode}`;
-    const payloadMsgs: Msg[] = [...messages, { role: "user", content: preface }];
+  function applyMetaToEditors(pm: PlanMeta | null) {
+    if (!pm) return;
+    setGoalTitle(pm.title || "");
+    setDaily(pm.steps?.daily || []);
+    setWeekly(pm.steps?.weekly || []);
+    setMonthly(pm.steps?.monthly || []);
+    if (pm.target_date) setTargetISO(pm.target_date);
+  }
 
-    // show the clean user message in the UI (not the preface)
-    setMessages(prev => [...prev, { role: "user", content: customPrompt ?? input }]);
-    setInput("");
+  /* --- ask EVA --- */
+  async function askEva() {
+    if (!prompt.trim()) return;
+    setBusy(true); setErr(null); setReply(""); setMeta(null);
+
+    // Ask EVA for both conversational help AND a tiny machine-readable block.
+    // The block is fenced ```json and looks like:
+    // { "kind":"task"|"goal","title":"...", "target_date":"YYYY-MM-DD", "steps": { "daily":[],"weekly":[],"monthly":[] } }
+    const instruction = `
+You are EVA inside a goal & task app. 
+1) Answer naturally to help the user.
+2) Then append a JSON "meta" block in a fenced code block like:
+
+\`\`\`json
+{ "kind":"goal","title":"Title", "target_date":"YYYY-MM-DD",
+  "steps": { "daily":["..."], "weekly":["..."], "monthly":["..."] } }
+\`\`\`
+
+Rules:
+- If the user asks for one actionable thing, use kind "task" and provide a concise "title".
+- If the request is a process or multi-step plan, use kind "goal" and provide steps split by cadences when possible. If unsure, put items under "weekly".
+- Keep "title" under 12 words. Dates in YYYY-MM-DD format.`;
+
+    const catHint = `Life area: ${CATS.find(c => c.key === active)?.label}`;
+    const fullPrompt = `${instruction}\n\n${catHint}\n\nUser: ${prompt.trim()}`;
 
     try {
-      // keep existing backend route to avoid server changes; you can rename later to /api/eva
-      const res = await fetch("/api/alfred", {
+      const res = await fetch("/api/eva", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, messages: payloadMsgs }),
+        body: JSON.stringify({ mode: "friend", messages: [{ role: "user", content: fullPrompt }] }),
       });
       if (!res.ok) throw new Error(`EVA error: ${res.status}`);
       const data = await res.json();
-      let text: string = (data.text || "…").trim();
-      if (!text.endsWith(TONES[mode].signoff)) text += `\n\n${TONES[mode].signoff}`;
-
-      setMessages(prev => [...prev, { role: "assistant", content: text }]);
-
-      // extract actions for quick add
-      const acts = extractActions(text);
-      setExtracted(acts);
-      setSelected(Object.fromEntries(acts.map((_, i) => [i, true])));
-
-      // auto-choose section by majority guess
-      const guesses = acts.map((a: string) => guessSection(a));
-      const order: SectionKey[] = ["exercise", "gratitude", "big_goal", "general"];
-      const winner = order
-        .map((k) => ({ k, c: guesses.filter((g) => g === k).length }))
-        .sort((a, b) => b.c - a.c)[0]?.k || "general";
-      setSection(winner);
-    } catch (e: unknown) {
-      const msg = (e as Error)?.message ?? String(e);
-      setErr(msg);
+      const text = (data.reply || data.text || "").trim();
+      setReply(text);
+      const pm = parseMetaFromReply(text);
+      setMeta(pm);
+      applyMetaToEditors(pm);
+    } catch (e:any) {
+      setErr(e.message || String(e));
     } finally {
       setBusy(false);
     }
   }
 
-  /* ---------- Flows ---------- */
-  async function runFlow(k: FlowKey) {
-    const m = FLOWS[k];
-    setMode(m.persona);
-    await send(m.prompt);
+  /* --- DB actions --- */
+  async function addAsTask() {
+    if (!userId || !meta) return;
+    const title = (meta.title || prompt).trim();
+    if (!title) return;
+    try {
+      const row: TaskRow = {
+        user_id: userId,
+        title,
+        due_date: dueISO || todayISO(),
+        status: "pending",
+        priority: 0,
+        source: "eva_task",
+        category: active,
+        category_color: colorOf(active),
+      };
+      const { error } = await supabase.from("tasks").insert([row] as any);
+      if (error) throw error;
+      alert("Task added ✔︎");
+    } catch (e:any) { setErr(e.message || String(e)); }
   }
 
-  /* ---------- Task/Goal writers ---------- */
-  async function addTasks(titles: string[], sec: SectionKey) {
-    if (!userId) { setErr("Not signed in."); return; }
-    if (titles.length === 0) return;
-    const iso = toISO(new Date());
+  async function createGoalAndSeed() {
+    if (!userId || !meta) return;
+    const title = (goalTitle || meta.title || prompt).trim();
+    if (!title) return;
 
-    const rows = titles.map((title: string) => ({
-      user_id: userId,
-      title,
-      due_date: iso,
-      priority: 3,
-      source: "eva",
-      category: sec === "general" ? null : sec,
-      category_color: null,
-      status: "todo",
-    }));
+    const start = startISO;
+    const target = targetISO || startISO;
+    const half = halfwayISO;
 
-    const { error } = await supabase.from("tasks").insert(rows);
-    if (error) { setErr(error.message); return; }
+    const cat = active;
+    const col = colorOf(cat);
 
-    setCelebrate(true);
-    setTimeout(() => setCelebrate(false), 900);
-    if ((navigator as any).vibrate) (navigator as any).vibrate(8);
+    try {
+      // 1) Create goal
+      const { data: gins, error: gerr } = await supabase
+        .from("goals")
+        .insert({
+          user_id: userId,
+          title,
+          goal_type: "big",
+          start_date: start,
+          target_date: target,
+          halfway_date: half,
+          category: cat,
+          category_color: col,
+          status: "active",
+        })
+        .select("id")
+        .limit(1);
+      if (gerr) throw gerr;
+      const goalId = (gins as any)?.[0]?.id as number;
+
+      // 2) Insert steps (if any)
+      const stepsPayload: Step[] = [];
+      for (const s of (monthly || [])) if (s.trim()) stepsPayload.push({ user_id:userId, goal_id:goalId, cadence:"monthly", description:s.trim(), active:true });
+      for (const s of (weekly  || [])) if (s.trim()) stepsPayload.push({ user_id:userId, goal_id:goalId, cadence:"weekly",  description:s.trim(), active:true });
+      for (const s of (daily   || [])) if (s.trim()) stepsPayload.push({ user_id:userId, goal_id:goalId, cadence:"daily",   description:s.trim(), active:true });
+
+      if (stepsPayload.length) {
+        const { error: se } = await supabase.from("big_goal_steps").insert(stepsPayload as any);
+        if (se) throw se;
+      }
+
+      // 3) Seed tasks via RPC, fallback to client
+      const { error: rerr } = await supabase.rpc("reseed_big_goal_steps", { p_goal_id: goalId });
+      if (rerr) {
+        await clientReseedTasksForGoal(
+          supabase, userId, goalId, start, target, stepsPayload, cat, col, todayISO()
+        );
+      }
+
+      alert("Goal created and tasks seeded ✔︎");
+    } catch (e:any) {
+      setErr(e.message || String(e));
+    }
   }
 
-  // Treat “Add as Big Goal” as a kickoff task under big_goal (works with your Wins logic)
-  async function addAsBigGoal(seed?: string) {
-    if (!userId) { setErr("Not signed in."); return; }
-    const title = (seed || lastUserMessageContent(messages) || "New Big Goal").trim();
-    const iso = toISO(new Date());
-
-    const { error } = await supabase.from("tasks").insert({
-      user_id: userId,
-      title,
-      due_date: iso,
-      priority: 3,
-      source: "big_goal",
-      category: "big_goal",
-      category_color: null,
-      status: "todo",
-    } as any);
-
-    if (error) { setErr(error.message); return; }
-
-    setCelebrate(true);
-    setTimeout(() => setCelebrate(false), 900);
-    if ((navigator as any).vibrate) (navigator as any).vibrate(8);
-  }
-
-  /* ---------- UI helpers ---------- */
-  const quickAdds = useMemo(() => extracted, [extracted]);
-  const selectedTitles = useMemo(
-    () => quickAdds.filter((_, i) => selected[i]),
-    [quickAdds, selected]
-  );
-  function toggleSel(i: number) { setSelected(prev => ({ ...prev, [i]: !prev[i] })); }
-
-  const chips = [
-    { label: "Break into 3 steps", action: () => setInput(i => `${i.trim()} — break into 3 concrete steps for today.`) },
-    { label: "Make it for today",  action: () => setInput(i => `${i.trim()} — restrict plan to what I can do today.`) },
-    { label: "Turn into checklist", action: () => setInput(i => `${i.trim()} — output as a checklist with 3–6 bullets.`) },
-    ...(mode === "business" ? [{ label: "Draft outreach email", action: () => setInput("Draft a 100-word cold email for our top ICP with one CTA.") }] : []),
-    ...(mode === "health"   ? [{ label: "20-min workout",      action: () => setInput("Create a 20-minute dumbbell workout, 3 sets + short cardio finisher.") }] : []),
-  ];
-
-  /* ========================= Render ========================= */
+  /* --- UI --- */
   return (
-    <div className="two-col" style={{ alignItems: "start" }}>
-      {/* Sidebar */}
-      <aside className="card sidebar-sticky" style={{ display: "grid", gap: 10 }}>
-        <div>
-          <h2 style={{ margin: 0 }}>Eva <span className="muted" style={{ fontWeight: 500 }}>(EVA — Enhanced Virtual Assistant)</span></h2>
-          <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
-            Ask anything. Eva answers, then helps turn it into tasks or goals.
-          </div>
-        </div>
+    <div style={{ display: "grid", gap: 12 }}>
+      {styleTag}
 
-        <div>
-          <div className="section-title">Choose a persona</div>
-          <div style={{ display: "grid", gap: 6 }}>
-            {MODES.map((m) => (
+      {/* Header */}
+      <div className="card" style={{ display:"grid", gap:8 }}>
+        <h1 style={{ margin: 0 }}>Ask EVA</h1>
+        <div className="muted">Get help by area, then turn insights into tasks or auto-seeded goals.</div>
+      </div>
+
+      {/* Category tabs */}
+      <div className="card">
+        <div className="eva-tabs">
+          {CATS.map(c => {
+            const on = c.key === active;
+            return (
               <button
-                key={m.key}
-                onClick={() => setMode(m.key)}
-                className={mode === m.key ? "btn-primary" : ""}
-                style={{ borderRadius: 10, display: "flex", alignItems: "center", gap: 8 }}
-                aria-pressed={mode === m.key}
-                title={m.label}
-              >
-                <span aria-hidden>{m.emoji}</span>
-                <span>{m.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="card" style={{ display: "grid", gap: 6 }}>
-          <div className="section-title">Mini coach</div>
-          {(Object.keys(FLOWS) as FlowKey[]).map((k) => (
-            <button key={k} onClick={() => runFlow(k)} style={{ textAlign: "left" }}>
-              {FLOWS[k].label}
-            </button>
-          ))}
-        </div>
-
-        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{dayHint}</div>
-      </aside>
-
-      {/* Chat pane */}
-      <main className="card" style={{ display: "grid", gridTemplateRows: "auto 1fr auto", gap: 10, minHeight: 420 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-          <h3 style={{ margin: 0 }}>{MODES.find((m) => m.key === mode)?.label}</h3>
-          <span className="muted">/ chat</span>
-          {/* Conversion nudges (always available) */}
-          <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <button
-              className="btn-soft"
-              onClick={() => {
-                const last = lastUserMessageContent(messages) || "";
-                const q = (last || input).trim();
-                setInput(`${q} — break this into staged milestones (3–6), each with 2–4 tasks for the first stage.`);
-              }}
-              title="Ask Eva to break your question/idea into stages"
-            >
-              Turn into staged plan
-            </button>
-            <button
-              className="btn-soft"
-              onClick={() => addAsBigGoal(lastUserMessageContent(messages))}
-              title="Create a Big Goal kickoff task from the last question"
-            >
-              Add as Big Goal
-            </button>
-          </div>
-        </div>
-
-        <div ref={scrollRef} style={{ overflowY: "auto", maxHeight: "50vh", paddingRight: 4 }}>
-          {messages.length === 0 && (
-            <div className="muted">
-              Try: “How would I build a website?” — Eva can answer, then stage it and add steps to your tasks.
-            </div>
-          )}
-          <div style={{ display: "grid", gap: 8 }}>
-            {messages.map((m: Msg, i: number) => (
-              <div
-                key={i}
+                key={c.key}
+                onClick={() => setActive(c.key)}
+                aria-pressed={on}
+                className="eva-chip"
                 style={{
-                  background: m.role === "assistant" ? "#f8fafc" : "#eef2ff",
-                  border: "1px solid var(--border)",
-                  borderRadius: 12,
-                  padding: 10,
+                  borderColor: on ? "#a5b4fc" : "#e5e7eb",
+                  background: on ? "#eef2ff" : "#fff",
+                  display: "inline-flex",
+                  gap: 8,
+                  alignItems: "center"
                 }}
               >
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>
-                  {m.role === "assistant" ? "Eva" : "You"}
-                </div>
-                <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* One-tap chips */}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {chips.map((c, i) => (
-            <button
-              key={i}
-              onClick={c.action}
-              style={{ borderRadius: 999, padding: "6px 10px", border: "1px solid var(--border)" }}
-              title={c.label}
-            >
-              {c.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Extraction → Add to Today */}
-        {quickAdds.length > 0 && (
-          <div className="card" style={{ borderTop: "1px solid var(--border)", paddingTop: 8, display: "grid", gap: 8 }}>
-            <div className="section-title" style={{ marginBottom: 2 }}>Actions from Eva</div>
-            <div style={{ display: "grid", gap: 6 }}>
-              {quickAdds.map((t: string, idx: number) => (
-                <label key={`${idx}-${t.slice(0,12)}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <input type="checkbox" checked={!!selected[idx]} onChange={() => toggleSel(idx)} />
-                  <div style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t}</div>
-                </label>
-              ))}
-            </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span className="muted">Section:</span>
-              {(["general","big_goal","exercise","gratitude"] as SectionKey[]).map((k: SectionKey) => (
-                <button
-                  key={k}
-                  onClick={() => setSection(k)}
-                  aria-pressed={section === k}
-                  style={{
-                    borderRadius: 999,
-                    padding: "6px 10px",
-                    border: "1px solid var(--border)",
-                    background: section === k ? "hsl(var(--pastel-hsl) / .45)" : "var(--card)",
-                  }}
-                  title={SECTION_LABELS[k]}
-                >
-                  {SECTION_LABELS[k]}
-                </button>
-              ))}
-              <div style={{ flex: 1 }} />
-              <button onClick={() => addTasks(selectedTitles, section)} className="btn-primary" style={{ borderRadius: 10 }}>
-                ＋ Add {selectedTitles.length || "0"} to Today
+                <span style={{ width: 10, height: 10, borderRadius: 999, background: c.color, border: "1px solid #d1d5db" }} />
+                {c.label}
               </button>
-            </div>
-          </div>
-        )}
-
-        {/* Input row */}
-        <div style={{ display: "grid", gap: 6 }}>
-          {err && <div style={{ color: "red" }}>{err}</div>}
-          <textarea
-            rows={3}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!busy) send(); } }}
-            placeholder="Type your question… (Shift+Enter for newline)"
-          />
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button onClick={() => setMessages([])} disabled={busy}>Clear</button>
-            <button className="btn-primary" onClick={() => send()} disabled={busy || !input.trim()} style={{ borderRadius: 10 }}>
-              {busy ? "Thinking…" : "Send"}
-            </button>
-          </div>
+            );
+          })}
         </div>
-      </main>
+      </div>
 
-      {/* confetti (simple) */}
-      {celebrate && <ConfettiBurst />}
-    </div>
-  );
-}
+      {/* Prompt box */}
+      <div className="card" style={{ display:"grid", gap:8 }}>
+        <label className="col">
+          <span className="muted">Your question or idea</span>
+          <textarea
+            rows={4}
+            value={prompt}
+            onChange={e => setPrompt(e.target.value)}
+            placeholder={`e.g., Plan a ${CATS.find(c=>c.key===active)?.label.toLowerCase()} reset for the next 3 months`}
+          />
+        </label>
+        <div style={{ display:"flex", gap:8, justifyContent:"flex-end", flexWrap:"wrap" }}>
+          {err && <div style={{ color:"red", marginRight:"auto" }}>{err}</div>}
+          <button onClick={() => { setPrompt(""); setReply(""); setMeta(null); setDaily([]); setWeekly([]); setMonthly([]); }} disabled={busy}>Clear</button>
+          <button className="btn-primary" onClick={askEva} disabled={!prompt.trim() || busy} style={{ borderRadius:10 }}>
+            {busy ? "Thinking…" : "Ask EVA"}
+          </button>
+        </div>
+      </div>
 
-/* ========================= Confetti ========================= */
-function ConfettiBurst() {
-  const pieces = Array.from({ length: 16 });
-  return (
-    <div aria-hidden style={{ position:"fixed", inset:0, pointerEvents:"none", overflow:"hidden", zIndex:3000 }}>
-      {pieces.map((_, i) => (
-        <span
-          key={i}
-          style={{
-            position:"absolute",
-            left: `${(i / pieces.length) * 100}%`,
-            top: -10,
-            width:6, height:10, borderRadius:1,
-            background:"hsl(var(--pastel-hsl))",
-            animation: `fall ${600 + i*20}ms ease-out forwards`,
-          }}
-        />
-      ))}
-      <style>{`@keyframes fall{ to { transform: translateY(100vh) rotate(260deg); opacity:.2; } }`}</style>
+      {/* Answer + actions */}
+      {!!reply && (
+        <div className="card" style={{ display:"grid", gap:10 }}>
+          <div className="section-title">EVA says</div>
+          <div style={{ whiteSpace:"pre-wrap", lineHeight:1.5 }}>{reply}</div>
+
+          {/* Action bar */}
+          {meta && (
+            <div style={{ borderTop:"1px solid #eee", paddingTop:10, display:"grid", gap:10 }}>
+              <div className="section-title">Make it real</div>
+
+              {meta.kind === "task" ? (
+                <div className="eva-cta">
+                  <input
+                    type="date"
+                    value={dueISO}
+                    onChange={(e) => setDueISO(e.target.value)}
+                    title="Due date"
+                  />
+                  <button className="btn-primary" onClick={addAsTask} style={{ borderRadius:10 }}>
+                    Add as task
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Goal details */}
+                  <div className="col">
+                    <label className="col">
+                      <span className="muted">Goal title</span>
+                      <input
+                        value={goalTitle}
+                        onChange={e => setGoalTitle(e.target.value)}
+                        placeholder={meta.title || "Goal title"}
+                      />
+                    </label>
+
+                    <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+                      <label>
+                        <div className="muted">Target date</div>
+                        <input type="date" value={targetISO} onChange={e => setTargetISO(e.target.value)} />
+                      </label>
+                      {halfwayISO && (
+                        <div className="muted">Halfway will be <b>{halfwayISO}</b></div>
+                      )}
+                      <span className="muted" style={{ marginLeft:"auto" }}>
+                        Area: <b>{CATS.find(c=>c.key===active)?.label}</b>{" "}
+                        <span style={{ display:"inline-block", width:12, height:12, borderRadius:999, background: color, border:"1px solid #d1d5db" }} />
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Steps editor */}
+                  <div className="steps">
+                    <fieldset>
+                      <legend>Monthly</legend>
+                      {monthly.map((v,i)=>(
+                        <div key={`m${i}`} style={{ display:"flex", gap:6, marginBottom:6 }}>
+                          <input value={v} onChange={e=>setMonthly(monthly.map((x,idx)=>idx===i?e.target.value:x))} placeholder="Monthly step…" style={{ flex:1 }} />
+                          <button onClick={()=>setMonthly(monthly.filter((_,idx)=>idx!==i))}>–</button>
+                        </div>
+                      ))}
+                      <button onClick={()=>setMonthly([...monthly, ""])}>+ Add monthly</button>
+                    </fieldset>
+                    <fieldset>
+                      <legend>Weekly</legend>
+                      {weekly.map((v,i)=>(
+                        <div key={`w${i}`} style={{ display:"flex", gap:6, marginBottom:6 }}>
+                          <input value={v} onChange={e=>setWeekly(weekly.map((x,idx)=>idx===i?e.target.value:x))} placeholder="Weekly step…" style={{ flex:1 }} />
+                          <button onClick={()=>setWeekly(weekly.filter((_,idx)=>idx!==i))}>–</button>
+                        </div>
+                      ))}
+                      <button onClick={()=>setWeekly([...weekly, ""])}>+ Add weekly</button>
+                    </fieldset>
+                    <fieldset>
+                      <legend>Daily</legend>
+                      {daily.map((v,i)=>(
+                        <div key={`d${i}`} style={{ display:"flex", gap:6, marginBottom:6 }}>
+                          <input value={v} onChange={e=>setDaily(daily.map((x,idx)=>idx===i?e.target.value:x))} placeholder="Daily step…" style={{ flex:1 }} />
+                          <button onClick={()=>setDaily(daily.filter((_,idx)=>idx!==i))}>–</button>
+                        </div>
+                      ))}
+                      <button onClick={()=>setDaily([...daily, ""])}>+ Add daily</button>
+                    </fieldset>
+                  </div>
+
+                  <div className="eva-cta" style={{ justifyContent:"flex-end" }}>
+                    <button className="btn-primary" onClick={createGoalAndSeed} style={{ borderRadius:10 }}>
+                      Create goal & seed tasks
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
