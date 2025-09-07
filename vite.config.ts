@@ -7,15 +7,17 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      // enable in dev so you can test install on a phone at your dev URL
-      devOptions: { enabled: true },
+      devOptions: { enabled: true }, // lets you test install while developing
       workbox: {
-        // don't cache your API routes
         navigateFallbackDenylist: [/^\/api\//],
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,webp}"],
       },
+      // Files that should be copied as-is (iOS uses the apple-touch icon tag)
       includeAssets: [
-        "icons/favicon.ico",
-        "icons/apple-touch-icon.png",
+        "icons/app-icon-120.png",
+        "icons/app-icon-152.png",
+        "icons/app-icon-167.png",
+        "icons/app-icon-180.png"
       ],
       manifest: {
         name: "BYB",
@@ -26,14 +28,23 @@ export default defineConfig({
         background_color: "#ffffff",
         theme_color: "#111827",
         icons: [
-          // standard icons
-          { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
-          { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
-          // maskable (Android adaptive)
-          { src: "/icons/maskable-192.png", sizes: "192x192", type: "image/png", purpose: "maskable" },
-          { src: "/icons/maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
-          // iOS home screen icon (Safari still prefers this)
-          { src: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+          // standard
+          { src: "/icons/app-icon-192.png",  sizes: "192x192",  type: "image/png" },
+          { src: "/icons/app-icon-256.png",  sizes: "256x256",  type: "image/png" },
+          { src: "/icons/app-icon-384.png",  sizes: "384x384",  type: "image/png" },
+          { src: "/icons/app-icon-512.png",  sizes: "512x512",  type: "image/png" },
+
+          // maskable (Android adaptive icons)
+          { src: "/icons/app-icon-maskable-192.png", sizes: "192x192",  type: "image/png", purpose: "maskable" },
+          { src: "/icons/app-icon-maskable-256.png", sizes: "256x256",  type: "image/png", purpose: "maskable" },
+          { src: "/icons/app-icon-maskable-512.png", sizes: "512x512",  type: "image/png", purpose: "maskable" },
+
+          // optional large (some stores/devices use these)
+          { src: "/icons/app-icon-1024.png",          sizes: "1024x1024", type: "image/png" },
+          { src: "/icons/app-icon-1024-maskable.png", sizes: "1024x1024", type: "image/png", purpose: "maskable" },
+
+          // iOS size also listed for completeness (Safari mainly uses <link rel="apple-touch-icon">)
+          { src: "/icons/app-icon-180.png", sizes: "180x180", type: "image/png" }
         ],
       },
     }),
