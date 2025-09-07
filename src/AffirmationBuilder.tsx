@@ -1,3 +1,4 @@
+// src/AffirmationBuilder.tsx
 import { useEffect, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
@@ -11,8 +12,6 @@ function publicPath(p: string) {
   const withSlash = p.startsWith("/") ? p : `/${p}`;
   return `${base.replace(/\/$/, "")}${withSlash}`;
 }
-// If you add an EVA help image later, point this to it.
-// For now we’ll hide the image if missing.
 const EVA_HELP_IMG = publicPath("/eva/Affirmations_Eva.png");
 
 /* ---------- Types ---------- */
@@ -24,6 +23,24 @@ type AffirmationRow = {
   text: string;
   created_at?: string;
 };
+
+/* ---------- Category palette (pastels) ---------- */
+const CATS: ReadonlyArray<{ key: Category; label: string; color: string }> = [
+  { key: "business",      label: "Business",      color: "#C7D2FE" }, // pastel indigo
+  { key: "financial",     label: "Financial",     color: "#A7F3D0" }, // pastel mint
+  { key: "health",        label: "Health",        color: "#99F6E4" }, // pastel teal
+  { key: "personal",      label: "Personal",      color: "#E9D5FF" }, // pastel purple
+  { key: "relationships", label: "Relationships", color: "#FECDD3" }, // pastel rose
+];
+
+const colorOf = (k: Category) => CATS.find(c => c.key === k)?.color || "#e5e7eb";
+function hexToRgba(hex: string, alpha = 0.45) {
+  const m = hex.replace("#", "");
+  const [r, g, b] = m.length === 3
+    ? [m[0]+m[0], m[1]+m[1], m[2]+m[2]]
+    : [m.slice(0,2), m.slice(2,4), m.slice(4,6)];
+  return `rgba(${parseInt(r,16)}, ${parseInt(g,16)}, ${parseInt(b,16)}, ${alpha})`;
+}
 
 /* ---------- Storage keys ---------- */
 const LS_VAULT = "byb:affirmations:v1";
@@ -131,14 +148,6 @@ export default function AffirmationBuilderScreen() {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
   }, []);
 
-  const CATS: { key: Category; label: string }[] = [
-    { key: "business", label: "Business" },
-    { key: "relationships", label: "Relationships" },
-    { key: "financial", label: "Financial" },
-    { key: "personal", label: "Personal" },
-    { key: "health", label: "Health" },
-  ];
-
   /* ---------- EVA helpers (calls your /api/eva endpoint) ---------- */
   async function askEva() {
     setErr(null);
@@ -179,12 +188,10 @@ Rules: under 12 words, positive, believable, in my control. Output as bullet poi
     let t = s.trim();
 
     if (kind === "shorter") {
-      // Remove commas/clauses and trim to ~10 words
       t = t.replace(/,.*$/g, "").replace(/\s{2,}/g, " ");
       const words = t.split(/\s+/).slice(0, 10);
       t = words.join(" ");
     } else if (kind === "stronger") {
-      // Remove hedges; strengthen verbs
       t = t
         .replace(/\b(maybe|try|trying|hope|hoping|aim|aiming|could|should|might|want to)\b/gi, "")
         .replace(/\bI (can|will)\b/gi, "I")
@@ -192,14 +199,12 @@ Rules: under 12 words, positive, believable, in my control. Output as bullet poi
         .trim();
       if (!/^I\b/i.test(t)) t = `I ${t.charAt(0).toLowerCase()}${t.slice(1)}`;
     } else if (kind === "gentler") {
-      // Add warmth
       if (!/with (kindness|calm|patience)/i.test(t)) {
         t = `${t} with kindness`;
       }
       t = t.replace(/\s{2,}/g, " ");
     }
 
-    // Keep under ~12 words
     const words = t.split(/\s+/).slice(0, 12);
     return words.join(" ").trim();
   }
@@ -222,7 +227,6 @@ Keep it present-tense, positive, under 12 words, believable:
         }),
       });
 
-      // If API fails, fall back locally
       if (!res.ok) {
         const offline = localRefine(kind, text);
         setText(offline);
@@ -232,7 +236,6 @@ Keep it present-tense, positive, under 12 words, believable:
       }
 
       const data = await res.json();
-      // Pick the first non-empty line
       const out =
         (data.reply || data.text || "")
           .trim()
@@ -244,7 +247,6 @@ Keep it present-tense, positive, under 12 words, believable:
         setText(out);
         setSelectedIdx(null);
       } else {
-        // Fallback if EVA returned something unexpected
         const offline = localRefine(kind, text);
         setText(offline);
         setSelectedIdx(null);
@@ -272,7 +274,6 @@ Keep it present-tense, positive, under 12 words, believable:
     setBusySave(true);
     const row: AffirmationRow = { user_id: userId, category: active, text: clean };
 
-    // 1) Supabase (best-effort)
     try {
       if (userId) {
         await supabase.from("affirmations").insert({ user_id: userId, category: active, text: clean });
@@ -281,15 +282,14 @@ Keep it present-tense, positive, under 12 words, believable:
       // best-effort only
     }
 
-    // 2) Local vault (always)
     await saveToVaultLocal(row);
-
-    // 3) Send to Confidence for today’s rotation (local)
     await sendToConfidenceTodayLocal(row);
 
     setBusySave(false);
     if ((navigator as any).vibrate) (navigator as any).vibrate(6);
   }
+
+  const activeColor = colorOf(active);
 
   return (
     <div className="page-affirmation-builder" style={{ maxWidth: "100%", overflowX: "hidden" }}>
@@ -332,6 +332,7 @@ Keep it present-tense, positive, under 12 words, believable:
         <div className="card" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {CATS.map(c => {
             const isActive = c.key === active;
+            const col = c.color;
             return (
               <button
                 key={c.key}
@@ -340,8 +341,9 @@ Keep it present-tense, positive, under 12 words, believable:
                   padding: "8px 12px",
                   borderRadius: 8,
                   border: "1px solid",
-                  borderColor: isActive ? "hsl(var(--pastel-hsl))" : "#e5e7eb",
-                  background: isActive ? "hsl(var(--pastel-hsl) / .45)" : "#fff",
+                  borderColor: isActive ? col : "#e5e7eb",
+                  background: isActive ? hexToRgba(col, 0.45) : "#fff",
+                  fontWeight: isActive ? 700 : 500,
                 }}
                 aria-pressed={isActive}
               >
@@ -390,8 +392,8 @@ Keep it present-tense, positive, under 12 words, believable:
                         padding: "8px 10px",
                         borderRadius: 12,
                         border: "1px solid",
-                        borderColor: activeChip ? "hsl(var(--pastel-hsl))" : "#e5e7eb",
-                        background: activeChip ? "hsl(var(--pastel-hsl) / .45)" : "#fff",
+                        borderColor: activeChip ? activeColor : "#e5e7eb",
+                        background: activeChip ? hexToRgba(activeColor, 0.45) : "#fff",
                         fontWeight: activeChip ? 700 : 500,
                         maxWidth: "100%",
                         whiteSpace: "normal",
@@ -420,12 +422,13 @@ Keep it present-tense, positive, under 12 words, believable:
             aria-label="Affirmation preview"
             style={{
               padding: 18,
-              border: "1px solid #e5e7eb",
+              border: `2px solid ${activeColor}`,
               borderRadius: 12,
               fontSize: 22,
               fontWeight: 800,
               lineHeight: 1.3,
               textAlign: "center",
+              background: hexToRgba(activeColor, 0.25),
             }}
           >
             {text || "Your affirmation will appear here…"}
