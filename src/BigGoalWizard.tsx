@@ -56,8 +56,8 @@ export default function BigGoalWizard({ onClose, onCreated, mode = "create", exi
   // form state
   const [title, setTitle] = useState(existingGoal?.title || "");
   const [category, setCategory] = useState<AllowedCategory>(existingGoal?.category || "other");
-  const [startDate, setStartDate] = useState(existingGoal?.start_date || todayISO);
-  const [targetDate, setTargetDate] = useState(existingGoal?.target_date || "");
+  const [startDate, setStartDate] = useState<string>(existingGoal?.start_date || todayISO);
+  const [targetDate, setTargetDate] = useState<string>(existingGoal?.target_date || "");
   const [halfwayNote, setHalfwayNote] = useState("");
 
   const [monthlyCommit, setMonthlyCommit] = useState("");
