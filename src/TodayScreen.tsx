@@ -12,6 +12,30 @@ const TOAST_LOGO_SRC = "/LogoButterfly.png"; // served from public/
 const TOAST_BG = "#D7F0FA";                   // match App banner
 const TOAST_BORDER = "#bfe5f3";               // subtle border to suit the bg
 
+/* ===== Category palette (banked) ===== */
+type AllowedCategory = "business" | "financial" | "health" | "personal" | "relationships";
+
+const CATS: ReadonlyArray<{ key: AllowedCategory; label: string; color: string }> = [
+  { key: "business",      label: "Business",      color: "#C7D2FE" }, // pastel indigo
+  { key: "financial",     label: "Financial",     color: "#A7F3D0" }, // pastel mint
+  { key: "health",        label: "Health",        color: "#99F6E4" }, // pastel teal
+  { key: "personal",      label: "Personal",      color: "#E9D5FF" }, // pastel purple
+  { key: "relationships", label: "Relationships", color: "#FECDD3" }, // pastel rose
+] as const;
+
+const colorOf = (k: AllowedCategory) => CATS.find(c => c.key === k)?.color || "#E5E7EB";
+
+/** Map any legacy/free-text category to one of our 5 keys */
+function normalizeCat(x: string | null | undefined): AllowedCategory {
+  const s = (x || "").toLowerCase().trim();
+  if (s === "career") return "business";
+  if (s === "finance") return "financial";
+  if (s === "relationship") return "relationships";
+  if (s === "business" || s === "financial" || s === "health" || s === "personal" || s === "relationships") return s as AllowedCategory;
+  // default bucket for unknown/legacy/empty
+  return "personal";
+}
+
 /* ===== Types ===== */
 type Task = {
   id: number;
@@ -23,6 +47,9 @@ type Task = {
   source: string | null;
   goal_id: number | null;
   completed_at: string | null;
+  // NEW: category fields for color dot
+  category?: string | null;
+  category_color?: string | null;
 };
 type GoalLite = { id: number; title: string };
 type Props = { externalDateISO?: string };
@@ -536,7 +563,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     try {
       const { data, error } = await supabase
         .from("tasks")
-        .select("id,user_id,title,due_date,status,priority,source,goal_id,completed_at")
+        .select("id,user_id,title,due_date,status,priority,source,goal_id,completed_at,category,category_color")
         .eq("user_id", userId);
       if (error) throw error;
 
@@ -943,6 +970,15 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
+                      {/* Category dot */}
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          width: 10, height: 10, borderRadius: 999, flex: "0 0 auto",
+                          background: (t.category_color || colorOf(normalizeCat(t.category))) || "#E5E7EB",
+                          border: "1px solid #d1d5db",
+                        }}
+                      />
                       <span style={{ minWidth: 0 }}>{displayTitle(t)}</span>
                     </div>
                   </div>
@@ -965,6 +1001,15 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
+                      {/* Category dot */}
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          width: 10, height: 10, borderRadius: 999, flex: "0 0 auto",
+                          background: (t.category_color || colorOf(normalizeCat(t.category))) || "#E5E7EB",
+                          border: "1px solid #d1d5db",
+                        }}
+                      />
                       <span style={{ minWidth: 0 }}>{displayTitle(t)}</span>
                       <span className="badge">Overdue</span>
                       <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => moveToSelectedDate(t.id)}>
