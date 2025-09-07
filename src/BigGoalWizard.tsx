@@ -4,11 +4,11 @@ import { supabase } from "./lib/supabaseClient";
 
 /* -------- categories + colours (match DB constraint) -------- */
 const CATS = [
-  { key: "personal",  label: "Personal",  color: "#a855f7" },
-  { key: "health",    label: "Health",    color: "#22c55e" },
-  { key: "career",    label: "Business",  color: "#3b82f6" },
-  { key: "financial", label: "Finance",   color: "#f59e0b" },
-  { key: "other",     label: "Other",     color: "#6b7280" },
+  { key: "business",      label: "Business",      color: "#C7D2FE" },
+  { key: "financial",     label: "Financial",     color: "#A7F3D0" },
+  { key: "health",        label: "Health",        color: "#99F6E4" },
+  { key: "personal",      label: "Personal",      color: "#E9D5FF" },
+  { key: "relationships", label: "Relationships", color: "#FECDD3" },
 ] as const;
 export type AllowedCategory = typeof CATS[number]["key"];
 const colorOf = (k: AllowedCategory) => CATS.find(c => c.key === k)?.color || "#6b7280";
