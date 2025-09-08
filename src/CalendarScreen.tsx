@@ -13,6 +13,13 @@ type Task = {
   category_color: string | null;
   completed_at: string | null;
   source: string | null;
+  all_day?: boolean | null;
+  due_time?: string | null;                // "HH:MM:SS"
+  due_at?: string | null;                  // ISO timestamp
+  duration_min?: number | null;
+  remind_before_min?: number[] | null;
+  remind_at?: string | null;
+  tz?: string | null;
 };
 
 type ViewMode = "month" | "week";
@@ -152,7 +159,11 @@ export default function CalendarScreen({
     try {
       const { data, error } = await supabase
         .from("tasks")
-        .select("id,user_id,title,due_date,priority,category,category_color,completed_at,source")
+        .select(`
+  id,user_id,title,due_date,
+  all_day,due_time,due_at,duration_min,remind_before_min,remind_at,tz,
+  priority,category,category_color,completed_at,source
+`)
         .eq("user_id", userId)
         .gte("due_date", toISO(firstDayOfMonth))
         .lte("due_date", toISO(lastDayOfMonth))
