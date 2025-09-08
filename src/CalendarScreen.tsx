@@ -118,16 +118,6 @@ export default function CalendarScreen({
     return out;
   }, [startGrid, endGrid]);
 
-  // Week view range based on selectedISO (Mon..Sun)
-  const weekStartISO = useMemo(
-    () => startOfWeekISO(fromISO(selectedISO)),
-    [selectedISO]
-  );
-  const weekDays = useMemo(() => {
-    const base = fromISO(weekStartISO);
-    return Array.from({ length: 7 }, (_, i) => toISO(addDays(base, i)));
-  }, [weekStartISO]);
-
   const [tasksByDay, setTasksByDay] = useState<Record<string, Task[]>>({});
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -229,7 +219,7 @@ export default function CalendarScreen({
     }
   }
 
-  /* ===== Navigation helpers ===== */
+  /* ===== Navigation helpers (Month view) ===== */
   function prevMonth() {
     const d = new Date(cursor);
     d.setMonth(d.getMonth() - 1);
