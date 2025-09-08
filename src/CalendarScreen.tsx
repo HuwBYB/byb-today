@@ -38,6 +38,14 @@ type CatKey = typeof CATS[number]["key"];
 const colorOf = (k: CatKey | null | undefined) =>
   CATS.find(c => c.key === k)?.color || "#6b7280";
 
+const CAT_ORDER: Record<string, number> = {
+  personal: 0,
+  health: 1,
+  career: 2,
+  financial: 3,
+  other: 4,
+};
+
 /* ========================== MAIN SCREEN ========================== */
 
 type RepeatFreq = "" | "daily" | "weekly" | "monthly" | "annually";
@@ -49,6 +57,8 @@ const REPEAT_COUNTS: Record<Exclude<RepeatFreq, "">, number> = {
   monthly: 12,   // 12 months
   annually: 5,   // 5 years
 };
+
+type SortMode = "time" | "category";
 
 export default function CalendarScreen({
   onSelectDate,
@@ -65,6 +75,8 @@ export default function CalendarScreen({
   const [cursor, setCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedISO, setSelectedISO] = useState<string>(todayISO);
   const [viewMode, setViewMode] = useState<ViewMode>("month");
+
+  const [sortMode, setSortMode] = useState<SortMode>("time");
 
   const monthLabel = useMemo(
     () => cursor.toLocaleString(undefined, { month: "long", year: "numeric" }),
@@ -399,6 +411,44 @@ export default function CalendarScreen({
 
   const dayTasks = tasksByDay[selectedISO] || [];
 
+  /* ================= Sorting ================= */
+  const sortedDayTasks = useMemo(() => {
+    const list = [...dayTasks];
+
+    const cmpTime = (a: Task, b: Task) => {
+      const aAll = !!a.all_day || !a.due_time;
+      const bAll = !!b.all_day || !b.due_time;
+      if (aAll && !bAll) return -1;           // all-day first
+      if (!aAll && bAll) return 1;
+      if (aAll && bAll) {
+        // same: fall back to category order then title
+        const ca = CAT_ORDER[a.category || "zz"] ?? 99;
+        const cb = CAT_ORDER[b.category || "zz"] ?? 99;
+        if (ca !== cb) return ca - cb;
+        return (a.title || "").localeCompare(b.title || "");
+      }
+      // both timed: compare HH:MM:SS strings
+      const ta = a.due_time || "";
+      const tb = b.due_time || "";
+      if (ta !== tb) return ta.localeCompare(tb);
+      // tie-breakers
+      const pa = a.priority ?? 2;
+      const pb = b.priority ?? 2;
+      if (pa !== pb) return pa - pb;          // 1(high) before 3(low)
+      return (a.title || "").localeCompare(b.title || "");
+    };
+
+    const cmpCategory = (a: Task, b: Task) => {
+      const ca = CAT_ORDER[a.category || "zz"] ?? 99;
+      const cb = CAT_ORDER[b.category || "zz"] ?? 99;
+      if (ca !== cb) return ca - cb;
+      return cmpTime(a, b); // within category, keep all-day first then time
+    };
+
+    list.sort(sortMode === "time" ? cmpTime : cmpCategory);
+    return list;
+  }, [dayTasks, sortMode]);
+
   return (
     <div style={{ display: "grid", gap: 12 }}>
       {/* Title card with controls */}
@@ -580,6 +630,20 @@ export default function CalendarScreen({
             </span>
           </div>
 
+          {/* Sort by */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <label className="muted" htmlFor="sortby">Sort by</label>
+            <select
+              id="sortby"
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as SortMode)}
+              title="Sort tasks"
+            >
+              <option value="time">Time due</option>
+              <option value="category">Category</option>
+            </select>
+          </div>
+
           {/* Natural-language quick add */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", flex: "1 1 320px" }}>
             <input
@@ -675,9 +739,9 @@ export default function CalendarScreen({
           </button>
         </div>
 
-        {dayTasks.length === 0 && !loading && <div className="muted">Nothing scheduled.</div>}
+        {sortedDayTasks.length === 0 && !loading && <div className="muted">Nothing scheduled.</div>}
         <ul className="list">
-          {dayTasks.map((t) => (
+          {sortedDayTasks.map((t) => (
             <li key={t.id} className="item">
               <div style={{ display: "flex", alignItems: "flex-start", gap: 8, width: "100%" }}>
                 <span
@@ -821,7 +885,7 @@ function parseNlp(raw: string, baseISO: string): {
       }
     }
     // remove "every..." clause from title
-    s = s.replace(/\bevery\b([\s\S]*)$/i, " ");
+    s = s.replace(/\bevery\b([\\s\S]*)$/i, " ");
   }
 
   const title = s.replace(/\s+/g, " ").trim();
