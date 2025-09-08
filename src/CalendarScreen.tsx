@@ -460,7 +460,7 @@ export default function CalendarScreen({
       if (aTimed && bTimed) {
         const ta = a.due_time || "";
         const tb = b.due_time || "";
-        if (ta !== tb) return ta.localeCompare(tb);
+        if (ta !== tb) return ta.localeCompare(tb); // "HH:MM:SS"
       }
 
       // both all-day or same time: fallbacks
@@ -545,35 +545,34 @@ export default function CalendarScreen({
       >
         <h1 style={{ margin: 0, fontSize: 20 }}>Calendar</h1>
 
-        {/* Row: Left controls + View toggle (stack on mobile) */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr auto",
-            gap: 8,
-          }}
-        >
-          <div
-            style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+        {/* Controls: Today + (Month/Year + View Toggle stacked) */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <button
+            onClick={goToday}
+            title="Go to today"
+            aria-label="Go to today"
+            style={{
+              minWidth: 64,
+              height: 40,
+              padding: "0 12px",
+              borderRadius: 10,
+              border: "1px solid var(--border)",
+              background: "#fff",
+              fontWeight: 700,
+            }}
           >
-            <button
-              onClick={goToday}
-              title="Go to today"
-              aria-label="Go to today"
-              style={{
-                minWidth: 64,
-                height: 40,
-                padding: "0 12px",
-                borderRadius: 10,
-                border: "1px solid var(--border)",
-                background: "#fff",
-                fontWeight: 700,
-              }}
-            >
-              Today
-            </button>
+            Today
+          </button>
 
-            {/* Month + Year dropdowns */}
+          {/* Month + Year side-by-side, View toggle below spanning both */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "150px 120px",
+              gap: 8,
+              width: "fit-content",
+            }}
+          >
             <select
               value={cursor.getMonth()}
               onChange={(e) =>
@@ -584,7 +583,7 @@ export default function CalendarScreen({
                 height: 40,
                 borderRadius: 10,
                 padding: "0 10px",
-                minWidth: 140,
+                width: 150,
                 fontSize: 14,
               }}
             >
@@ -594,6 +593,7 @@ export default function CalendarScreen({
                 </option>
               ))}
             </select>
+
             <select
               value={cursor.getFullYear()}
               onChange={(e) =>
@@ -604,7 +604,7 @@ export default function CalendarScreen({
                 height: 40,
                 borderRadius: 10,
                 padding: "0 10px",
-                minWidth: 110,
+                width: 120,
                 fontSize: 14,
               }}
             >
@@ -615,48 +615,52 @@ export default function CalendarScreen({
               ))}
             </select>
 
-            <strong style={{ marginLeft: 4, fontSize: 14 }}>{monthLabel}</strong>
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <div
-              className="btn-group"
-              role="group"
-              aria-label="View mode"
-              style={{
-                display: "inline-flex",
-                borderRadius: 10,
-                overflow: "hidden",
-                border: "1px solid var(--border)",
-              }}
-            >
-              <button
-                onClick={() => setViewMode("month")}
-                className={viewMode === "month" ? "btn-primary" : ""}
+            {/* View toggle sized to combined width of the two selects above */}
+            <div style={{ gridColumn: "1 / -1" }}>
+              <div
+                role="group"
+                aria-label="View mode"
                 style={{
-                  padding: "6px 10px",
-                  minWidth: 68,
-                  fontSize: 14,
-                  background: viewMode === "month" ? "#eef2ff" : "#fff",
+                  display: "flex",
+                  width: "100%",
+                  height: 40,
+                  borderRadius: 10,
+                  overflow: "hidden",
+                  border: "1px solid var(--border)",
                 }}
               >
-                Month
-              </button>
-              <button
-                onClick={() => setViewMode("week")}
-                className={viewMode === "week" ? "btn-primary" : ""}
-                style={{
-                  padding: "6px 10px",
-                  minWidth: 68,
-                  fontSize: 14,
-                  background: viewMode === "week" ? "#eef2ff" : "#fff",
-                  borderLeft: "1px solid var(--border)",
-                }}
-              >
-                Week
-              </button>
+                <button
+                  onClick={() => setViewMode("month")}
+                  aria-pressed={viewMode === "month"}
+                  style={{
+                    flex: 1,
+                    height: "100%",
+                    padding: "0 12px",
+                    fontSize: 14,
+                    background: viewMode === "month" ? "#eef2ff" : "#fff",
+                  }}
+                >
+                  Month
+                </button>
+                <button
+                  onClick={() => setViewMode("week")}
+                  aria-pressed={viewMode === "week"}
+                  style={{
+                    flex: 1,
+                    height: "100%",
+                    padding: "0 12px",
+                    fontSize: 14,
+                    background: viewMode === "week" ? "#eef2ff" : "#fff",
+                    borderLeft: "1px solid var(--border)",
+                  }}
+                >
+                  Week
+                </button>
+              </div>
             </div>
           </div>
+
+          <strong style={{ fontSize: 14 }}>{monthLabel}</strong>
         </div>
 
         {/* Navigation arrows */}
