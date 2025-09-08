@@ -1,5 +1,5 @@
 // src/CalendarScreen.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* ===================== Types ===================== */
@@ -144,6 +144,14 @@ export default function CalendarScreen({
   // natural-language quick add
   const [nlp, setNlp] = useState("");
   const [addingNlp, setAddingNlp] = useState(false);
+
+  // Ask for Notification permission once
+  useEffect(() => {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
+  }, []);
 
   // Month/year selectors
   const months = useMemo(
@@ -421,20 +429,17 @@ export default function CalendarScreen({
       if (aAll && !bAll) return -1;           // all-day first
       if (!aAll && bAll) return 1;
       if (aAll && bAll) {
-        // same: fall back to category order then title
         const ca = CAT_ORDER[a.category || "zz"] ?? 99;
         const cb = CAT_ORDER[b.category || "zz"] ?? 99;
         if (ca !== cb) return ca - cb;
         return (a.title || "").localeCompare(b.title || "");
       }
-      // both timed: compare HH:MM:SS strings
       const ta = a.due_time || "";
       const tb = b.due_time || "";
       if (ta !== tb) return ta.localeCompare(tb);
-      // tie-breakers
       const pa = a.priority ?? 2;
       const pb = b.priority ?? 2;
-      if (pa !== pb) return pa - pb;          // 1(high) before 3(low)
+      if (pa !== pb) return pa - pb;
       return (a.title || "").localeCompare(b.title || "");
     };
 
@@ -448,6 +453,51 @@ export default function CalendarScreen({
     list.sort(sortMode === "time" ? cmpTime : cmpCategory);
     return list;
   }, [dayTasks, sortMode]);
+
+  /* ================= In-app reminders (local) ================= */
+  const notifiedRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!("Notification" in window)) return;
+
+    const tick = async () => {
+      if (Notification.permission !== "granted") return;
+      const reg = await navigator.serviceWorker?.ready.catch(() => null);
+      const now = Date.now();
+      const all: Task[] = Object.values(tasksByDay).flat();
+
+      for (const t of all) {
+        if (!t.due_at || !t.remind_before_min || t.remind_before_min.length === 0) continue;
+
+        for (const m of t.remind_before_min) {
+          const key = `${t.id}:${m}`;
+          if (notifiedRef.current.has(key)) continue;
+
+          const trigger = new Date(t.due_at).getTime() - m * 60_000;
+          if (now >= trigger && now <= trigger + 60_000) {
+            const title = "Reminder";
+            const body = t.all_day ? t.title : `${(t.due_time || "").slice(0,5)} — ${t.title}`;
+
+            if (reg?.showNotification) {
+              reg.showNotification(title, {
+                body,
+                tag: key,
+                icon: "/icons/app-icon-192.png",
+                badge: "/icons/app-icon-192.png",
+              });
+            } else {
+              new Notification(title, { body, tag: key });
+            }
+            notifiedRef.current.add(key);
+          }
+        }
+      }
+    };
+
+    tick();
+    const id = setInterval(tick, 30_000);
+    return () => clearInterval(id);
+  }, [tasksByDay]);
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
@@ -699,13 +749,7 @@ export default function CalendarScreen({
 
           {timed && (
             <>
-              <input
-                type="time"
-                value={timeStr}
-                onChange={(e) => setTimeStr(e.target.value)}
-                title="Start time"
-                style={{ width: 120 }}
-              />
+              <DigitalTimePicker value={timeStr} onChange={setTimeStr} minuteStep={5} />
               <input
                 type="number"
                 min={5}
@@ -725,6 +769,7 @@ export default function CalendarScreen({
               >
                 <option value="">No reminder</option>
                 <option value="0">At time</option>
+                <option value="1">1 min before</option>
                 <option value="5">5 min before</option>
                 <option value="10">10 min before</option>
                 <option value="15">15 min before</option>
@@ -777,21 +822,70 @@ export default function CalendarScreen({
   );
 }
 
+/* ===================== Digital time picker (hours + minutes) ===================== */
+function DigitalTimePicker({
+  value,
+  onChange,
+  minuteStep = 5,
+}: {
+  value: string;              // "HH:MM"
+  onChange: (v: string) => void;
+  minuteStep?: number;
+}) {
+  const [h, m] = value.split(":").map(n => Number(n) || 0);
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const minutes = Array.from({ length: Math.floor(60 / minuteStep) }, (_, i) => i * minuteStep);
+
+  const update = (hh: number, mm: number) => {
+    const v = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+    onChange(v);
+  };
+
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "4px 8px",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        background: "#fff",
+      }}
+      aria-label="Time picker"
+      role="group"
+    >
+      <select
+        aria-label="Hours"
+        value={h}
+        onChange={(e) => update(Number(e.target.value), m)}
+        style={{ fontSize: 16, padding: "6px 8px", height: 40 }}
+      >
+        {hours.map(hr => (
+          <option key={hr} value={hr}>{String(hr).padStart(2, "0")}</option>
+        ))}
+      </select>
+      <span style={{ fontWeight: 700, lineHeight: "40px" }}>:</span>
+      <select
+        aria-label="Minutes"
+        value={m - (m % minuteStep)}
+        onChange={(e) => update(h, Number(e.target.value))}
+        style={{ fontSize: 16, padding: "6px 8px", height: 40 }}
+      >
+        {minutes.map(mm => (
+          <option key={mm} value={mm}>{String(mm).padStart(2, "0")}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 /* ===================== helpers ===================== */
 function combineLocalDateTimeISO(dateISO: string, hhmm: string) {
-  // builds a local Date from YYYY-MM-DD + "HH:MM" (seconds fixed to :00)
   return new Date(`${dateISO}T${hhmm}:00`);
 }
 
 /* ===================== NLP Parser ===================== */
-/**
- * Parse examples:
- *  - "Lunch tomorrow #personal !high"
- *  - "Dentist 2025-09-01 #health"
- *  - "Gym every Mon,Wed,Fri #health"
- *  - "Invoice 15 Sep every month until 2026-01-01 !high"
- *  - "Pay VAT 15/10 every 2 weeks for 6 times"
- */
 function parseNlp(raw: string, baseISO: string): {
   title: string;
   occurrences: string[];
@@ -804,14 +898,12 @@ function parseNlp(raw: string, baseISO: string): {
   let category: CatKey | undefined = undefined;
   let priority: number | undefined = undefined;
 
-  // category via #tag
   const catMatch = s.match(/#(personal|health|career|financial|other)\b/i);
   if (catMatch) {
     category = catMatch[1].toLowerCase() as CatKey;
     s = s.replace(catMatch[0], " ");
   }
 
-  // priority via !high|!normal|!low|!top
   const priMatch = s.match(/!(high|normal|low|top)\b/i);
   if (priMatch) {
     const key = priMatch[1].toLowerCase();
@@ -819,21 +911,17 @@ function parseNlp(raw: string, baseISO: string): {
     s = s.replace(priMatch[0], " ");
   }
 
-  // explicit date forms in text -> pick first as anchor
   let anchorISO: string | null = findExplicitDateISO(s, baseISO);
   if (anchorISO) {
-    // remove that substring
     s = removeDateSubstr(s);
   }
 
-  // relative tokens: today / tomorrow / next week / next mon...
   const rel = s.match(/\b(today|tomorrow|next week|next\s+(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun))\b/i);
   if (rel && !anchorISO) {
     anchorISO = relativeToISO(rel[0].toLowerCase(), baseISO);
     if (anchorISO) s = s.replace(rel[0], " ");
   }
 
-  // "in N days/weeks/months"
   const inMatch = s.match(/\bin\s+(\d+)\s+(day|days|week|weeks|month|months)\b/i);
   if (inMatch && !anchorISO) {
     const n = Number(inMatch[1]);
@@ -846,25 +934,25 @@ function parseNlp(raw: string, baseISO: string): {
     s = s.replace(inMatch[0], " ");
   }
 
-  // repeat rules: every ...
   const everyMatch = s.match(/\bevery\b([\s\S]*)$/i);
-  let rule: { type: "weekday-list" | "interval" | "freq"; days?: number[]; freq?: "daily"|"weekly"|"monthly"|"annually"; interval?: number; until?: string | null; count?: number | null } | null = null;
+  let rule:
+    | { type: "weekday-list"; days?: number[]; until?: string | null; count?: number | null }
+    | { type: "interval"; interval?: number; freq?: "daily"|"weekly"|"monthly"|"annually"; until?: string | null; count?: number | null }
+    | { type: "freq"; freq?: "daily"|"weekly"|"monthly"|"annually"; until?: string | null; count?: number | null }
+    | null = null;
+
   if (everyMatch) {
     const tail = everyMatch[1].trim();
-    // until date
     const until = (tail.match(/\buntil\s+([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{1,2}[\/\-][0-9]{1,2}(?:[\/\-][0-9]{2,4})?|[0-9]{1,2}\s+[A-Za-z]{3,})/i));
     const untilISO = until ? normalizeAnyDateToISO(until[1], baseISO) : null;
 
-    // count "for N times"
     const countMatch = tail.match(/\bfor\s+(\d+)\s+(time|times)\b/i);
     const count = countMatch ? Number(countMatch[1]) : null;
 
-    // weekday list: mon,wed,fri
     const wd = parseWeekdayList(tail);
     if (wd && wd.length) {
       rule = { type: "weekday-list", days: wd, until: untilISO, count };
     } else {
-      // interval like "every 2 weeks", or "weekly/monthly/daily/annually"
       const intMatch = tail.match(/\bevery\s+(\d+)\s+(week|weeks|month|months|day|days|year|years)\b/i);
       if (intMatch) {
         const n = Number(intMatch[1]);
@@ -872,7 +960,6 @@ function parseNlp(raw: string, baseISO: string): {
         const freq = unit.startsWith("day") ? "daily" : unit.startsWith("week") ? "weekly" : unit.startsWith("month") ? "monthly" : "annually";
         rule = { type: "interval", interval: n, freq, until: untilISO, count };
       } else {
-        // plain "every week/month/day/year"
         const fMatch = tail.match(/\bevery\s+(day|daily|week|weekly|month|monthly|year|yearly|annually)\b/i);
         if (fMatch) {
           const token = fMatch[1].toLowerCase();
@@ -884,50 +971,47 @@ function parseNlp(raw: string, baseISO: string): {
         }
       }
     }
-    // remove "every..." clause from title
-    s = s.replace(/\bevery\b([\\s\S]*)$/i, " ");
+    s = s.replace(/\bevery\b([\s\S]*)$/i, " ");
   }
 
   const title = s.replace(/\s+/g, " ").trim();
 
-  // Build occurrences
   const base = anchorISO || baseISO;
   if (!rule) {
     occurrences.push(base);
   } else {
     const maxCap = 104; // safety
-    if (rule.type === "weekday-list") {
-      const days = rule.days || [];
-      const until = rule.until ? fromISO(rule.until) : null;
+    if ((rule as any).type === "weekday-list") {
+      const days = (rule as any).days || [];
+      const until = (rule as any).until ? fromISO((rule as any).until) : null;
       let d = fromISO(base);
       let added = 0;
-      // iterate forward day by day and pick matching weekdays
-      while (added < (rule.count ?? 24) && added < maxCap) {
+      while (added < ((rule as any).count ?? 24) && added < maxCap) {
         const iso = toISO(d);
-        const wd = weekdayIdx(d); // Mon=1..Sun=7
+        const wd = weekdayIdx(d);
         if (days.includes(wd) && (until ? d <= until : true)) {
           occurrences.push(iso);
           added++;
         }
         d = addDays(d, 1);
-        if (!until && added >= (rule.count ?? 24)) break;
+        if (!until && added >= ((rule as any).count ?? 24)) break;
         if (until && d > until) break;
       }
-    } else if (rule.type === "interval") {
-      const interval = Math.max(1, rule.interval || 1);
-      const freq = rule.freq!;
-      const until = rule.until ? fromISO(rule.until) : null;
-      const limit = rule.count ?? defaultCountFor(freq);
+    } else if ((rule as any).type === "interval") {
+      const interval = Math.max(1, (rule as any).interval || 1);
+      const freq = (rule as any).freq!;
+      const until = (rule as any).until ? fromISO((rule as any).until) : null;
+      const limit = (rule as any).count ?? defaultCountFor(freq);
       let d = fromISO(base);
       for (let i = 0; i < Math.min(limit, maxCap); i++) {
         occurrences.push(toISO(d));
         d = addIntervalN(d, freq, interval);
         if (until && d > until) break;
       }
-    } else if (rule.type === "freq") {
-      const freq = rule.freq!;
-      const until = rule.until ? fromISO(rule.until) : null;
-      const limit = rule.count ?? defaultCountFor(freq);
+    } else if ((rule as any).type === "freq") {
+      const freq = (rule as any).freq!;
+      const until = (rule as any).until ? fromISO((rule as any).until) : null;
+      const limit = (rule as any).count ?? defaultCountFor(freq);
       let d = fromISO(base);
       for (let i = 0; i < Math.min(limit, maxCap); i++) {
         occurrences.push(toISO(d));
@@ -939,7 +1023,7 @@ function parseNlp(raw: string, baseISO: string): {
 
   return {
     title,
-    occurrences: Array.from(new Set(occurrences)), // dedupe
+    occurrences: Array.from(new Set(occurrences)),
     category,
     priority,
     source: "calendar_nlp"
@@ -951,7 +1035,6 @@ function defaultCountFor(freq: "daily"|"weekly"|"monthly"|"annually") {
 }
 
 function parseWeekdayList(tail: string): number[] | null {
-  // returns Mon..Sun as 1..7
   const map: Record<string, number> = { mon:1, tue:2, tues:2, wed:3, thu:4, thur:4, thurs:4, fri:5, sat:6, sun:7 };
   const m = tail.match(/\b(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(\s*,\s*(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun))*\b/ig);
   if (!m) return null;
@@ -961,17 +1044,14 @@ function parseWeekdayList(tail: string): number[] | null {
 }
 
 function findExplicitDateISO(s: string, baseISO: string): string | null {
-  // YYYY-MM-DD
   const iso = s.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
   if (iso) return clampISO(iso[1]);
-  // DD/MM or D/M (assume current year)
   const dm = s.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/);
   if (dm) {
     const y = dm[3] ? normalizeYear(Number(dm[3])) : fromISO(baseISO).getFullYear();
     const m = Number(dm[2]); const d = Number(dm[1]);
     return toISO(new Date(y, m - 1, d));
   }
-  // "15 Sep" or "Sep 15"
   const m1 = s.match(/\b(\d{1,2})\s+([A-Za-z]{3,})\b/);
   const m2 = s.match(/\b([A-Za-z]{3,})\s+(\d{1,2})\b/);
   const y = fromISO(baseISO).getFullYear();
