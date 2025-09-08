@@ -13,11 +13,13 @@ type Task = {
   category_color: string | null;
   completed_at: string | null;
   source: string | null;
+
+  // time-based fields (existing in your DB)
   all_day?: boolean | null;
   due_time?: string | null;                // "HH:MM:SS"
-  due_at?: string | null;                  // ISO timestamp
+  due_at?: string | null;                  // ISO timestamp (timestamptz)
   duration_min?: number | null;
-  remind_before_min?: number[] | null;
+  remind_before_min?: number[] | null;     // array<int> or null
   remind_at?: string | null;
   tz?: string | null;
 };
@@ -119,6 +121,13 @@ export default function CalendarScreen({
   const [newPriority, setNewPriority] = useState<number>(2);
   const [newFreq, setNewFreq] = useState<RepeatFreq>("");
   const [adding, setAdding] = useState(false);
+
+  // time-based options
+  const [timed, setTimed] = useState(false);          // all-day by default
+  const [timeStr, setTimeStr] = useState("09:00");    // "HH:MM"
+  const [durationMin, setDurationMin] = useState<number>(60);
+  const [remindBefore, setRemindBefore] = useState<number | "">(""); // minutes before ("" = none)
+  const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
   // natural-language quick add
   const [nlp, setNlp] = useState("");
@@ -252,27 +261,48 @@ export default function CalendarScreen({
 
       let rows: Array<Partial<Task> & { user_id: string }> = [];
 
-      if (!newFreq) {
-        rows = [{
+      const buildRow = (iso: string) => {
+        if (timed) {
+          const dt = combineLocalDateTimeISO(iso, timeStr);
+          return {
+            user_id: userId,
+            title,
+            due_date: iso,
+            all_day: false,
+            due_time: `${timeStr}:00`,
+            due_at: dt.toISOString(),
+            duration_min: durationMin,
+            tz: userTz,
+            remind_before_min: remindBefore === "" ? null : [Number(remindBefore)],
+            priority: newPriority,
+            category,
+            category_color,
+            source: newFreq ? `calendar_repeat_${newFreq}` : "calendar_manual",
+          };
+        }
+        // all-day
+        return {
           user_id: userId,
           title,
-          due_date: selectedISO,
+          due_date: iso,
+          all_day: true,
+          due_time: null,
+          due_at: null,
+          duration_min: null,
+          tz: userTz,
+          remind_before_min: null,
           priority: newPriority,
           category,
           category_color,
-          source: "calendar_manual",
-        }];
+          source: newFreq ? `calendar_repeat_${newFreq}` : "calendar_manual",
+        };
+      };
+
+      if (!newFreq) {
+        rows = [buildRow(selectedISO)];
       } else {
         const count = REPEAT_COUNTS[newFreq];
-        rows = Array.from({ length: count }, (_, i) => ({
-          user_id: userId,
-          title,
-          due_date: addInterval(selectedISO, newFreq, i),
-          priority: newPriority,
-          category,
-          category_color,
-          source: `calendar_repeat_${newFreq}`,
-        }));
+        rows = Array.from({ length: count }, (_, i) => buildRow(addInterval(selectedISO, newFreq, i)));
       }
 
       const { data, error } = await supabase.from("tasks").insert(rows as any).select();
@@ -294,6 +324,8 @@ export default function CalendarScreen({
 
       setNewTitle("");
       setNewFreq("");
+      // Optional UX reset:
+      // setTimed(false); setTimeStr("09:00"); setDurationMin(60); setRemindBefore("");
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -322,6 +354,7 @@ export default function CalendarScreen({
           user_id: userId,
           title: parsed.title,
           due_date: iso,
+          all_day: true, // NLP quick-add remains all-day for now
           priority: parsed.priority ?? 2,
           category,
           category_color,
@@ -332,6 +365,7 @@ export default function CalendarScreen({
           user_id: userId,
           title: parsed.title,
           due_date: selectedISO,
+          all_day: true,
           priority: parsed.priority ?? 2,
           category,
           category_color,
@@ -367,7 +401,7 @@ export default function CalendarScreen({
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      {/* Title card with controls (Alfred/help & Import/Export removed) */}
+      {/* Title card with controls */}
       <div className="card" style={{ position: "relative", display: "grid", gap: 10 }}>
         <h1 style={{ margin: 0 }}>Calendar</h1>
 
@@ -561,7 +595,7 @@ export default function CalendarScreen({
           </div>
         </div>
 
-        {/* Structured add (optional) */}
+        {/* Structured add */}
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <input
             value={newTitle}
@@ -587,6 +621,55 @@ export default function CalendarScreen({
             <option value="monthly">Monthly</option>
             <option value="annually">Annually</option>
           </select>
+
+          {/* Timed options */}
+          <label title="Timed event?">
+            <input
+              type="checkbox"
+              checked={timed}
+              onChange={(e) => setTimed(e.target.checked)}
+              style={{ marginRight: 6 }}
+            />
+            Timed
+          </label>
+
+          {timed && (
+            <>
+              <input
+                type="time"
+                value={timeStr}
+                onChange={(e) => setTimeStr(e.target.value)}
+                title="Start time"
+                style={{ width: 120 }}
+              />
+              <input
+                type="number"
+                min={5}
+                step={5}
+                value={durationMin}
+                onChange={(e) => setDurationMin(Math.max(5, Number(e.target.value) || 60))}
+                title="Duration (min)"
+                style={{ width: 110 }}
+                placeholder="min"
+              />
+              <select
+                value={remindBefore === "" ? "" : String(remindBefore)}
+                onChange={(e) =>
+                  setRemindBefore(e.target.value === "" ? "" : Number(e.target.value))
+                }
+                title="Reminder"
+              >
+                <option value="">No reminder</option>
+                <option value="0">At time</option>
+                <option value="5">5 min before</option>
+                <option value="10">10 min before</option>
+                <option value="15">15 min before</option>
+                <option value="30">30 min before</option>
+                <option value="60">1 hour before</option>
+              </select>
+            </>
+          )}
+
           <button className="btn-primary" onClick={addTaskToSelected} disabled={!newTitle.trim() || adding} style={{ borderRadius: 8 }}>
             {adding ? "Adding…" : "Add"}
           </button>
@@ -612,7 +695,9 @@ export default function CalendarScreen({
                 />
                 <div style={{ flex: 1 }}>
                   <div style={{ textDecoration: t.completed_at ? "line-through" : "none" }}>
-                    {t.title}
+                    {t.all_day
+                      ? t.title
+                      : `${(t.due_time || "").slice(0,5)} — ${t.title}`}
                   </div>
                   <div className="muted" style={{ fontSize: 12 }}>
                     Category: {t.category || "—"} · Priority: {priorityLabel(t.priority)}
@@ -626,6 +711,12 @@ export default function CalendarScreen({
       </div>
     </div>
   );
+}
+
+/* ===================== helpers ===================== */
+function combineLocalDateTimeISO(dateISO: string, hhmm: string) {
+  // builds a local Date from YYYY-MM-DD + "HH:MM" (seconds fixed to :00)
+  return new Date(`${dateISO}T${hhmm}:00`);
 }
 
 /* ===================== NLP Parser ===================== */
