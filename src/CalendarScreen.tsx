@@ -228,42 +228,12 @@ export default function CalendarScreen({
   }
 
   /* ===== Navigation helpers ===== */
-  function prevMonth() {
-    const d = new Date(cursor);
-    d.setMonth(d.getMonth() - 1);
-    setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
-  }
-  function nextMonth() {
-    const d = new Date(cursor);
-    d.setMonth(d.getMonth() + 1);
-    setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
-  }
-  function prevYear() {
-    setCursor(new Date(cursor.getFullYear() - 1, cursor.getMonth(), 1));
-  }
-  function nextYear() {
-    setCursor(new Date(cursor.getFullYear() + 1, cursor.getMonth(), 1));
-  }
   function goToday() {
     const d = new Date();
     const iso = toISO(d);
     setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
     setSelectedISO(iso);
     if (navigateOnSelect && onSelectDate) onSelectDate(iso);
-  }
-  function prevWeek() {
-    const newSel = toISO(addDays(fromISO(selectedISO), -7));
-    setSelectedISO(newSel);
-    if (navigateOnSelect && onSelectDate) onSelectDate(newSel);
-    const d = fromISO(newSel);
-    setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
-  }
-  function nextWeek() {
-    const newSel = toISO(addDays(fromISO(selectedISO), 7));
-    setSelectedISO(newSel);
-    if (navigateOnSelect && onSelectDate) onSelectDate(newSel);
-    const d = fromISO(newSel);
-    setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
   }
 
   function isSameMonth(iso: string) {
@@ -460,7 +430,7 @@ export default function CalendarScreen({
       if (aTimed && bTimed) {
         const ta = a.due_time || "";
         const tb = b.due_time || "";
-        if (ta !== tb) return ta.localeCompare(tb); // "HH:MM:SS"
+        if (ta !== tb) return ta.localeCompare(tb);
       }
 
       // both all-day or same time: fallbacks
@@ -487,53 +457,48 @@ export default function CalendarScreen({
     return list;
   }, [dayTasks, sortMode]);
 
-  /* ================= In-app reminders (local) ================= */
-  const notifiedRef = useRef<Set<string>>(new Set());
+  /* ================= Week scroller (swipe to change weeks) ================= */
+  const anchorMondayISO = useMemo(() => startOfWeekISO(today), []); // fixed anchor (today's week)
+  const WSPAN = 52; // ±52 weeks around anchor
+  const weekPanels = useMemo(() => {
+    const anchor = fromISO(anchorMondayISO);
+    return Array.from({ length: WSPAN * 2 + 1 }, (_, i) =>
+      toISO(addDays(anchor, (i - WSPAN) * 7))
+    );
+  }, [anchorMondayISO]);
 
-  useEffect(() => {
-    if (!("Notification" in window)) return;
+  const weekStripRef = useRef<HTMLDivElement | null>(null);
+  const [stripIndex, setStripIndex] = useState<number>(() => {
+    const idx = weekIndexFor(weekStartISO, anchorMondayISO, WSPAN);
+    return Math.max(0, Math.min(idx, weekPanels.length - 1));
+  });
 
-    const tick = async () => {
-      if (Notification.permission !== "granted") return;
-      const reg = await navigator.serviceWorker?.ready.catch(() => null);
-      const now = Date.now();
-      const all: Task[] = Object.values(tasksByDay).flat();
-
-      for (const t of all) {
-        if (!t.due_at || !t.remind_before_min || t.remind_before_min.length === 0)
-          continue;
-
-        for (const m of t.remind_before_min) {
-          const key = `${t.id}:${m}`;
-          if (notifiedRef.current.has(key)) continue;
-
-          const trigger = new Date(t.due_at).getTime() - m * 60_000;
-          if (now >= trigger && now <= trigger + 60_000) {
-            const title = "Reminder";
-            const body = t.all_day
-              ? t.title
-              : `${(t.due_time || "").slice(0, 5)} — ${t.title}`;
-
-            if (reg?.showNotification) {
-              reg.showNotification(title, {
-                body,
-                tag: key,
-                icon: "/icons/app-icon-192.png",
-                badge: "/icons/app-icon-192.png",
-              });
-            } else {
-              new Notification(title, { body, tag: key });
-            }
-            notifiedRef.current.add(key);
-          }
-        }
+  // Sync selected week when user scrolls the strip
+  function onStripScroll() {
+    const el = weekStripRef.current;
+    if (!el) return;
+    const w = el.clientWidth || 1;
+    const i = Math.round(el.scrollLeft / w);
+    if (i !== stripIndex) {
+      setStripIndex(i);
+      const startIso = weekPanels[i];
+      if (startIso) {
+        const monday = startIso;
+        setSelectedISO(monday); // jump selection to Monday of that week
+        const dd = fromISO(monday);
+        setCursor(new Date(dd.getFullYear(), dd.getMonth(), 1));
       }
-    };
+    }
+  }
 
-    tick();
-    const id = setInterval(tick, 30_000);
-    return () => clearInterval(id);
-  }, [tasksByDay]);
+  // Keep the strip roughly aligned to the current week when you switch modes manually
+  useEffect(() => {
+    const idx = weekIndexFor(weekStartISO, anchorMondayISO, WSPAN);
+    setStripIndex(idx);
+    const el = weekStripRef.current;
+    if (!el) return;
+    el.scrollLeft = idx * el.clientWidth;
+  }, [weekStartISO, anchorMondayISO]);
 
   /* ================= UI (mobile-first) ================= */
   return (
@@ -545,7 +510,7 @@ export default function CalendarScreen({
       >
         <h1 style={{ margin: 0, fontSize: 20 }}>Calendar</h1>
 
-        {/* Controls: Today + (Month/Year + View Toggle stacked) */}
+        {/* Controls row */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <button
             onClick={goToday}
@@ -564,7 +529,7 @@ export default function CalendarScreen({
             Today
           </button>
 
-          {/* Month + Year side-by-side, View toggle below spanning both */}
+          {/* Month + Year (side-by-side) */}
           <div
             style={{
               display: "grid",
@@ -615,95 +580,74 @@ export default function CalendarScreen({
               ))}
             </select>
 
-            {/* View toggle sized to combined width of the two selects above */}
-            <div style={{ gridColumn: "1 / -1" }}>
-              <div
-                role="group"
-                aria-label="View mode"
+            {/* View toggle – separate pills with a gap, full width of the two selects */}
+            <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8 }}>
+              <button
+                onClick={() => setViewMode("month")}
+                aria-pressed={viewMode === "month"}
                 style={{
-                  display: "flex",
-                  width: "100%",
+                  flex: 1,
                   height: 40,
+                  padding: "0 12px",
+                  fontSize: 14,
                   borderRadius: 10,
-                  overflow: "hidden",
                   border: "1px solid var(--border)",
+                  background: viewMode === "month" ? "#eef2ff" : "#fff",
                 }}
               >
-                <button
-                  onClick={() => setViewMode("month")}
-                  aria-pressed={viewMode === "month"}
-                  style={{
-                    flex: 1,
-                    height: "100%",
-                    padding: "0 12px",
-                    fontSize: 14,
-                    background: viewMode === "month" ? "#eef2ff" : "#fff",
-                  }}
-                >
-                  Month
-                </button>
-                <button
-                  onClick={() => setViewMode("week")}
-                  aria-pressed={viewMode === "week"}
-                  style={{
-                    flex: 1,
-                    height: "100%",
-                    padding: "0 12px",
-                    fontSize: 14,
-                    background: viewMode === "week" ? "#eef2ff" : "#fff",
-                    borderLeft: "1px solid var(--border)",
-                  }}
-                >
-                  Week
-                </button>
-              </div>
+                Month
+              </button>
+              <button
+                onClick={() => setViewMode("week")}
+                aria-pressed={viewMode === "week"}
+                style={{
+                  flex: 1,
+                  height: 40,
+                  padding: "0 12px",
+                  fontSize: 14,
+                  borderRadius: 10,
+                  border: "1px solid var(--border)",
+                  background: viewMode === "week" ? "#eef2ff" : "#fff",
+                }}
+              >
+                Week
+              </button>
             </div>
           </div>
 
           <strong style={{ fontSize: 14 }}>{monthLabel}</strong>
         </div>
 
-        {/* Navigation arrows */}
-        {viewMode === "month" ? (
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span className="muted" style={{ minWidth: 50 }}>
-                Month
-              </span>
-              <button onClick={prevMonth} aria-label="Previous month">
-                ←
-              </button>
-              <button onClick={nextMonth} aria-label="Next month">
-                →
-              </button>
-            </div>
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span className="muted" style={{ minWidth: 50 }}>
-                Year
-              </span>
-              <button onClick={prevYear} aria-label="Previous year">
-                ←
-              </button>
-              <button onClick={nextYear} aria-label="Next year">
-                →
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span className="muted" style={{ minWidth: 50 }}>
-                Week
-              </span>
-              <button onClick={prevWeek} aria-label="Previous week">
-                ←
-              </button>
-              <button onClick={nextWeek} aria-label="Next week">
-                →
-              </button>
-              <span className="muted">
-                ({weekDays[0]} → {weekDays[6]})
-              </span>
+        {/* Week scroller (replaces the old Month/Year/Week arrow row) */}
+        {viewMode === "week" && (
+          <div className="card" style={{ padding: 8 }}>
+            <div
+              ref={weekStripRef}
+              onScroll={onStripScroll}
+              style={{
+                display: "grid",
+                gridAutoFlow: "column",
+                gridAutoColumns: "100%",
+                overflowX: "auto",
+                scrollbarWidth: "thin",
+                gap: 8,
+                scrollSnapType: "x mandatory",
+                WebkitOverflowScrolling: "touch",
+              }}
+            >
+              {weekPanels.map((startIso) => (
+                <WeekPanel
+                  key={startIso}
+                  startIso={startIso}
+                  selectedISO={selectedISO}
+                  onPick={(iso) => {
+                    setSelectedISO(iso);
+                    const dd = fromISO(iso);
+                    setCursor(new Date(dd.getFullYear(), dd.getMonth(), 1));
+                    if (navigateOnSelect && onSelectDate) onSelectDate(iso);
+                  }}
+                />
+              ))}
             </div>
           </div>
         )}
@@ -1140,6 +1084,66 @@ export default function CalendarScreen({
   );
 }
 
+/* ===================== WeekPanel (one snap page) ===================== */
+function WeekPanel({
+  startIso,
+  selectedISO,
+  onPick,
+}: {
+  startIso: string;
+  selectedISO: string;
+  onPick: (iso: string) => void;
+}) {
+  const start = fromISO(startIso);
+  const days = Array.from({ length: 7 }, (_, i) => toISO(addDays(start, i)));
+  return (
+    <div style={{ scrollSnapAlign: "center", padding: 4 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(7, 1fr)",
+          gap: 6,
+        }}
+      >
+        {days.map((iso) => {
+          const d = fromISO(iso);
+          const dayNum = d.getDate();
+          const short = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][
+            (d.getDay() + 6) % 7
+          ];
+          const isSel = iso === selectedISO;
+          return (
+            <button
+              key={iso}
+              onClick={() => onPick(iso)}
+              title={iso}
+              style={{
+                height: 40,
+                borderRadius: 999,
+                padding: "0 10px",
+                border: "1px solid var(--border)",
+                background: isSel ? "#eef2ff" : "#fff",
+                fontSize: 13,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <span style={{ opacity: 0.8, marginRight: 6 }}>{short}</span>
+              <strong>{dayNum}</strong>
+            </button>
+          );
+        })}
+      </div>
+      {/* Week range label */}
+      <div style={{ textAlign: "center", marginTop: 6, fontSize: 12, color: "#64748b" }}>
+        {days[0]} → {days[6]}
+      </div>
+    </div>
+  );
+}
+
 /* ===================== Digital time picker (hours + minutes) ===================== */
 function DigitalTimePicker({
   value,
@@ -1211,7 +1215,14 @@ function combineLocalDateTimeISO(dateISO: string, hhmm: string) {
   return new Date(`${dateISO}T${hhmm}:00`);
 }
 
-/* ===================== NLP Parser ===================== */
+function weekIndexFor(weekStartISO: string, anchorMondayISO: string, span: number) {
+  const a = fromISO(anchorMondayISO).getTime();
+  const b = fromISO(weekStartISO).getTime();
+  const weeks = Math.round((b - a) / (7 * 24 * 60 * 60 * 1000));
+  return weeks + span; // shift to [0..len-1]
+}
+
+/* ===================== NLP Parser (unchanged) ===================== */
 function parseNlp(
   raw: string,
   baseISO: string
@@ -1292,7 +1303,7 @@ function parseNlp(
     );
     const untilISO = until ? normalizeAnyDateToISO(until[1], baseISO) : null;
 
-    const countMatch = tail.match(/\bfor\s+(\d+)\s+(time|times)\b/i);
+  const countMatch = tail.match(/\bfor\s+(\d+)\s+(time|times)\b/i);
     const count = countMatch ? Number(countMatch[1]) : null;
 
     const wd = parseWeekdayList(tail);
@@ -1448,18 +1459,8 @@ function parseDayMonth(dayStr: string, monStr: string, year: number): string {
 }
 function monthIndex(token: string) {
   const map = [
-    "jan",
-    "feb",
-    "mar",
-    "apr",
-    "may",
-    "jun",
-    "jul",
-    "aug",
-    "sep",
-    "oct",
-    "nov",
-    "dec",
+    "jan", "feb", "mar", "apr", "may", "jun",
+    "jul", "aug", "sep", "oct", "nov", "dec",
   ];
   const idx = map.findIndex((x) => token.toLowerCase().startsWith(x));
   return idx >= 0 ? idx : 0;
@@ -1490,16 +1491,7 @@ function relativeToISO(token: string, baseISO: string): string | null {
 }
 function mapWeekday(tok: string): number {
   const m: Record<string, number> = {
-    mon: 1,
-    tue: 2,
-    tues: 2,
-    wed: 3,
-    thu: 4,
-    thur: 4,
-    thurs: 4,
-    fri: 5,
-    sat: 6,
-    sun: 7,
+    mon: 1, tue: 2, tues: 2, wed: 3, thu: 4, thur: 4, thurs: 4, fri: 5, sat: 6, sun: 7,
   };
   return m[tok] || 1;
 }
