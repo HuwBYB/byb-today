@@ -16,10 +16,10 @@ type Task = {
 
   // time-based fields (existing in your DB)
   all_day?: boolean | null;
-  due_time?: string | null;                // "HH:MM:SS"
-  due_at?: string | null;                  // ISO timestamp (timestamptz)
+  due_time?: string | null; // "HH:MM:SS"
+  due_at?: string | null; // ISO timestamp (timestamptz)
   duration_min?: number | null;
-  remind_before_min?: number[] | null;     // array<int> or null
+  remind_before_min?: number[] | null; // array<int> or null
   remind_at?: string | null;
   tz?: string | null;
 };
@@ -28,15 +28,15 @@ type ViewMode = "month" | "week";
 
 /* ---------- Categories + colours (shared with Goals) ---------- */
 const CATS = [
-  { key: "personal",  label: "Personal",  color: "#a855f7" },
-  { key: "health",    label: "Health",    color: "#22c55e" },
-  { key: "career",    label: "Business",  color: "#3b82f6" }, // stored as 'career'
-  { key: "financial", label: "Finance",   color: "#f59e0b" }, // stored as 'financial'
-  { key: "other",     label: "Other",     color: "#6b7280" },
+  { key: "personal", label: "Personal", color: "#a855f7" },
+  { key: "health", label: "Health", color: "#22c55e" },
+  { key: "career", label: "Business", color: "#3b82f6" }, // stored as 'career'
+  { key: "financial", label: "Finance", color: "#f59e0b" }, // stored as 'financial'
+  { key: "other", label: "Other", color: "#6b7280" },
 ] as const;
-type CatKey = typeof CATS[number]["key"];
+type CatKey = (typeof CATS)[number]["key"];
 const colorOf = (k: CatKey | null | undefined) =>
-  CATS.find(c => c.key === k)?.color || "#6b7280";
+  CATS.find((c) => c.key === k)?.color || "#6b7280";
 
 const CAT_ORDER: Record<string, number> = {
   personal: 0,
@@ -56,8 +56,8 @@ const REPEAT_COUNTS: Record<Exclude<RepeatFreq, "">, number> = {
   annually: 5,
 };
 
-// ✅ add manual + priority
-type SortMode = "time" | "category" | "priority" | "manual";
+// Only two modes per your request
+type SortMode = "time" | "category";
 
 export default function CalendarScreen({
   onSelectDate,
@@ -71,7 +71,9 @@ export default function CalendarScreen({
   const todayISO = toISO(today);
 
   // calendar cursor points at first of month
-  const [cursor, setCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
+  const [cursor, setCursor] = useState(
+    () => new Date(today.getFullYear(), today.getMonth(), 1)
+  );
   const [selectedISO, setSelectedISO] = useState<string>(todayISO);
   const [viewMode, setViewMode] = useState<ViewMode>("month");
 
@@ -117,7 +119,10 @@ export default function CalendarScreen({
   }, [startGrid, endGrid]);
 
   // Week view range based on selectedISO (Mon..Sun)
-  const weekStartISO = useMemo(() => startOfWeekISO(fromISO(selectedISO)), [selectedISO]);
+  const weekStartISO = useMemo(
+    () => startOfWeekISO(fromISO(selectedISO)),
+    [selectedISO]
+  );
   const weekDays = useMemo(() => {
     const base = fromISO(weekStartISO);
     return Array.from({ length: 7 }, (_, i) => toISO(addDays(base, i)));
@@ -135,8 +140,8 @@ export default function CalendarScreen({
   const [adding, setAdding] = useState(false);
 
   // time-based options
-  const [timed, setTimed] = useState(false);          // all-day by default
-  const [timeStr, setTimeStr] = useState("09:00");    // "HH:MM"
+  const [timed, setTimed] = useState(false); // all-day by default
+  const [timeStr, setTimeStr] = useState("09:00"); // "HH:MM"
   const [durationMin, setDurationMin] = useState<number>(60);
   const [remindBefore, setRemindBefore] = useState<number | "">(""); // minutes before ("" = none)
   const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -144,10 +149,6 @@ export default function CalendarScreen({
   // natural-language quick add
   const [nlp, setNlp] = useState("");
   const [addingNlp, setAddingNlp] = useState(false);
-
-  // 🔒 per-day manual order (local, mobile-friendly)
-  const [manualOrder, setManualOrder] = useState<number[]>([]);
-  const orderKey = (iso: string) => `calOrder:${iso}`;
 
   // Ask for Notification permission once
   useEffect(() => {
@@ -159,10 +160,12 @@ export default function CalendarScreen({
 
   // Month/year selectors
   const months = useMemo(
-    () => Array.from({ length: 12 }, (_, i) => ({
-      value: i,
-      label: new Date(2000, i, 1).toLocaleString(undefined, { month: "long" })
-    })), []
+    () =>
+      Array.from({ length: 12 }, (_, i) => ({
+        value: i,
+        label: new Date(2000, i, 1).toLocaleString(undefined, { month: "long" }),
+      })),
+    []
   );
   const years = useMemo(() => {
     const y = today.getFullYear();
@@ -173,7 +176,10 @@ export default function CalendarScreen({
   // auth
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
-      if (error) { setErr(error.message); return; }
+      if (error) {
+        setErr(error.message);
+        return;
+      }
       setUserId(data.user?.id ?? null);
     });
   }, []);
@@ -192,11 +198,13 @@ export default function CalendarScreen({
     try {
       const { data, error } = await supabase
         .from("tasks")
-        .select(`
+        .select(
+          `
   id,user_id,title,due_date,
   all_day,due_time,due_at,duration_min,remind_before_min,remind_at,tz,
   priority,category,category_color,completed_at,source
-`)
+`
+        )
         .eq("user_id", userId)
         .gte("due_date", toISO(firstDayOfMonth))
         .lte("due_date", toISO(lastDayOfMonth))
@@ -205,7 +213,7 @@ export default function CalendarScreen({
         .order("id", { ascending: true });
       if (error) throw error;
       const map: Record<string, Task[]> = {};
-      for (const t of (data as Task[])) {
+      for (const t of data as Task[]) {
         const day = (t.due_date || "").slice(0, 10);
         if (!day) continue;
         (map[day] ||= []).push(t);
@@ -260,7 +268,9 @@ export default function CalendarScreen({
 
   function isSameMonth(iso: string) {
     const d = fromISO(iso);
-    return d.getMonth() === cursor.getMonth() && d.getFullYear() === cursor.getFullYear();
+    return (
+      d.getMonth() === cursor.getMonth() && d.getFullYear() === cursor.getFullYear()
+    );
   }
 
   function addInterval(baseISO: string, step: Exclude<RepeatFreq, "">, i: number) {
@@ -278,7 +288,8 @@ export default function CalendarScreen({
     const title = newTitle.trim();
     if (!title) return;
 
-    setAdding(true); setErr(null);
+    setAdding(true);
+    setErr(null);
     try {
       const category = newCat;
       const category_color = colorOf(category);
@@ -326,15 +337,21 @@ export default function CalendarScreen({
         rows = [buildRow(selectedISO)];
       } else {
         const count = REPEAT_COUNTS[newFreq];
-        rows = Array.from({ length: count }, (_, i) => buildRow(addInterval(selectedISO, newFreq, i)));
+        rows = Array.from({ length: count }, (_, i) =>
+          buildRow(addInterval(selectedISO, newFreq, i))
+        );
       }
 
-      const { data, error } = await supabase.from("tasks").insert(rows as any).select();
+      const { data, error } = await supabase
+        .from("tasks")
+        .insert(rows as any)
+        .select();
       if (error) throw error;
 
       // Update local month cache
-      const first = toISO(firstDayOfMonth), last = toISO(lastDayOfMonth);
-      setTasksByDay(prev => {
+      const first = toISO(firstDayOfMonth),
+        last = toISO(lastDayOfMonth);
+      setTasksByDay((prev) => {
         const map = { ...prev };
         for (const t of data as Task[]) {
           const day = (t.due_date || "").slice(0, 10);
@@ -348,7 +365,7 @@ export default function CalendarScreen({
 
       setNewTitle("");
       setNewFreq("");
-      // Optionally reset timed fields
+      // Optional: reset timed controls if you like
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -373,35 +390,41 @@ export default function CalendarScreen({
       let rows: Array<Partial<Task> & { user_id: string }> = [];
 
       if (parsed.occurrences && parsed.occurrences.length > 0) {
-        rows = parsed.occurrences.map(iso => ({
+        rows = parsed.occurrences.map((iso) => ({
           user_id: userId,
           title: parsed.title,
           due_date: iso,
-          all_day: true,
+          all_day: true, // NLP quick-add remains all-day for now
           priority: parsed.priority ?? 2,
           category,
           category_color,
           source: parsed.source || "calendar_nlp",
         }));
       } else {
-        rows = [{
-          user_id: userId,
-          title: parsed.title,
-          due_date: selectedISO,
-          all_day: true,
-          priority: parsed.priority ?? 2,
-          category,
-          category_color,
-          source: parsed.source || "calendar_nlp",
-        }];
+        rows = [
+          {
+            user_id: userId,
+            title: parsed.title,
+            due_date: selectedISO,
+            all_day: true,
+            priority: parsed.priority ?? 2,
+            category,
+            category_color,
+            source: parsed.source || "calendar_nlp",
+          },
+        ];
       }
 
-      const { data, error } = await supabase.from("tasks").insert(rows as any).select();
+      const { data, error } = await supabase
+        .from("tasks")
+        .insert(rows as any)
+        .select();
       if (error) throw error;
 
       // update month cache
-      const first = toISO(firstDayOfMonth), last = toISO(lastDayOfMonth);
-      setTasksByDay(prev => {
+      const first = toISO(firstDayOfMonth),
+        last = toISO(lastDayOfMonth);
+      setTasksByDay((prev) => {
         const map = { ...prev };
         for (const t of data as Task[]) {
           const day = (t.due_date || "").slice(0, 10);
@@ -422,67 +445,40 @@ export default function CalendarScreen({
 
   const dayTasks = tasksByDay[selectedISO] || [];
 
-  /* ========== Manual order persistence per day ========== */
-  // Load order on date change
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(orderKey(selectedISO));
-      setManualOrder(raw ? JSON.parse(raw) : []);
-    } catch { setManualOrder([]); }
-  }, [selectedISO]);
-
-  // Ensure manualOrder always contains current task ids (in a stable way)
-  useEffect(() => {
-    const ids = dayTasks.map(t => t.id);
-    setManualOrder(prev => {
-      // keep only still-existing ids
-      const cleaned = prev.filter(id => ids.includes(id));
-      // append any new ids to end (stable)
-      const missing = ids.filter(id => !cleaned.includes(id));
-      const next = [...cleaned, ...missing];
-      try { localStorage.setItem(orderKey(selectedISO), JSON.stringify(next)); } catch {}
-      return next;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dayTasks.length, selectedISO]);
-
-  function moveTask(id: number, dir: -1 | 1) {
-    setManualOrder(prev => {
-      const idx = prev.indexOf(id);
-      if (idx < 0) return prev;
-      const next = [...prev];
-      const newIdx = Math.min(Math.max(0, idx + dir), next.length - 1);
-      next.splice(idx, 1);
-      next.splice(newIdx, 0, id);
-      try { localStorage.setItem(orderKey(selectedISO), JSON.stringify(next)); } catch {}
-      return next;
-    });
-  }
-
   /* ================= Sorting ================= */
   const sortedDayTasks = useMemo(() => {
     const list = [...dayTasks];
 
+    const isTimed = (t: Task) => !t.all_day && !!t.due_time;
+
+    // Sort by time: timed first (earliest -> latest), then all-day.
     const cmpTime = (a: Task, b: Task) => {
-      const aAll = !!a.all_day || !a.due_time;
-      const bAll = !!b.all_day || !b.due_time;
-      if (aAll && !bAll) return -1; // all-day first
-      if (!aAll && bAll) return 1;
-      if (aAll && bAll) {
-        const ca = CAT_ORDER[a.category || "zz"] ?? 99;
-        const cb = CAT_ORDER[b.category || "zz"] ?? 99;
-        if (ca !== cb) return ca - cb;
-        return (a.title || "").localeCompare(b.title || "");
+      const aTimed = isTimed(a);
+      const bTimed = isTimed(b);
+
+      if (aTimed && !bTimed) return -1;
+      if (!aTimed && bTimed) return 1;
+
+      if (aTimed && bTimed) {
+        const ta = a.due_time || "";
+        const tb = b.due_time || "";
+        if (ta !== tb) return ta.localeCompare(tb); // "HH:MM:SS" lexicographic works
       }
-      const ta = a.due_time || "";
-      const tb = b.due_time || "";
-      if (ta !== tb) return ta.localeCompare(tb);
+
+      // both all-day or same time: fallbacks
+      // Prefer category order, then priority, then title
+      const ca = CAT_ORDER[a.category || "zz"] ?? 99;
+      const cb = CAT_ORDER[b.category || "zz"] ?? 99;
+      if (ca !== cb) return ca - cb;
+
       const pa = a.priority ?? 2;
       const pb = b.priority ?? 2;
       if (pa !== pb) return pa - pb;
+
       return (a.title || "").localeCompare(b.title || "");
     };
 
+    // Category sort: group by category, then use cmpTime within group
     const cmpCategory = (a: Task, b: Task) => {
       const ca = CAT_ORDER[a.category || "zz"] ?? 99;
       const cb = CAT_ORDER[b.category || "zz"] ?? 99;
@@ -490,25 +486,9 @@ export default function CalendarScreen({
       return cmpTime(a, b);
     };
 
-    const cmpPriority = (a: Task, b: Task) => {
-      const pa = a.priority ?? 2;
-      const pb = b.priority ?? 2;
-      if (pa !== pb) return pa - pb; // 1 (high) first
-      return cmpTime(a, b);
-    };
-
-    if (sortMode === "manual") {
-      const pos = (id: number) => {
-        const i = manualOrder.indexOf(id);
-        return i === -1 ? Number.MAX_SAFE_INTEGER : i;
-      };
-      return list.sort((a, b) => pos(a.id) - pos(b.id));
-    }
-
-    if (sortMode === "category") return list.sort(cmpCategory);
-    if (sortMode === "priority") return list.sort(cmpPriority);
-    return list.sort(cmpTime); // default time
-  }, [dayTasks, sortMode, manualOrder]);
+    list.sort(sortMode === "category" ? cmpCategory : cmpTime);
+    return list;
+  }, [dayTasks, sortMode]);
 
   /* ================= In-app reminders (local) ================= */
   const notifiedRef = useRef<Set<string>>(new Set());
@@ -523,7 +503,8 @@ export default function CalendarScreen({
       const all: Task[] = Object.values(tasksByDay).flat();
 
       for (const t of all) {
-        if (!t.due_at || !t.remind_before_min || t.remind_before_min.length === 0) continue;
+        if (!t.due_at || !t.remind_before_min || t.remind_before_min.length === 0)
+          continue;
 
         for (const m of t.remind_before_min) {
           const key = `${t.id}:${m}`;
@@ -532,7 +513,9 @@ export default function CalendarScreen({
           const trigger = new Date(t.due_at).getTime() - m * 60_000;
           if (now >= trigger && now <= trigger + 60_000) {
             const title = "Reminder";
-            const body = t.all_day ? t.title : `${(t.due_time || "").slice(0,5)} — ${t.title}`;
+            const body = t.all_day
+              ? t.title
+              : `${(t.due_time || "").slice(0, 5)} — ${t.title}`;
 
             if (reg?.showNotification) {
               reg.showNotification(title, {
@@ -559,7 +542,10 @@ export default function CalendarScreen({
   return (
     <div style={{ display: "grid", gap: 12, padding: 12 }}>
       {/* Title & top controls */}
-      <div className="card" style={{ position: "relative", display: "grid", gap: 10, padding: 12 }}>
+      <div
+        className="card"
+        style={{ position: "relative", display: "grid", gap: 10, padding: 12 }}
+      >
         <h1 style={{ margin: 0, fontSize: 20 }}>Calendar</h1>
 
         {/* Row: Left controls + View toggle (stack on mobile) */}
@@ -570,7 +556,9 @@ export default function CalendarScreen({
             gap: 8,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+          >
             <button
               onClick={goToday}
               title="Go to today"
@@ -582,7 +570,7 @@ export default function CalendarScreen({
                 borderRadius: 10,
                 border: "1px solid var(--border)",
                 background: "#fff",
-                fontWeight: 700
+                fontWeight: 700,
               }}
             >
               Today
@@ -591,37 +579,70 @@ export default function CalendarScreen({
             {/* Month + Year dropdowns */}
             <select
               value={cursor.getMonth()}
-              onChange={(e) => setCursor(new Date(cursor.getFullYear(), Number(e.target.value), 1))}
+              onChange={(e) =>
+                setCursor(new Date(cursor.getFullYear(), Number(e.target.value), 1))
+              }
               title="Month"
               style={{ height: 36, borderRadius: 10 }}
             >
-              {months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              {months.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
             </select>
             <select
               value={cursor.getFullYear()}
-              onChange={(e) => setCursor(new Date(Number(e.target.value), cursor.getMonth(), 1))}
+              onChange={(e) =>
+                setCursor(new Date(Number(e.target.value), cursor.getMonth(), 1))
+              }
               title="Year"
               style={{ height: 36, borderRadius: 10 }}
             >
-              {years.map(y => <option key={y} value={y}>{y}</option>)}
+              {years.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
             </select>
 
             <strong style={{ marginLeft: 4, fontSize: 14 }}>{monthLabel}</strong>
           </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <div className="btn-group" role="group" aria-label="View mode" style={{ display: "inline-flex", borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)" }}>
+            <div
+              className="btn-group"
+              role="group"
+              aria-label="View mode"
+              style={{
+                display: "inline-flex",
+                borderRadius: 10,
+                overflow: "hidden",
+                border: "1px solid var(--border)",
+              }}
+            >
               <button
                 onClick={() => setViewMode("month")}
                 className={viewMode === "month" ? "btn-primary" : ""}
-                style={{ padding: "6px 10px", minWidth: 68, fontSize: 14, background: viewMode === "month" ? "#eef2ff" : "#fff" }}
+                style={{
+                  padding: "6px 10px",
+                  minWidth: 68,
+                  fontSize: 14,
+                  background: viewMode === "month" ? "#eef2ff" : "#fff",
+                }}
               >
                 Month
               </button>
               <button
                 onClick={() => setViewMode("week")}
                 className={viewMode === "week" ? "btn-primary" : ""}
-                style={{ padding: "6px 10px", minWidth: 68, fontSize: 14, background: viewMode === "week" ? "#eef2ff" : "#fff", borderLeft: "1px solid var(--border)" }}
+                style={{
+                  padding: "6px 10px",
+                  minWidth: 68,
+                  fontSize: 14,
+                  background: viewMode === "week" ? "#eef2ff" : "#fff",
+                  borderLeft: "1px solid var(--border)",
+                }}
               >
                 Week
               </button>
@@ -633,23 +654,43 @@ export default function CalendarScreen({
         {viewMode === "month" ? (
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span className="muted" style={{ minWidth: 50 }}>Month</span>
-              <button onClick={prevMonth} aria-label="Previous month">←</button>
-              <button onClick={nextMonth} aria-label="Next month">→</button>
+              <span className="muted" style={{ minWidth: 50 }}>
+                Month
+              </span>
+              <button onClick={prevMonth} aria-label="Previous month">
+                ←
+              </button>
+              <button onClick={nextMonth} aria-label="Next month">
+                →
+              </button>
             </div>
             <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span className="muted" style={{ minWidth: 50 }}>Year</span>
-              <button onClick={prevYear} aria-label="Previous year">←</button>
-              <button onClick={nextYear} aria-label="Next year">→</button>
+              <span className="muted" style={{ minWidth: 50 }}>
+                Year
+              </span>
+              <button onClick={prevYear} aria-label="Previous year">
+                ←
+              </button>
+              <button onClick={nextYear} aria-label="Next year">
+                →
+              </button>
             </div>
           </div>
         ) : (
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span className="muted" style={{ minWidth: 50 }}>Week</span>
-              <button onClick={prevWeek} aria-label="Previous week">←</button>
-              <button onClick={nextWeek} aria-label="Next week">→</button>
-              <span className="muted">({weekDays[0]} → {weekDays[6]})</span>
+              <span className="muted" style={{ minWidth: 50 }}>
+                Week
+              </span>
+              <button onClick={prevWeek} aria-label="Previous week">
+                ←
+              </button>
+              <button onClick={nextWeek} aria-label="Next week">
+                →
+              </button>
+              <span className="muted">
+                ({weekDays[0]} → {weekDays[6]})
+              </span>
             </div>
           </div>
         )}
@@ -657,9 +698,19 @@ export default function CalendarScreen({
 
       {/* Weekday header (Mon..Sun) */}
       <div className="card" style={{ padding: 8 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, fontSize: 12, color: "#64748b" }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(7, 1fr)",
+            gap: 6,
+            fontSize: 12,
+            color: "#64748b",
+          }}
+        >
           {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
-            <div key={d} style={{ textAlign: "center" }}>{d}</div>
+            <div key={d} style={{ textAlign: "center" }}>
+              {d}
+            </div>
           ))}
         </div>
       </div>
@@ -667,7 +718,13 @@ export default function CalendarScreen({
       {/* Month or Week grid */}
       <div className="card" style={{ padding: 8 }}>
         {viewMode === "month" ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(7, 1fr)",
+              gap: 6,
+            }}
+          >
             {gridDays.map((iso) => {
               const inMonth = isSameMonth(iso);
               const list = tasksByDay[iso] || [];
@@ -681,7 +738,8 @@ export default function CalendarScreen({
                   key={iso}
                   onClick={() => {
                     setSelectedISO(iso);
-                    if (!inMonth) setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
+                    if (!inMonth)
+                      setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
                     if (navigateOnSelect && onSelectDate) onSelectDate(iso);
                   }}
                   className="cal-day"
@@ -693,10 +751,16 @@ export default function CalendarScreen({
                     border: "1px solid var(--border)",
                     background: isSelected ? "#eef2ff" : "#fff",
                     opacity: inMonth ? 1 : 0.5,
-                    minHeight: 64, // bigger tap area on mobile
+                    minHeight: 64,
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "baseline",
+                    }}
+                  >
                     <div style={{ fontWeight: 700, fontSize: 13 }}>{dayNum}</div>
                     {count > 0 && (
                       <span
@@ -717,7 +781,13 @@ export default function CalendarScreen({
             })}
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(7, 1fr)",
+              gap: 6,
+            }}
+          >
             {weekDays.map((iso) => {
               const list = tasksByDay[iso] || [];
               const isSelected = iso === selectedISO;
@@ -742,10 +812,24 @@ export default function CalendarScreen({
                   }}
                   title={`${iso}${list.length ? ` • ${list.length} task(s)` : ""}`}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "baseline",
+                    }}
+                  >
                     <div style={{ fontWeight: 700, fontSize: 13 }}>{dayNum}</div>
                     {list.length > 0 && (
-                      <span style={{ fontSize: 11, padding: "2px 6px", borderRadius: 999, background: "#f1f5f9", border: "1px solid var(--border)" }}>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          padding: "2px 6px",
+                          borderRadius: 999,
+                          background: "#f1f5f9",
+                          border: "1px solid var(--border)",
+                        }}
+                      >
                         {list.length}
                       </span>
                     )}
@@ -769,52 +853,107 @@ export default function CalendarScreen({
             paddingBottom: 6,
           }}
         >
-          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center", gap: 8 }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-              <h2 style={{ margin: 0, fontSize: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedISO}</h2>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr auto",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "baseline",
+                gap: 8,
+                minWidth: 0,
+              }}
+            >
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: 18,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {selectedISO}
+              </h2>
               <span className="muted" style={{ fontSize: 13 }}>
-                {loading ? "Loading…" : `${(tasksByDay[selectedISO] || []).length} task${(tasksByDay[selectedISO] || []).length === 1 ? "" : "s"}`}
+                {loading
+                  ? "Loading…"
+                  : `${(tasksByDay[selectedISO] || []).length} task${
+                      (tasksByDay[selectedISO] || []).length === 1 ? "" : "s"
+                    }`}
               </span>
             </div>
 
+            {/* Sort toggle: just Time and Category */}
             <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-              <div role="group" aria-label="Sort tasks"
-                   style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 999, overflow: "hidden" }}>
-                {(["time","category","priority","manual"] as SortMode[]).map(mode => (
-                  <button
-                    key={mode}
-                    onClick={() => setSortMode(mode)}
-                    aria-pressed={sortMode === mode}
-                    style={{
-                      padding: "6px 10px",
-                      fontSize: 13,
-                      background: sortMode === mode ? "#eef2ff" : "#fff",
-                      borderLeft: mode === "time" ? "none" : "1px solid var(--border)"
-                    }}
-                  >
-                    {mode === "time" ? "Time" : mode === "category" ? "Category" : mode === "priority" ? "Priority" : "Manual"}
-                  </button>
-                ))}
+              <div
+                role="group"
+                aria-label="Sort tasks"
+                style={{
+                  display: "inline-flex",
+                  border: "1px solid var(--border)",
+                  borderRadius: 999,
+                  overflow: "hidden",
+                }}
+              >
+                <button
+                  onClick={() => setSortMode("time")}
+                  aria-pressed={sortMode === "time"}
+                  style={{
+                    padding: "6px 12px",
+                    fontSize: 13,
+                    background: sortMode === "time" ? "#eef2ff" : "#fff",
+                    minWidth: 72,
+                  }}
+                >
+                  Time
+                </button>
+                <button
+                  onClick={() => setSortMode("category")}
+                  aria-pressed={sortMode === "category"}
+                  style={{
+                    padding: "6px 12px",
+                    fontSize: 13,
+                    background: sortMode === "category" ? "#eef2ff" : "#fff",
+                    borderLeft: "1px solid var(--border)",
+                    minWidth: 92,
+                  }}
+                >
+                  Category
+                </button>
               </div>
             </div>
           </div>
-          {sortMode === "manual" && (
-            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-              Manual order is saved for {selectedISO}. Use ↑/↓ on each item.
-            </div>
-          )}
         </div>
 
         {/* Quick add (NLP) */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
           <input
             value={nlp}
-            onChange={e => setNlp(e.target.value)}
+            onChange={(e) => setNlp(e.target.value)}
             placeholder='Quick add (e.g., "Dentist next Tue #health every month !high")'
-            style={{ minWidth: 200, height: 40, borderRadius: 10, padding: "0 10px", border: "1px solid var(--border)" }}
-            onKeyDown={(e) => { if (e.key === "Enter" && nlp.trim() && !addingNlp) addNlp(); }}
+            style={{
+              minWidth: 200,
+              height: 40,
+              borderRadius: 10,
+              padding: "0 10px",
+              border: "1px solid var(--border)",
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && nlp.trim() && !addingNlp) addNlp();
+            }}
           />
-          <button className="btn-primary" onClick={addNlp} disabled={!nlp.trim() || addingNlp} style={{ borderRadius: 10, height: 40, padding: "0 14px" }}>
+          <button
+            className="btn-primary"
+            onClick={addNlp}
+            disabled={!nlp.trim() || addingNlp}
+            style={{ borderRadius: 10, height: 40, padding: "0 14px" }}
+          >
             {addingNlp ? "Adding…" : "Add"}
           </button>
         </div>
@@ -823,22 +962,49 @@ export default function CalendarScreen({
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <input
             value={newTitle}
-            onChange={e => setNewTitle(e.target.value)}
+            onChange={(e) => setNewTitle(e.target.value)}
             placeholder="Add a task…"
-            style={{ minWidth: 200, height: 40, borderRadius: 10, padding: "0 10px", border: "1px solid var(--border)", flex: "1 1 200px" }}
+            style={{
+              minWidth: 200,
+              height: 40,
+              borderRadius: 10,
+              padding: "0 10px",
+              border: "1px solid var(--border)",
+              flex: "1 1 200px",
+            }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && newTitle.trim() && !adding) addTaskToSelected();
+              if (e.key === "Enter" && newTitle.trim() && !adding)
+                addTaskToSelected();
             }}
           />
-          <select value={newCat} onChange={e => setNewCat(e.target.value as CatKey)} title="Category" style={{ height: 40, borderRadius: 10, padding: "0 8px" }}>
-            {CATS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+          <select
+            value={newCat}
+            onChange={(e) => setNewCat(e.target.value as CatKey)}
+            title="Category"
+            style={{ height: 40, borderRadius: 10, padding: "0 8px" }}
+          >
+            {CATS.map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.label}
+              </option>
+            ))}
           </select>
-          <select value={newPriority} onChange={e => setNewPriority(Number(e.target.value))} title="Priority" style={{ height: 40, borderRadius: 10, padding: "0 8px" }}>
+          <select
+            value={newPriority}
+            onChange={(e) => setNewPriority(Number(e.target.value))}
+            title="Priority"
+            style={{ height: 40, borderRadius: 10, padding: "0 8px" }}
+          >
             <option value={1}>High</option>
             <option value={2}>Normal</option>
             <option value={3}>Low</option>
           </select>
-          <select value={newFreq} onChange={e => setNewFreq(e.target.value as RepeatFreq)} title="Repeat (optional)" style={{ height: 40, borderRadius: 10, padding: "0 8px" }}>
+          <select
+            value={newFreq}
+            onChange={(e) => setNewFreq(e.target.value as RepeatFreq)}
+            title="Repeat (optional)"
+            style={{ height: 40, borderRadius: 10, padding: "0 8px" }}
+          >
             <option value="">No repeat</option>
             <option value="daily">Daily</option>
             <option value="weekly">Weekly</option>
@@ -847,7 +1013,10 @@ export default function CalendarScreen({
           </select>
 
           {/* Timed options */}
-          <label title="Timed event?" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <label
+            title="Timed event?"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
             <input
               type="checkbox"
               checked={timed}
@@ -865,9 +1034,17 @@ export default function CalendarScreen({
                 min={5}
                 step={5}
                 value={durationMin}
-                onChange={(e) => setDurationMin(Math.max(5, Number(e.target.value) || 60))}
+                onChange={(e) =>
+                  setDurationMin(Math.max(5, Number(e.target.value) || 60))
+                }
                 title="Duration (min)"
-                style={{ width: 110, height: 40, borderRadius: 10, padding: "0 10px", border: "1px solid var(--border)" }}
+                style={{
+                  width: 110,
+                  height: 40,
+                  borderRadius: 10,
+                  padding: "0 10px",
+                  border: "1px solid var(--border)",
+                }}
                 placeholder="min"
               />
               <select
@@ -890,67 +1067,67 @@ export default function CalendarScreen({
             </>
           )}
 
-          <button className="btn-primary" onClick={addTaskToSelected} disabled={!newTitle.trim() || adding} style={{ borderRadius: 10, height: 40, padding: "0 14px" }}>
+          <button
+            className="btn-primary"
+            onClick={addTaskToSelected}
+            disabled={!newTitle.trim() || adding}
+            style={{ borderRadius: 10, height: 40, padding: "0 14px" }}
+          >
             {adding ? "Adding…" : "Add"}
           </button>
         </div>
 
-        {sortedDayTasks.length === 0 && !loading && <div className="muted">Nothing scheduled.</div>}
+        {sortedDayTasks.length === 0 && !loading && (
+          <div className="muted">Nothing scheduled.</div>
+        )}
         <ul className="list" style={{ margin: 0, padding: 0, listStyle: "none" }}>
-          {sortedDayTasks.map((t) => {
-            const idx = manualOrder.indexOf(t.id);
-            const canUp = sortMode === "manual" && idx > 0;
-            const canDown = sortMode === "manual" && idx !== -1 && idx < manualOrder.length - 1;
-
-            return (
-              <li key={t.id} className="item" style={{ padding: 8, borderBottom: "1px solid #f1f5f9" }}>
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 10, width: "100%" }}>
-                  <span
-                    title={t.category || ""}
+          {sortedDayTasks.map((t) => (
+            <li
+              key={t.id}
+              className="item"
+              style={{ padding: 8, borderBottom: "1px solid #f1f5f9" }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 10,
+                  width: "100%",
+                }}
+              >
+                <span
+                  title={t.category || ""}
+                  style={{
+                    display: "inline-block",
+                    flex: "0 0 auto",
+                    width: 12,
+                    height: 12,
+                    marginTop: 6,
+                    borderRadius: 999,
+                    background: t.category_color || "#e5e7eb",
+                    border: "1px solid #d1d5db",
+                  }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
                     style={{
-                      display: "inline-block",
-                      flex: "0 0 auto",
-                      width: 12,
-                      height: 12,
-                      marginTop: 6,
-                      borderRadius: 999,
-                      background: t.category_color || "#e5e7eb",
-                      border: "1px solid #d1d5db",
+                      textDecoration: t.completed_at ? "line-through" : "none",
+                      fontSize: 15,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
                     }}
-                  />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ textDecoration: t.completed_at ? "line-through" : "none", fontSize: 15, overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {t.all_day ? t.title : `${(t.due_time || "").slice(0,5)} — ${t.title}`}
-                    </div>
-                    <div className="muted" style={{ fontSize: 12 }}>
-                      Category: {t.category || "—"} · Priority: {priorityLabel(t.priority)}
-                    </div>
+                  >
+                    {t.all_day
+                      ? t.title
+                      : `${(t.due_time || "").slice(0, 5)} — ${t.title}`}
                   </div>
-
-                  {sortMode === "manual" && (
-                    <div style={{ display: "inline-flex", gap: 6 }}>
-                      <button
-                        aria-label="Move up"
-                        onClick={() => moveTask(t.id, -1)}
-                        disabled={!canUp}
-                        style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "2px 8px", opacity: canUp ? 1 : 0.4 }}
-                      >
-                        ↑
-                      </button>
-                      <button
-                        aria-label="Move down"
-                        onClick={() => moveTask(t.id, 1)}
-                        disabled={!canDown}
-                        style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "2px 8px", opacity: canDown ? 1 : 0.4 }}
-                      >
-                        ↓
-                      </button>
-                    </div>
-                  )}
+                  <div className="muted" style={{ fontSize: 12 }}>
+                    Category: {t.category || "—"} · Priority: {priorityLabel(t.priority)}
+                  </div>
                 </div>
-              </li>
-            );
-          })}
+              </div>
+            </li>
+          ))}
         </ul>
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
@@ -964,13 +1141,16 @@ function DigitalTimePicker({
   onChange,
   minuteStep = 5,
 }: {
-  value: string;              // "HH:MM"
+  value: string; // "HH:MM"
   onChange: (v: string) => void;
   minuteStep?: number;
 }) {
-  const [h, m] = value.split(":").map(n => Number(n) || 0);
+  const [h, m] = value.split(":").map((n) => Number(n) || 0);
   const hours = Array.from({ length: 24 }, (_, i) => i);
-  const minutes = Array.from({ length: Math.floor(60 / minuteStep) }, (_, i) => i * minuteStep);
+  const minutes = Array.from(
+    { length: Math.floor(60 / minuteStep) },
+    (_, i) => i * minuteStep
+  );
 
   const update = (hh: number, mm: number) => {
     const v = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
@@ -987,7 +1167,7 @@ function DigitalTimePicker({
         border: "1px solid var(--border)",
         borderRadius: 10,
         background: "#fff",
-        height: 40
+        height: 40,
       }}
       aria-label="Time picker"
       role="group"
@@ -998,8 +1178,10 @@ function DigitalTimePicker({
         onChange={(e) => update(Number(e.target.value), m)}
         style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
       >
-        {hours.map(hr => (
-          <option key={hr} value={hr}>{String(hr).padStart(2, "0")}</option>
+        {hours.map((hr) => (
+          <option key={hr} value={hr}>
+            {String(hr).padStart(2, "0")}
+          </option>
         ))}
       </select>
       <span style={{ fontWeight: 700, lineHeight: "32px" }}>:</span>
@@ -1009,8 +1191,10 @@ function DigitalTimePicker({
         onChange={(e) => update(h, Number(e.target.value))}
         style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
       >
-        {minutes.map(mm => (
-          <option key={mm} value={mm}>{String(mm).padStart(2, "0")}</option>
+        {minutes.map((mm) => (
+          <option key={mm} value={mm}>
+            {String(mm).padStart(2, "0")}
+          </option>
         ))}
       </select>
     </div>
@@ -1023,7 +1207,10 @@ function combineLocalDateTimeISO(dateISO: string, hhmm: string) {
 }
 
 /* ===================== NLP Parser ===================== */
-function parseNlp(raw: string, baseISO: string): {
+function parseNlp(
+  raw: string,
+  baseISO: string
+): {
   title: string;
   occurrences: string[];
   category?: CatKey;
@@ -1053,7 +1240,9 @@ function parseNlp(raw: string, baseISO: string): {
     s = removeDateSubstr(s);
   }
 
-  const rel = s.match(/\b(today|tomorrow|next week|next\s+(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun))\b/i);
+  const rel = s.match(
+    /\b(today|tomorrow|next week|next\s+(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun))\b/i
+  );
   if (rel && !anchorISO) {
     anchorISO = relativeToISO(rel[0].toLowerCase(), baseISO);
     if (anchorISO) s = s.replace(rel[0], " ");
@@ -1066,7 +1255,9 @@ function parseNlp(raw: string, baseISO: string): {
     let d = fromISO(baseISO);
     if (unit.startsWith("day")) d = addDays(d, n);
     else if (unit.startsWith("week")) d = addDays(d, 7 * n);
-    else if (unit.startsWith("month")) { d = new Date(d.getFullYear(), d.getMonth() + n, d.getDate()); }
+    else if (unit.startsWith("month")) {
+      d = new Date(d.getFullYear(), d.getMonth() + n, d.getDate());
+    }
     anchorISO = toISO(d);
     s = s.replace(inMatch[0], " ");
   }
@@ -1074,13 +1265,26 @@ function parseNlp(raw: string, baseISO: string): {
   const everyMatch = s.match(/\bevery\b([\s\S]*)$/i);
   let rule:
     | { type: "weekday-list"; days?: number[]; until?: string | null; count?: number | null }
-    | { type: "interval"; interval?: number; freq?: "daily"|"weekly"|"monthly"|"annually"; until?: string | null; count?: number | null }
-    | { type: "freq"; freq?: "daily"|"weekly"|"monthly"|"annually"; until?: string | null; count?: number | null }
+    | {
+        type: "interval";
+        interval?: number;
+        freq?: "daily" | "weekly" | "monthly" | "annually";
+        until?: string | null;
+        count?: number | null;
+      }
+    | {
+        type: "freq";
+        freq?: "daily" | "weekly" | "monthly" | "annually";
+        until?: string | null;
+        count?: number | null;
+      }
     | null = null;
 
   if (everyMatch) {
     const tail = everyMatch[1].trim();
-    const until = (tail.match(/\buntil\s+([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{1,2}[\/\-][0-9]{1,2}(?:[\/\-][0-9]{2,4})?|[0-9]{1,2}\s+[A-Za-z]{3,})/i));
+    const until = tail.match(
+      /\buntil\s+([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{1,2}[\/\-][0-9]{1,2}(?:[\/\-][0-9]{2,4})?|[0-9]{1,2}\s+[A-Za-z]{3,})/i
+    );
     const untilISO = until ? normalizeAnyDateToISO(until[1], baseISO) : null;
 
     const countMatch = tail.match(/\bfor\s+(\d+)\s+(time|times)\b/i);
@@ -1090,20 +1294,35 @@ function parseNlp(raw: string, baseISO: string): {
     if (wd && wd.length) {
       rule = { type: "weekday-list", days: wd, until: untilISO, count };
     } else {
-      const intMatch = tail.match(/\bevery\s+(\d+)\s+(week|weeks|month|months|day|days|year|years)\b/i);
+      const intMatch = tail.match(
+        /\bevery\s+(\d+)\s+(week|weeks|month|months|day|days|year|years)\b/i
+      );
       if (intMatch) {
         const n = Number(intMatch[1]);
         const unit = intMatch[2].toLowerCase();
-        const freq = unit.startsWith("day") ? "daily" : unit.startsWith("week") ? "weekly" : unit.startsWith("month") ? "monthly" : "annually";
+        const freq = unit.startsWith("day")
+          ? "daily"
+          : unit.startsWith("week")
+          ? "weekly"
+          : unit.startsWith("month")
+          ? "monthly"
+          : "annually";
         rule = { type: "interval", interval: n, freq, until: untilISO, count };
       } else {
-        const fMatch = tail.match(/\bevery\s+(day|daily|week|weekly|month|monthly|year|yearly|annually)\b/i);
+        const fMatch = tail.match(
+          /\bevery\s+(day|daily|week|weekly|month|monthly|year|yearly|annually)\b/i
+        );
         if (fMatch) {
           const token = fMatch[1].toLowerCase();
-          const freq: "daily"|"weekly"|"monthly"|"annually" =
-            token.startsWith("day") ? "daily" :
-            token.startsWith("week") ? "weekly" :
-            token.startsWith("month") ? "monthly" : "annually";
+          const freq: "daily" | "weekly" | "monthly" | "annually" = token.startsWith(
+            "day"
+          )
+            ? "daily"
+            : token.startsWith("week")
+            ? "weekly"
+            : token.startsWith("month")
+            ? "monthly"
+            : "annually";
           rule = { type: "freq", freq, until: untilISO, count };
         }
       }
@@ -1163,20 +1382,33 @@ function parseNlp(raw: string, baseISO: string): {
     occurrences: Array.from(new Set(occurrences)),
     category,
     priority,
-    source: "calendar_nlp"
+    source: "calendar_nlp",
   };
 }
 
-function defaultCountFor(freq: "daily"|"weekly"|"monthly"|"annually") {
+function defaultCountFor(freq: "daily" | "weekly" | "monthly" | "annually") {
   return freq === "daily" ? 14 : freq === "weekly" ? 12 : freq === "monthly" ? 12 : 5;
 }
 
 function parseWeekdayList(tail: string): number[] | null {
-  const map: Record<string, number> = { mon:1, tue:2, tues:2, wed:3, thu:4, thur:4, thurs:4, fri:5, sat:6, sun:7 };
-  const m = tail.match(/\b(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(\s*,\s*(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun))*\b/ig);
+  const map: Record<string, number> = {
+    mon: 1,
+    tue: 2,
+    tues: 2,
+    wed: 3,
+    thu: 4,
+    thur: 4,
+    thurs: 4,
+    fri: 5,
+    sat: 6,
+    sun: 7,
+  };
+  const m = tail.match(
+    /\b(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(\s*,\s*(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun))*\b/gi
+  );
   if (!m) return null;
-  const tokens = m[0].split(",").map(s => s.trim().toLowerCase());
-  const days = tokens.map(t => map[t]).filter(Boolean);
+  const tokens = m[0].split(",").map((s) => s.trim().toLowerCase());
+  const days = tokens.map((t) => map[t]).filter(Boolean);
   return Array.from(new Set(days));
 }
 
@@ -1186,7 +1418,8 @@ function findExplicitDateISO(s: string, baseISO: string): string | null {
   const dm = s.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/);
   if (dm) {
     const y = dm[3] ? normalizeYear(Number(dm[3])) : fromISO(baseISO).getFullYear();
-    const m = Number(dm[2]); const d = Number(dm[1]);
+    const m = Number(dm[2]);
+    const d = Number(dm[1]);
     return toISO(new Date(y, m - 1, d));
   }
   const m1 = s.match(/\b(\d{1,2})\s+([A-Za-z]{3,})\b/);
@@ -1209,8 +1442,21 @@ function parseDayMonth(dayStr: string, monStr: string, year: number): string {
   return toISO(new Date(year, m, d));
 }
 function monthIndex(token: string) {
-  const map = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
-  const idx = map.findIndex(x => token.toLowerCase().startsWith(x));
+  const map = [
+    "jan",
+    "feb",
+    "mar",
+    "apr",
+    "may",
+    "jun",
+    "jul",
+    "aug",
+    "sep",
+    "oct",
+    "nov",
+    "dec",
+  ];
+  const idx = map.findIndex((x) => token.toLowerCase().startsWith(x));
   return idx >= 0 ? idx : 0;
 }
 function normalizeAnyDateToISO(tok: string, baseISO: string): string | null {
@@ -1238,13 +1484,26 @@ function relativeToISO(token: string, baseISO: string): string | null {
   return null;
 }
 function mapWeekday(tok: string): number {
-  const m: Record<string, number> = { mon:1, tue:2, tues:2, wed:3, thu:4, thur:4, thurs:4, fri:5, sat:6, sun:7 };
+  const m: Record<string, number> = {
+    mon: 1,
+    tue: 2,
+    tues: 2,
+    wed: 3,
+    thu: 4,
+    thur: 4,
+    thurs: 4,
+    fri: 5,
+    sat: 6,
+    sun: 7,
+  };
   return m[tok] || 1;
 }
 
 /* ===================== date utils ===================== */
 function toISO(d: Date) {
-  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
+  const y = d.getFullYear(),
+    m = String(d.getMonth() + 1).padStart(2, "0"),
+    dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
 function fromISO(s: string) {
@@ -1262,12 +1521,19 @@ function startOfWeekISO(d: Date) {
   x.setDate(x.getDate() - wd);
   return toISO(x);
 }
-function weekdayIdx(d: Date) { // Mon..Sun = 1..7
+function weekdayIdx(d: Date) {
+  // Mon..Sun = 1..7
   const n = d.getDay(); // Sun=0..Sat=6
   return n === 0 ? 7 : n;
 }
-function clampISO(iso: string) { return iso.slice(0, 10); }
-function addIntervalN(d: Date, freq: "daily"|"weekly"|"monthly"|"annually", n: number) {
+function clampISO(iso: string) {
+  return iso.slice(0, 10);
+}
+function addIntervalN(
+  d: Date,
+  freq: "daily" | "weekly" | "monthly" | "annually",
+  n: number
+) {
   const x = new Date(d);
   if (freq === "daily") x.setDate(x.getDate() + n);
   else if (freq === "weekly") x.setDate(x.getDate() + 7 * n);
