@@ -30,8 +30,8 @@ type ViewMode = "month" | "week";
 const CATS = [
   { key: "personal",  label: "Personal",  color: "#a855f7" },
   { key: "health",    label: "Health",    color: "#22c55e" },
-  { key: "career",    label: "Business",  color: "#3b82f6" },   // stored as 'career'
-  { key: "financial", label: "Finance",   color: "#f59e0b" },   // stored as 'financial'
+  { key: "career",    label: "Business",  color: "#3b82f6" }, // stored as 'career'
+  { key: "financial", label: "Finance",   color: "#f59e0b" }, // stored as 'financial'
   { key: "other",     label: "Other",     color: "#6b7280" },
 ] as const;
 type CatKey = typeof CATS[number]["key"];
@@ -49,16 +49,15 @@ const CAT_ORDER: Record<string, number> = {
 /* ========================== MAIN SCREEN ========================== */
 
 type RepeatFreq = "" | "daily" | "weekly" | "monthly" | "annually";
-
-/** Default counts (when no "until" or "for N") */
 const REPEAT_COUNTS: Record<Exclude<RepeatFreq, "">, number> = {
-  daily: 14,     // 2 weeks
-  weekly: 12,    // 12 weeks
-  monthly: 12,   // 12 months
-  annually: 5,   // 5 years
+  daily: 14,
+  weekly: 12,
+  monthly: 12,
+  annually: 5,
 };
 
-type SortMode = "time" | "category";
+// ✅ add manual + priority
+type SortMode = "time" | "category" | "priority" | "manual";
 
 export default function CalendarScreen({
   onSelectDate,
@@ -76,6 +75,7 @@ export default function CalendarScreen({
   const [selectedISO, setSelectedISO] = useState<string>(todayISO);
   const [viewMode, setViewMode] = useState<ViewMode>("month");
 
+  // sorting
   const [sortMode, setSortMode] = useState<SortMode>("time");
 
   const monthLabel = useMemo(
@@ -144,6 +144,10 @@ export default function CalendarScreen({
   // natural-language quick add
   const [nlp, setNlp] = useState("");
   const [addingNlp, setAddingNlp] = useState(false);
+
+  // 🔒 per-day manual order (local, mobile-friendly)
+  const [manualOrder, setManualOrder] = useState<number[]>([]);
+  const orderKey = (iso: string) => `calOrder:${iso}`;
 
   // Ask for Notification permission once
   useEffect(() => {
@@ -344,8 +348,7 @@ export default function CalendarScreen({
 
       setNewTitle("");
       setNewFreq("");
-      // Optional UX reset:
-      // setTimed(false); setTimeStr("09:00"); setDurationMin(60); setRemindBefore("");
+      // Optionally reset timed fields
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -374,7 +377,7 @@ export default function CalendarScreen({
           user_id: userId,
           title: parsed.title,
           due_date: iso,
-          all_day: true, // NLP quick-add remains all-day for now
+          all_day: true,
           priority: parsed.priority ?? 2,
           category,
           category_color,
@@ -419,6 +422,43 @@ export default function CalendarScreen({
 
   const dayTasks = tasksByDay[selectedISO] || [];
 
+  /* ========== Manual order persistence per day ========== */
+  // Load order on date change
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(orderKey(selectedISO));
+      setManualOrder(raw ? JSON.parse(raw) : []);
+    } catch { setManualOrder([]); }
+  }, [selectedISO]);
+
+  // Ensure manualOrder always contains current task ids (in a stable way)
+  useEffect(() => {
+    const ids = dayTasks.map(t => t.id);
+    setManualOrder(prev => {
+      // keep only still-existing ids
+      const cleaned = prev.filter(id => ids.includes(id));
+      // append any new ids to end (stable)
+      const missing = ids.filter(id => !cleaned.includes(id));
+      const next = [...cleaned, ...missing];
+      try { localStorage.setItem(orderKey(selectedISO), JSON.stringify(next)); } catch {}
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dayTasks.length, selectedISO]);
+
+  function moveTask(id: number, dir: -1 | 1) {
+    setManualOrder(prev => {
+      const idx = prev.indexOf(id);
+      if (idx < 0) return prev;
+      const next = [...prev];
+      const newIdx = Math.min(Math.max(0, idx + dir), next.length - 1);
+      next.splice(idx, 1);
+      next.splice(newIdx, 0, id);
+      try { localStorage.setItem(orderKey(selectedISO), JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }
+
   /* ================= Sorting ================= */
   const sortedDayTasks = useMemo(() => {
     const list = [...dayTasks];
@@ -426,7 +466,7 @@ export default function CalendarScreen({
     const cmpTime = (a: Task, b: Task) => {
       const aAll = !!a.all_day || !a.due_time;
       const bAll = !!b.all_day || !b.due_time;
-      if (aAll && !bAll) return -1;           // all-day first
+      if (aAll && !bAll) return -1; // all-day first
       if (!aAll && bAll) return 1;
       if (aAll && bAll) {
         const ca = CAT_ORDER[a.category || "zz"] ?? 99;
@@ -447,12 +487,28 @@ export default function CalendarScreen({
       const ca = CAT_ORDER[a.category || "zz"] ?? 99;
       const cb = CAT_ORDER[b.category || "zz"] ?? 99;
       if (ca !== cb) return ca - cb;
-      return cmpTime(a, b); // within category, keep all-day first then time
+      return cmpTime(a, b);
     };
 
-    list.sort(sortMode === "time" ? cmpTime : cmpCategory);
-    return list;
-  }, [dayTasks, sortMode]);
+    const cmpPriority = (a: Task, b: Task) => {
+      const pa = a.priority ?? 2;
+      const pb = b.priority ?? 2;
+      if (pa !== pb) return pa - pb; // 1 (high) first
+      return cmpTime(a, b);
+    };
+
+    if (sortMode === "manual") {
+      const pos = (id: number) => {
+        const i = manualOrder.indexOf(id);
+        return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+      };
+      return list.sort((a, b) => pos(a.id) - pos(b.id));
+    }
+
+    if (sortMode === "category") return list.sort(cmpCategory);
+    if (sortMode === "priority") return list.sort(cmpPriority);
+    return list.sort(cmpTime); // default time
+  }, [dayTasks, sortMode, manualOrder]);
 
   /* ================= In-app reminders (local) ================= */
   const notifiedRef = useRef<Set<string>>(new Set());
@@ -706,37 +762,47 @@ export default function CalendarScreen({
         {/* Date + count + Sort toggle (mobile-first layout) */}
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "1fr auto",
-            alignItems: "center",
-            gap: 8,
+            position: "sticky",
+            top: 0,
+            zIndex: 1,
+            background: "#fff",
+            paddingBottom: 6,
           }}
         >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-            <h2 style={{ margin: 0, fontSize: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedISO}</h2>
-            <span className="muted" style={{ fontSize: 13 }}>
-              {loading ? "Loading…" : `${(tasksByDay[selectedISO] || []).length} task${(tasksByDay[selectedISO] || []).length === 1 ? "" : "s"}`}
-            </span>
-          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+              <h2 style={{ margin: 0, fontSize: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedISO}</h2>
+              <span className="muted" style={{ fontSize: 13 }}>
+                {loading ? "Loading…" : `${(tasksByDay[selectedISO] || []).length} task${(tasksByDay[selectedISO] || []).length === 1 ? "" : "s"}`}
+              </span>
+            </div>
 
-          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-            <div role="group" aria-label="Sort tasks" style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 999, overflow: "hidden" }}>
-              <button
-                onClick={() => setSortMode("time")}
-                aria-pressed={sortMode === "time"}
-                style={{ padding: "6px 10px", fontSize: 13, background: sortMode === "time" ? "#eef2ff" : "#fff" }}
-              >
-                Time
-              </button>
-              <button
-                onClick={() => setSortMode("category")}
-                aria-pressed={sortMode === "category"}
-                style={{ padding: "6px 10px", fontSize: 13, background: sortMode === "category" ? "#eef2ff" : "#fff", borderLeft: "1px solid var(--border)" }}
-              >
-                Category
-              </button>
+            <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+              <div role="group" aria-label="Sort tasks"
+                   style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 999, overflow: "hidden" }}>
+                {(["time","category","priority","manual"] as SortMode[]).map(mode => (
+                  <button
+                    key={mode}
+                    onClick={() => setSortMode(mode)}
+                    aria-pressed={sortMode === mode}
+                    style={{
+                      padding: "6px 10px",
+                      fontSize: 13,
+                      background: sortMode === mode ? "#eef2ff" : "#fff",
+                      borderLeft: mode === "time" ? "none" : "1px solid var(--border)"
+                    }}
+                  >
+                    {mode === "time" ? "Time" : mode === "category" ? "Category" : mode === "priority" ? "Priority" : "Manual"}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
+          {sortMode === "manual" && (
+            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+              Manual order is saved for {selectedISO}. Use ↑/↓ on each item.
+            </div>
+          )}
         </div>
 
         {/* Quick add (NLP) */}
@@ -753,7 +819,7 @@ export default function CalendarScreen({
           </button>
         </div>
 
-        {/* Structured add (mobile-first row that wraps cleanly) */}
+        {/* Structured add */}
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <input
             value={newTitle}
@@ -831,35 +897,60 @@ export default function CalendarScreen({
 
         {sortedDayTasks.length === 0 && !loading && <div className="muted">Nothing scheduled.</div>}
         <ul className="list" style={{ margin: 0, padding: 0, listStyle: "none" }}>
-          {sortedDayTasks.map((t) => (
-            <li key={t.id} className="item" style={{ padding: 8, borderBottom: "1px solid #f1f5f9" }}>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 10, width: "100%" }}>
-                <span
-                  title={t.category || ""}
-                  style={{
-                    display: "inline-block",
-                    flex: "0 0 auto",
-                    width: 12,
-                    height: 12,
-                    marginTop: 6,
-                    borderRadius: 999,
-                    background: t.category_color || "#e5e7eb",
-                    border: "1px solid #d1d5db",
-                  }}
-                />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ textDecoration: t.completed_at ? "line-through" : "none", fontSize: 15, overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {t.all_day
-                      ? t.title
-                      : `${(t.due_time || "").slice(0,5)} — ${t.title}`}
+          {sortedDayTasks.map((t) => {
+            const idx = manualOrder.indexOf(t.id);
+            const canUp = sortMode === "manual" && idx > 0;
+            const canDown = sortMode === "manual" && idx !== -1 && idx < manualOrder.length - 1;
+
+            return (
+              <li key={t.id} className="item" style={{ padding: 8, borderBottom: "1px solid #f1f5f9" }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 10, width: "100%" }}>
+                  <span
+                    title={t.category || ""}
+                    style={{
+                      display: "inline-block",
+                      flex: "0 0 auto",
+                      width: 12,
+                      height: 12,
+                      marginTop: 6,
+                      borderRadius: 999,
+                      background: t.category_color || "#e5e7eb",
+                      border: "1px solid #d1d5db",
+                    }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ textDecoration: t.completed_at ? "line-through" : "none", fontSize: 15, overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {t.all_day ? t.title : `${(t.due_time || "").slice(0,5)} — ${t.title}`}
+                    </div>
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      Category: {t.category || "—"} · Priority: {priorityLabel(t.priority)}
+                    </div>
                   </div>
-                  <div className="muted" style={{ fontSize: 12 }}>
-                    Category: {t.category || "—"} · Priority: {priorityLabel(t.priority)}
-                  </div>
+
+                  {sortMode === "manual" && (
+                    <div style={{ display: "inline-flex", gap: 6 }}>
+                      <button
+                        aria-label="Move up"
+                        onClick={() => moveTask(t.id, -1)}
+                        disabled={!canUp}
+                        style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "2px 8px", opacity: canUp ? 1 : 0.4 }}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        aria-label="Move down"
+                        onClick={() => moveTask(t.id, 1)}
+                        disabled={!canDown}
+                        style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "2px 8px", opacity: canDown ? 1 : 0.4 }}
+                      >
+                        ↓
+                      </button>
+                    </div>
+                  )}
                 </div>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
@@ -932,14 +1023,6 @@ function combineLocalDateTimeISO(dateISO: string, hhmm: string) {
 }
 
 /* ===================== NLP Parser ===================== */
-/**
- * Parse examples:
- *  - "Lunch tomorrow #personal !high"
- *  - "Dentist 2025-09-01 #health"
- *  - "Gym every Mon,Wed,Fri #health"
- *  - "Invoice 15 Sep every month until 2026-01-01 !high"
- *  - "Pay VAT 15/10 every 2 weeks for 6 times"
- */
 function parseNlp(raw: string, baseISO: string): {
   title: string;
   occurrences: string[];
@@ -952,14 +1035,12 @@ function parseNlp(raw: string, baseISO: string): {
   let category: CatKey | undefined = undefined;
   let priority: number | undefined = undefined;
 
-  // category via #tag
   const catMatch = s.match(/#(personal|health|career|financial|other)\b/i);
   if (catMatch) {
     category = catMatch[1].toLowerCase() as CatKey;
     s = s.replace(catMatch[0], " ");
   }
 
-  // priority via !high|!normal|!low|!top
   const priMatch = s.match(/!(high|normal|low|top)\b/i);
   if (priMatch) {
     const key = priMatch[1].toLowerCase();
@@ -967,21 +1048,17 @@ function parseNlp(raw: string, baseISO: string): {
     s = s.replace(priMatch[0], " ");
   }
 
-  // explicit date forms in text -> pick first as anchor
   let anchorISO: string | null = findExplicitDateISO(s, baseISO);
   if (anchorISO) {
-    // remove that substring
     s = removeDateSubstr(s);
   }
 
-  // relative tokens: today / tomorrow / next week / next mon...
   const rel = s.match(/\b(today|tomorrow|next week|next\s+(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun))\b/i);
   if (rel && !anchorISO) {
     anchorISO = relativeToISO(rel[0].toLowerCase(), baseISO);
     if (anchorISO) s = s.replace(rel[0], " ");
   }
 
-  // "in N days/weeks/months"
   const inMatch = s.match(/\bin\s+(\d+)\s+(day|days|week|weeks|month|months)\b/i);
   if (inMatch && !anchorISO) {
     const n = Number(inMatch[1]);
@@ -994,25 +1071,25 @@ function parseNlp(raw: string, baseISO: string): {
     s = s.replace(inMatch[0], " ");
   }
 
-  // repeat rules: every ...
   const everyMatch = s.match(/\bevery\b([\s\S]*)$/i);
-  let rule: { type: "weekday-list" | "interval" | "freq"; days?: number[]; freq?: "daily"|"weekly"|"monthly"|"annually"; interval?: number; until?: string | null; count?: number | null } | null = null;
+  let rule:
+    | { type: "weekday-list"; days?: number[]; until?: string | null; count?: number | null }
+    | { type: "interval"; interval?: number; freq?: "daily"|"weekly"|"monthly"|"annually"; until?: string | null; count?: number | null }
+    | { type: "freq"; freq?: "daily"|"weekly"|"monthly"|"annually"; until?: string | null; count?: number | null }
+    | null = null;
+
   if (everyMatch) {
     const tail = everyMatch[1].trim();
-    // until date
     const until = (tail.match(/\buntil\s+([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{1,2}[\/\-][0-9]{1,2}(?:[\/\-][0-9]{2,4})?|[0-9]{1,2}\s+[A-Za-z]{3,})/i));
     const untilISO = until ? normalizeAnyDateToISO(until[1], baseISO) : null;
 
-    // count "for N times"
     const countMatch = tail.match(/\bfor\s+(\d+)\s+(time|times)\b/i);
     const count = countMatch ? Number(countMatch[1]) : null;
 
-    // weekday list: mon,wed,fri
     const wd = parseWeekdayList(tail);
     if (wd && wd.length) {
       rule = { type: "weekday-list", days: wd, until: untilISO, count };
     } else {
-      // interval like "every 2 weeks", or "weekly/monthly/daily/annually"
       const intMatch = tail.match(/\bevery\s+(\d+)\s+(week|weeks|month|months|day|days|year|years)\b/i);
       if (intMatch) {
         const n = Number(intMatch[1]);
@@ -1020,7 +1097,6 @@ function parseNlp(raw: string, baseISO: string): {
         const freq = unit.startsWith("day") ? "daily" : unit.startsWith("week") ? "weekly" : unit.startsWith("month") ? "monthly" : "annually";
         rule = { type: "interval", interval: n, freq, until: untilISO, count };
       } else {
-        // plain "every week/month/day/year"
         const fMatch = tail.match(/\bevery\s+(day|daily|week|weekly|month|monthly|year|yearly|annually)\b/i);
         if (fMatch) {
           const token = fMatch[1].toLowerCase();
@@ -1032,50 +1108,47 @@ function parseNlp(raw: string, baseISO: string): {
         }
       }
     }
-    // remove "every..." clause from title
     s = s.replace(/\bevery\b([\s\S]*)$/i, " ");
   }
 
   const title = s.replace(/\s+/g, " ").trim();
 
-  // Build occurrences
   const base = anchorISO || baseISO;
   if (!rule) {
     occurrences.push(base);
   } else {
     const maxCap = 104; // safety
-    if (rule.type === "weekday-list") {
-      const days = rule.days || [];
-      const until = rule.until ? fromISO(rule.until) : null;
+    if ((rule as any).type === "weekday-list") {
+      const days = (rule as any).days || [];
+      const until = (rule as any).until ? fromISO((rule as any).until) : null;
       let d = fromISO(base);
       let added = 0;
-      // iterate forward day by day and pick matching weekdays
-      while (added < (rule.count ?? 24) && added < maxCap) {
+      while (added < ((rule as any).count ?? 24) && added < maxCap) {
         const iso = toISO(d);
-        const wd = weekdayIdx(d); // Mon=1..Sun=7
+        const wd = weekdayIdx(d);
         if (days.includes(wd) && (until ? d <= until : true)) {
           occurrences.push(iso);
           added++;
         }
         d = addDays(d, 1);
-        if (!until && added >= (rule.count ?? 24)) break;
+        if (!until && added >= ((rule as any).count ?? 24)) break;
         if (until && d > until) break;
       }
-    } else if (rule.type === "interval") {
-      const interval = Math.max(1, rule.interval || 1);
-      const freq = rule.freq!;
-      const until = rule.until ? fromISO(rule.until) : null;
-      const limit = rule.count ?? defaultCountFor(freq);
+    } else if ((rule as any).type === "interval") {
+      const interval = Math.max(1, (rule as any).interval || 1);
+      const freq = (rule as any).freq!;
+      const until = (rule as any).until ? fromISO((rule as any).until) : null;
+      const limit = (rule as any).count ?? defaultCountFor(freq);
       let d = fromISO(base);
       for (let i = 0; i < Math.min(limit, maxCap); i++) {
         occurrences.push(toISO(d));
         d = addIntervalN(d, freq, interval);
         if (until && d > until) break;
       }
-    } else if (rule.type === "freq") {
-      const freq = rule.freq!;
-      const until = rule.until ? fromISO(rule.until) : null;
-      const limit = rule.count ?? defaultCountFor(freq);
+    } else if ((rule as any).type === "freq") {
+      const freq = (rule as any).freq!;
+      const until = (rule as any).until ? fromISO((rule as any).until) : null;
+      const limit = (rule as any).count ?? defaultCountFor(freq);
       let d = fromISO(base);
       for (let i = 0; i < Math.min(limit, maxCap); i++) {
         occurrences.push(toISO(d));
@@ -1087,7 +1160,7 @@ function parseNlp(raw: string, baseISO: string): {
 
   return {
     title,
-    occurrences: Array.from(new Set(occurrences)), // dedupe
+    occurrences: Array.from(new Set(occurrences)),
     category,
     priority,
     source: "calendar_nlp"
@@ -1099,7 +1172,6 @@ function defaultCountFor(freq: "daily"|"weekly"|"monthly"|"annually") {
 }
 
 function parseWeekdayList(tail: string): number[] | null {
-  // returns Mon..Sun as 1..7
   const map: Record<string, number> = { mon:1, tue:2, tues:2, wed:3, thu:4, thur:4, thurs:4, fri:5, sat:6, sun:7 };
   const m = tail.match(/\b(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(\s*,\s*(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun))*\b/ig);
   if (!m) return null;
@@ -1109,17 +1181,14 @@ function parseWeekdayList(tail: string): number[] | null {
 }
 
 function findExplicitDateISO(s: string, baseISO: string): string | null {
-  // YYYY-MM-DD
   const iso = s.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
   if (iso) return clampISO(iso[1]);
-  // DD/MM or D/M (assume current year)
   const dm = s.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/);
   if (dm) {
     const y = dm[3] ? normalizeYear(Number(dm[3])) : fromISO(baseISO).getFullYear();
     const m = Number(dm[2]); const d = Number(dm[1]);
     return toISO(new Date(y, m - 1, d));
   }
-  // "15 Sep" or "Sep 15"
   const m1 = s.match(/\b(\d{1,2})\s+([A-Za-z]{3,})\b/);
   const m2 = s.match(/\b([A-Za-z]{3,})\s+(\d{1,2})\b/);
   const y = fromISO(baseISO).getFullYear();
