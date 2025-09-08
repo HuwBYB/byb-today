@@ -499,17 +499,36 @@ export default function CalendarScreen({
     return () => clearInterval(id);
   }, [tasksByDay]);
 
+  /* ================= UI (mobile-first) ================= */
   return (
-    <div style={{ display: "grid", gap: 12 }}>
-      {/* Title card with controls */}
-      <div className="card" style={{ position: "relative", display: "grid", gap: 10 }}>
-        <h1 style={{ margin: 0 }}>Calendar</h1>
+    <div style={{ display: "grid", gap: 12, padding: 12 }}>
+      {/* Title & top controls */}
+      <div className="card" style={{ position: "relative", display: "grid", gap: 10, padding: 12 }}>
+        <h1 style={{ margin: 0, fontSize: 20 }}>Calendar</h1>
 
-        {/* Row: Left controls + View toggle */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap", flexWrap: "wrap" }}>
-            <button onClick={goToday} title="Go to today" aria-label="Go to today"
-              style={{ minWidth: 64, height: 32, padding: "0 12px", borderRadius: 8, border: "1px solid var(--border)", background: "#fff", fontWeight: 700 }}>
+        {/* Row: Left controls + View toggle (stack on mobile) */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr auto",
+            gap: 8,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <button
+              onClick={goToday}
+              title="Go to today"
+              aria-label="Go to today"
+              style={{
+                minWidth: 64,
+                height: 36,
+                padding: "0 12px",
+                borderRadius: 10,
+                border: "1px solid var(--border)",
+                background: "#fff",
+                fontWeight: 700
+              }}
+            >
               Today
             </button>
 
@@ -518,6 +537,7 @@ export default function CalendarScreen({
               value={cursor.getMonth()}
               onChange={(e) => setCursor(new Date(cursor.getFullYear(), Number(e.target.value), 1))}
               title="Month"
+              style={{ height: 36, borderRadius: 10 }}
             >
               {months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
             </select>
@@ -525,19 +545,28 @@ export default function CalendarScreen({
               value={cursor.getFullYear()}
               onChange={(e) => setCursor(new Date(Number(e.target.value), cursor.getMonth(), 1))}
               title="Year"
+              style={{ height: 36, borderRadius: 10 }}
             >
               {years.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
 
-            <strong style={{ marginLeft: 6 }}>{monthLabel}</strong>
+            <strong style={{ marginLeft: 4, fontSize: 14 }}>{monthLabel}</strong>
           </div>
 
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <div className="btn-group" role="group" aria-label="View mode">
-              <button onClick={() => setViewMode("month")} className={viewMode === "month" ? "btn-primary" : ""} style={{ borderRadius: 8 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <div className="btn-group" role="group" aria-label="View mode" style={{ display: "inline-flex", borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)" }}>
+              <button
+                onClick={() => setViewMode("month")}
+                className={viewMode === "month" ? "btn-primary" : ""}
+                style={{ padding: "6px 10px", minWidth: 68, fontSize: 14, background: viewMode === "month" ? "#eef2ff" : "#fff" }}
+              >
                 Month
               </button>
-              <button onClick={() => setViewMode("week")} className={viewMode === "week" ? "btn-primary" : ""} style={{ borderRadius: 8 }}>
+              <button
+                onClick={() => setViewMode("week")}
+                className={viewMode === "week" ? "btn-primary" : ""}
+                style={{ padding: "6px 10px", minWidth: 68, fontSize: 14, background: viewMode === "week" ? "#eef2ff" : "#fff", borderLeft: "1px solid var(--border)" }}
+              >
                 Week
               </button>
             </div>
@@ -608,6 +637,7 @@ export default function CalendarScreen({
                     border: "1px solid var(--border)",
                     background: isSelected ? "#eef2ff" : "#fff",
                     opacity: inMonth ? 1 : 0.5,
+                    minHeight: 64, // bigger tap area on mobile
                   }}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
@@ -652,6 +682,7 @@ export default function CalendarScreen({
                     borderRadius: 10,
                     border: "1px solid var(--border)",
                     background: isSelected ? "#eef2ff" : "#fff",
+                    minHeight: 64,
                   }}
                   title={`${iso}${list.length ? ` • ${list.length} task(s)` : ""}`}
                 >
@@ -671,64 +702,77 @@ export default function CalendarScreen({
       </div>
 
       {/* Day detail + NLP add + structured add */}
-      <div className="card" style={{ display: "grid", gap: 10 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <h2 style={{ margin: 0 }}>{selectedISO}</h2>
-            <span className="muted">
+      <div className="card" style={{ display: "grid", gap: 10, padding: 12 }}>
+        {/* Date + count + Sort toggle (mobile-first layout) */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr auto",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+            <h2 style={{ margin: 0, fontSize: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedISO}</h2>
+            <span className="muted" style={{ fontSize: 13 }}>
               {loading ? "Loading…" : `${(tasksByDay[selectedISO] || []).length} task${(tasksByDay[selectedISO] || []).length === 1 ? "" : "s"}`}
             </span>
           </div>
 
-          {/* Sort by */}
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <label className="muted" htmlFor="sortby">Sort by</label>
-            <select
-              id="sortby"
-              value={sortMode}
-              onChange={(e) => setSortMode(e.target.value as SortMode)}
-              title="Sort tasks"
-            >
-              <option value="time">Time due</option>
-              <option value="category">Category</option>
-            </select>
-          </div>
-
-          {/* Natural-language quick add */}
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", flex: "1 1 320px" }}>
-            <input
-              value={nlp}
-              onChange={e => setNlp(e.target.value)}
-              placeholder='Quick add (e.g., "Dentist next Tue #health every month !high")'
-              style={{ minWidth: 220, flex: 1 }}
-              onKeyDown={(e) => { if (e.key === "Enter" && nlp.trim() && !addingNlp) addNlp(); }}
-            />
-            <button className="btn-primary" onClick={addNlp} disabled={!nlp.trim() || addingNlp} style={{ borderRadius: 8 }}>
-              {addingNlp ? "Adding…" : "Add"}
-            </button>
+          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+            <div role="group" aria-label="Sort tasks" style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 999, overflow: "hidden" }}>
+              <button
+                onClick={() => setSortMode("time")}
+                aria-pressed={sortMode === "time"}
+                style={{ padding: "6px 10px", fontSize: 13, background: sortMode === "time" ? "#eef2ff" : "#fff" }}
+              >
+                Time
+              </button>
+              <button
+                onClick={() => setSortMode("category")}
+                aria-pressed={sortMode === "category"}
+                style={{ padding: "6px 10px", fontSize: 13, background: sortMode === "category" ? "#eef2ff" : "#fff", borderLeft: "1px solid var(--border)" }}
+              >
+                Category
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Structured add */}
+        {/* Quick add (NLP) */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
+          <input
+            value={nlp}
+            onChange={e => setNlp(e.target.value)}
+            placeholder='Quick add (e.g., "Dentist next Tue #health every month !high")'
+            style={{ minWidth: 200, height: 40, borderRadius: 10, padding: "0 10px", border: "1px solid var(--border)" }}
+            onKeyDown={(e) => { if (e.key === "Enter" && nlp.trim() && !addingNlp) addNlp(); }}
+          />
+          <button className="btn-primary" onClick={addNlp} disabled={!nlp.trim() || addingNlp} style={{ borderRadius: 10, height: 40, padding: "0 14px" }}>
+            {addingNlp ? "Adding…" : "Add"}
+          </button>
+        </div>
+
+        {/* Structured add (mobile-first row that wraps cleanly) */}
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <input
             value={newTitle}
             onChange={e => setNewTitle(e.target.value)}
             placeholder="Add a task…"
-            style={{ minWidth: 200 }}
+            style={{ minWidth: 200, height: 40, borderRadius: 10, padding: "0 10px", border: "1px solid var(--border)", flex: "1 1 200px" }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && newTitle.trim() && !adding) addTaskToSelected();
             }}
           />
-          <select value={newCat} onChange={e => setNewCat(e.target.value as CatKey)} title="Category">
+          <select value={newCat} onChange={e => setNewCat(e.target.value as CatKey)} title="Category" style={{ height: 40, borderRadius: 10, padding: "0 8px" }}>
             {CATS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
           </select>
-          <select value={newPriority} onChange={e => setNewPriority(Number(e.target.value))} title="Priority">
+          <select value={newPriority} onChange={e => setNewPriority(Number(e.target.value))} title="Priority" style={{ height: 40, borderRadius: 10, padding: "0 8px" }}>
             <option value={1}>High</option>
             <option value={2}>Normal</option>
             <option value={3}>Low</option>
           </select>
-          <select value={newFreq} onChange={e => setNewFreq(e.target.value as RepeatFreq)} title="Repeat (optional)">
+          <select value={newFreq} onChange={e => setNewFreq(e.target.value as RepeatFreq)} title="Repeat (optional)" style={{ height: 40, borderRadius: 10, padding: "0 8px" }}>
             <option value="">No repeat</option>
             <option value="daily">Daily</option>
             <option value="weekly">Weekly</option>
@@ -737,12 +781,12 @@ export default function CalendarScreen({
           </select>
 
           {/* Timed options */}
-          <label title="Timed event?">
+          <label title="Timed event?" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <input
               type="checkbox"
               checked={timed}
               onChange={(e) => setTimed(e.target.checked)}
-              style={{ marginRight: 6 }}
+              style={{ marginRight: 2 }}
             />
             Timed
           </label>
@@ -757,7 +801,7 @@ export default function CalendarScreen({
                 value={durationMin}
                 onChange={(e) => setDurationMin(Math.max(5, Number(e.target.value) || 60))}
                 title="Duration (min)"
-                style={{ width: 110 }}
+                style={{ width: 110, height: 40, borderRadius: 10, padding: "0 10px", border: "1px solid var(--border)" }}
                 placeholder="min"
               />
               <select
@@ -766,6 +810,7 @@ export default function CalendarScreen({
                   setRemindBefore(e.target.value === "" ? "" : Number(e.target.value))
                 }
                 title="Reminder"
+                style={{ height: 40, borderRadius: 10, padding: "0 8px" }}
               >
                 <option value="">No reminder</option>
                 <option value="0">At time</option>
@@ -779,31 +824,31 @@ export default function CalendarScreen({
             </>
           )}
 
-          <button className="btn-primary" onClick={addTaskToSelected} disabled={!newTitle.trim() || adding} style={{ borderRadius: 8 }}>
+          <button className="btn-primary" onClick={addTaskToSelected} disabled={!newTitle.trim() || adding} style={{ borderRadius: 10, height: 40, padding: "0 14px" }}>
             {adding ? "Adding…" : "Add"}
           </button>
         </div>
 
         {sortedDayTasks.length === 0 && !loading && <div className="muted">Nothing scheduled.</div>}
-        <ul className="list">
+        <ul className="list" style={{ margin: 0, padding: 0, listStyle: "none" }}>
           {sortedDayTasks.map((t) => (
-            <li key={t.id} className="item">
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 8, width: "100%" }}>
+            <li key={t.id} className="item" style={{ padding: 8, borderBottom: "1px solid #f1f5f9" }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 10, width: "100%" }}>
                 <span
                   title={t.category || ""}
                   style={{
                     display: "inline-block",
                     flex: "0 0 auto",
-                    width: 10,
-                    height: 10,
+                    width: 12,
+                    height: 12,
                     marginTop: 6,
                     borderRadius: 999,
                     background: t.category_color || "#e5e7eb",
                     border: "1px solid #d1d5db",
                   }}
                 />
-                <div style={{ flex: 1 }}>
-                  <div style={{ textDecoration: t.completed_at ? "line-through" : "none" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ textDecoration: t.completed_at ? "line-through" : "none", fontSize: 15, overflow: "hidden", textOverflow: "ellipsis" }}>
                     {t.all_day
                       ? t.title
                       : `${(t.due_time || "").slice(0,5)} — ${t.title}`}
@@ -849,8 +894,9 @@ function DigitalTimePicker({
         gap: 6,
         padding: "4px 8px",
         border: "1px solid var(--border)",
-        borderRadius: 8,
+        borderRadius: 10,
         background: "#fff",
+        height: 40
       }}
       aria-label="Time picker"
       role="group"
@@ -859,18 +905,18 @@ function DigitalTimePicker({
         aria-label="Hours"
         value={h}
         onChange={(e) => update(Number(e.target.value), m)}
-        style={{ fontSize: 16, padding: "6px 8px", height: 40 }}
+        style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
       >
         {hours.map(hr => (
           <option key={hr} value={hr}>{String(hr).padStart(2, "0")}</option>
         ))}
       </select>
-      <span style={{ fontWeight: 700, lineHeight: "40px" }}>:</span>
+      <span style={{ fontWeight: 700, lineHeight: "32px" }}>:</span>
       <select
         aria-label="Minutes"
         value={m - (m % minuteStep)}
         onChange={(e) => update(h, Number(e.target.value))}
-        style={{ fontSize: 16, padding: "6px 8px", height: 40 }}
+        style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
       >
         {minutes.map(mm => (
           <option key={mm} value={mm}>{String(mm).padStart(2, "0")}</option>
@@ -886,6 +932,14 @@ function combineLocalDateTimeISO(dateISO: string, hhmm: string) {
 }
 
 /* ===================== NLP Parser ===================== */
+/**
+ * Parse examples:
+ *  - "Lunch tomorrow #personal !high"
+ *  - "Dentist 2025-09-01 #health"
+ *  - "Gym every Mon,Wed,Fri #health"
+ *  - "Invoice 15 Sep every month until 2026-01-01 !high"
+ *  - "Pay VAT 15/10 every 2 weeks for 6 times"
+ */
 function parseNlp(raw: string, baseISO: string): {
   title: string;
   occurrences: string[];
@@ -898,12 +952,14 @@ function parseNlp(raw: string, baseISO: string): {
   let category: CatKey | undefined = undefined;
   let priority: number | undefined = undefined;
 
+  // category via #tag
   const catMatch = s.match(/#(personal|health|career|financial|other)\b/i);
   if (catMatch) {
     category = catMatch[1].toLowerCase() as CatKey;
     s = s.replace(catMatch[0], " ");
   }
 
+  // priority via !high|!normal|!low|!top
   const priMatch = s.match(/!(high|normal|low|top)\b/i);
   if (priMatch) {
     const key = priMatch[1].toLowerCase();
@@ -911,17 +967,21 @@ function parseNlp(raw: string, baseISO: string): {
     s = s.replace(priMatch[0], " ");
   }
 
+  // explicit date forms in text -> pick first as anchor
   let anchorISO: string | null = findExplicitDateISO(s, baseISO);
   if (anchorISO) {
+    // remove that substring
     s = removeDateSubstr(s);
   }
 
+  // relative tokens: today / tomorrow / next week / next mon...
   const rel = s.match(/\b(today|tomorrow|next week|next\s+(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun))\b/i);
   if (rel && !anchorISO) {
     anchorISO = relativeToISO(rel[0].toLowerCase(), baseISO);
     if (anchorISO) s = s.replace(rel[0], " ");
   }
 
+  // "in N days/weeks/months"
   const inMatch = s.match(/\bin\s+(\d+)\s+(day|days|week|weeks|month|months)\b/i);
   if (inMatch && !anchorISO) {
     const n = Number(inMatch[1]);
@@ -934,25 +994,25 @@ function parseNlp(raw: string, baseISO: string): {
     s = s.replace(inMatch[0], " ");
   }
 
+  // repeat rules: every ...
   const everyMatch = s.match(/\bevery\b([\s\S]*)$/i);
-  let rule:
-    | { type: "weekday-list"; days?: number[]; until?: string | null; count?: number | null }
-    | { type: "interval"; interval?: number; freq?: "daily"|"weekly"|"monthly"|"annually"; until?: string | null; count?: number | null }
-    | { type: "freq"; freq?: "daily"|"weekly"|"monthly"|"annually"; until?: string | null; count?: number | null }
-    | null = null;
-
+  let rule: { type: "weekday-list" | "interval" | "freq"; days?: number[]; freq?: "daily"|"weekly"|"monthly"|"annually"; interval?: number; until?: string | null; count?: number | null } | null = null;
   if (everyMatch) {
     const tail = everyMatch[1].trim();
+    // until date
     const until = (tail.match(/\buntil\s+([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{1,2}[\/\-][0-9]{1,2}(?:[\/\-][0-9]{2,4})?|[0-9]{1,2}\s+[A-Za-z]{3,})/i));
     const untilISO = until ? normalizeAnyDateToISO(until[1], baseISO) : null;
 
+    // count "for N times"
     const countMatch = tail.match(/\bfor\s+(\d+)\s+(time|times)\b/i);
     const count = countMatch ? Number(countMatch[1]) : null;
 
+    // weekday list: mon,wed,fri
     const wd = parseWeekdayList(tail);
     if (wd && wd.length) {
       rule = { type: "weekday-list", days: wd, until: untilISO, count };
     } else {
+      // interval like "every 2 weeks", or "weekly/monthly/daily/annually"
       const intMatch = tail.match(/\bevery\s+(\d+)\s+(week|weeks|month|months|day|days|year|years)\b/i);
       if (intMatch) {
         const n = Number(intMatch[1]);
@@ -960,6 +1020,7 @@ function parseNlp(raw: string, baseISO: string): {
         const freq = unit.startsWith("day") ? "daily" : unit.startsWith("week") ? "weekly" : unit.startsWith("month") ? "monthly" : "annually";
         rule = { type: "interval", interval: n, freq, until: untilISO, count };
       } else {
+        // plain "every week/month/day/year"
         const fMatch = tail.match(/\bevery\s+(day|daily|week|weekly|month|monthly|year|yearly|annually)\b/i);
         if (fMatch) {
           const token = fMatch[1].toLowerCase();
@@ -971,47 +1032,50 @@ function parseNlp(raw: string, baseISO: string): {
         }
       }
     }
+    // remove "every..." clause from title
     s = s.replace(/\bevery\b([\s\S]*)$/i, " ");
   }
 
   const title = s.replace(/\s+/g, " ").trim();
 
+  // Build occurrences
   const base = anchorISO || baseISO;
   if (!rule) {
     occurrences.push(base);
   } else {
     const maxCap = 104; // safety
-    if ((rule as any).type === "weekday-list") {
-      const days = (rule as any).days || [];
-      const until = (rule as any).until ? fromISO((rule as any).until) : null;
+    if (rule.type === "weekday-list") {
+      const days = rule.days || [];
+      const until = rule.until ? fromISO(rule.until) : null;
       let d = fromISO(base);
       let added = 0;
-      while (added < ((rule as any).count ?? 24) && added < maxCap) {
+      // iterate forward day by day and pick matching weekdays
+      while (added < (rule.count ?? 24) && added < maxCap) {
         const iso = toISO(d);
-        const wd = weekdayIdx(d);
+        const wd = weekdayIdx(d); // Mon=1..Sun=7
         if (days.includes(wd) && (until ? d <= until : true)) {
           occurrences.push(iso);
           added++;
         }
         d = addDays(d, 1);
-        if (!until && added >= ((rule as any).count ?? 24)) break;
+        if (!until && added >= (rule.count ?? 24)) break;
         if (until && d > until) break;
       }
-    } else if ((rule as any).type === "interval") {
-      const interval = Math.max(1, (rule as any).interval || 1);
-      const freq = (rule as any).freq!;
-      const until = (rule as any).until ? fromISO((rule as any).until) : null;
-      const limit = (rule as any).count ?? defaultCountFor(freq);
+    } else if (rule.type === "interval") {
+      const interval = Math.max(1, rule.interval || 1);
+      const freq = rule.freq!;
+      const until = rule.until ? fromISO(rule.until) : null;
+      const limit = rule.count ?? defaultCountFor(freq);
       let d = fromISO(base);
       for (let i = 0; i < Math.min(limit, maxCap); i++) {
         occurrences.push(toISO(d));
         d = addIntervalN(d, freq, interval);
         if (until && d > until) break;
       }
-    } else if ((rule as any).type === "freq") {
-      const freq = (rule as any).freq!;
-      const until = (rule as any).until ? fromISO((rule as any).until) : null;
-      const limit = (rule as any).count ?? defaultCountFor(freq);
+    } else if (rule.type === "freq") {
+      const freq = rule.freq!;
+      const until = rule.until ? fromISO(rule.until) : null;
+      const limit = rule.count ?? defaultCountFor(freq);
       let d = fromISO(base);
       for (let i = 0; i < Math.min(limit, maxCap); i++) {
         occurrences.push(toISO(d));
@@ -1023,7 +1087,7 @@ function parseNlp(raw: string, baseISO: string): {
 
   return {
     title,
-    occurrences: Array.from(new Set(occurrences)),
+    occurrences: Array.from(new Set(occurrences)), // dedupe
     category,
     priority,
     source: "calendar_nlp"
@@ -1035,6 +1099,7 @@ function defaultCountFor(freq: "daily"|"weekly"|"monthly"|"annually") {
 }
 
 function parseWeekdayList(tail: string): number[] | null {
+  // returns Mon..Sun as 1..7
   const map: Record<string, number> = { mon:1, tue:2, tues:2, wed:3, thu:4, thur:4, thurs:4, fri:5, sat:6, sun:7 };
   const m = tail.match(/\b(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(\s*,\s*(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun))*\b/ig);
   if (!m) return null;
@@ -1044,14 +1109,17 @@ function parseWeekdayList(tail: string): number[] | null {
 }
 
 function findExplicitDateISO(s: string, baseISO: string): string | null {
+  // YYYY-MM-DD
   const iso = s.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
   if (iso) return clampISO(iso[1]);
+  // DD/MM or D/M (assume current year)
   const dm = s.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/);
   if (dm) {
     const y = dm[3] ? normalizeYear(Number(dm[3])) : fromISO(baseISO).getFullYear();
     const m = Number(dm[2]); const d = Number(dm[1]);
     return toISO(new Date(y, m - 1, d));
   }
+  // "15 Sep" or "Sep 15"
   const m1 = s.match(/\b(\d{1,2})\s+([A-Za-z]{3,})\b/);
   const m2 = s.match(/\b([A-Za-z]{3,})\s+(\d{1,2})\b/);
   const y = fromISO(baseISO).getFullYear();
