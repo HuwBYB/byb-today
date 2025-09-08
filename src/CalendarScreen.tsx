@@ -365,7 +365,6 @@ export default function CalendarScreen({
 
       setNewTitle("");
       setNewFreq("");
-      // Optional: reset timed controls if you like
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -394,7 +393,7 @@ export default function CalendarScreen({
           user_id: userId,
           title: parsed.title,
           due_date: iso,
-          all_day: true, // NLP quick-add remains all-day for now
+          all_day: true,
           priority: parsed.priority ?? 2,
           category,
           category_color,
@@ -421,7 +420,6 @@ export default function CalendarScreen({
         .select();
       if (error) throw error;
 
-      // update month cache
       const first = toISO(firstDayOfMonth),
         last = toISO(lastDayOfMonth);
       setTasksByDay((prev) => {
@@ -462,11 +460,10 @@ export default function CalendarScreen({
       if (aTimed && bTimed) {
         const ta = a.due_time || "";
         const tb = b.due_time || "";
-        if (ta !== tb) return ta.localeCompare(tb); // "HH:MM:SS" lexicographic works
+        if (ta !== tb) return ta.localeCompare(tb);
       }
 
       // both all-day or same time: fallbacks
-      // Prefer category order, then priority, then title
       const ca = CAT_ORDER[a.category || "zz"] ?? 99;
       const cb = CAT_ORDER[b.category || "zz"] ?? 99;
       if (ca !== cb) return ca - cb;
@@ -565,7 +562,7 @@ export default function CalendarScreen({
               aria-label="Go to today"
               style={{
                 minWidth: 64,
-                height: 36,
+                height: 40,
                 padding: "0 12px",
                 borderRadius: 10,
                 border: "1px solid var(--border)",
@@ -583,7 +580,13 @@ export default function CalendarScreen({
                 setCursor(new Date(cursor.getFullYear(), Number(e.target.value), 1))
               }
               title="Month"
-              style={{ height: 36, borderRadius: 10 }}
+              style={{
+                height: 40,
+                borderRadius: 10,
+                padding: "0 10px",
+                minWidth: 140,
+                fontSize: 14,
+              }}
             >
               {months.map((m) => (
                 <option key={m.value} value={m.value}>
@@ -597,7 +600,13 @@ export default function CalendarScreen({
                 setCursor(new Date(Number(e.target.value), cursor.getMonth(), 1))
               }
               title="Year"
-              style={{ height: 36, borderRadius: 10 }}
+              style={{
+                height: 40,
+                borderRadius: 10,
+                padding: "0 10px",
+                minWidth: 110,
+                fontSize: 14,
+              }}
             >
               {years.map((y) => (
                 <option key={y} value={y}>
@@ -843,7 +852,7 @@ export default function CalendarScreen({
 
       {/* Day detail + NLP add + structured add */}
       <div className="card" style={{ display: "grid", gap: 10, padding: 12 }}>
-        {/* Date + count + Sort toggle (mobile-first layout) */}
+        {/* Date + count */}
         <div
           style={{
             position: "sticky",
@@ -855,78 +864,70 @@ export default function CalendarScreen({
         >
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns: "1fr auto",
-              alignItems: "center",
+              display: "flex",
+              alignItems: "baseline",
               gap: 8,
+              minWidth: 0,
+              flexWrap: "wrap",
             }}
           >
-            <div
+            <h2
               style={{
-                display: "flex",
-                alignItems: "baseline",
-                gap: 8,
-                minWidth: 0,
+                margin: 0,
+                fontSize: 18,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
               }}
             >
-              <h2
-                style={{
-                  margin: 0,
-                  fontSize: 18,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {selectedISO}
-              </h2>
-              <span className="muted" style={{ fontSize: 13 }}>
-                {loading
-                  ? "Loading…"
-                  : `${(tasksByDay[selectedISO] || []).length} task${
-                      (tasksByDay[selectedISO] || []).length === 1 ? "" : "s"
-                    }`}
-              </span>
-            </div>
+              {selectedISO}
+            </h2>
+            <span className="muted" style={{ fontSize: 13 }}>
+              {loading
+                ? "Loading…"
+                : `${(tasksByDay[selectedISO] || []).length} task${
+                    (tasksByDay[selectedISO] || []).length === 1 ? "" : "s"
+                  }`}
+            </span>
+          </div>
 
-            {/* Sort toggle: just Time and Category */}
-            <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-              <div
-                role="group"
-                aria-label="Sort tasks"
+          {/* Sort toggle on its own line */}
+          <div style={{ marginTop: 8 }}>
+            <div
+              role="group"
+              aria-label="Sort tasks"
+              style={{
+                display: "inline-flex",
+                border: "1px solid var(--border)",
+                borderRadius: 999,
+                overflow: "hidden",
+              }}
+            >
+              <button
+                onClick={() => setSortMode("time")}
+                aria-pressed={sortMode === "time"}
                 style={{
-                  display: "inline-flex",
-                  border: "1px solid var(--border)",
-                  borderRadius: 999,
-                  overflow: "hidden",
+                  padding: "6px 12px",
+                  fontSize: 13,
+                  background: sortMode === "time" ? "#eef2ff" : "#fff",
+                  minWidth: 72,
                 }}
               >
-                <button
-                  onClick={() => setSortMode("time")}
-                  aria-pressed={sortMode === "time"}
-                  style={{
-                    padding: "6px 12px",
-                    fontSize: 13,
-                    background: sortMode === "time" ? "#eef2ff" : "#fff",
-                    minWidth: 72,
-                  }}
-                >
-                  Time
-                </button>
-                <button
-                  onClick={() => setSortMode("category")}
-                  aria-pressed={sortMode === "category"}
-                  style={{
-                    padding: "6px 12px",
-                    fontSize: 13,
-                    background: sortMode === "category" ? "#eef2ff" : "#fff",
-                    borderLeft: "1px solid var(--border)",
-                    minWidth: 92,
-                  }}
-                >
-                  Category
-                </button>
-              </div>
+                Time
+              </button>
+              <button
+                onClick={() => setSortMode("category")}
+                aria-pressed={sortMode === "category"}
+                style={{
+                  padding: "6px 12px",
+                  fontSize: 13,
+                  background: sortMode === "category" ? "#eef2ff" : "#fff",
+                  borderLeft: "1px solid var(--border)",
+                  minWidth: 92,
+                }}
+              >
+                Category
+              </button>
             </div>
           </div>
         </div>
