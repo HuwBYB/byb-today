@@ -43,6 +43,7 @@ function hexToRgba(hex: string, alpha = 0.45) {
 /* ---------- Storage keys ---------- */
 const LS_VAULT = "byb:affirmations:v1";
 const LS_CONF_TODAY_PREFIX = "byb:confidence:today:";
+const LS_DEFAULT_PREFIX = "byb:affirmation:default:";
 
 /* ---------- Utils ---------- */
 const todayISO = () => {
@@ -52,7 +53,9 @@ const todayISO = () => {
   ).padStart(2, "0")}`;
 };
 const confidenceKeyForToday = () => `${LS_CONF_TODAY_PREFIX}${todayISO()}`;
+const defaultKey = (cat: string) => `${LS_DEFAULT_PREFIX}${cat}`;
 
+/* ---------- Local persistence ---------- */
 async function saveToVaultLocal(row: AffirmationRow) {
   try {
     const arr: AffirmationRow[] = JSON.parse(localStorage.getItem(LS_VAULT) || "[]");
@@ -72,6 +75,18 @@ async function sendToConfidenceTodayLocal(row: AffirmationRow) {
       localStorage.setItem(key, JSON.stringify(arr));
     }
   } catch {}
+}
+function setDefaultLocal(category: Category, text: string) {
+  try {
+    localStorage.setItem(defaultKey(category), text);
+  } catch {}
+}
+function getDefaultLocal(category: Category): string {
+  try {
+    return localStorage.getItem(defaultKey(category)) || "";
+  } catch {
+    return "";
+  }
 }
 
 /* ---------- Modal ---------- */
@@ -162,7 +177,7 @@ function BuilderHelpContent() {
           <b>Tweak tone</b> with one-taps: Shorter, Stronger, Gentler.
         </li>
         <li>
-          <b>Save</b> to your vault and <b>Send to Confidence</b> for today’s practice set.
+          <b>Save</b> to your vault, <b>Set as default</b> for the category, and/or <b>Use today</b>.
         </li>
       </ul>
 
@@ -193,10 +208,14 @@ export default function AffirmationBuilderScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [active, setActive] = useState<Category>("business");
 
-  const [text, setText] = useState(""); // editor text
-  const [theme, setTheme] = useState(""); // optional prompt theme
+  const [text, setText] = useState("");        // editor text
+  const [theme, setTheme] = useState("");      // optional prompt theme
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+
+  // NEW: save options
+  const [optUseToday, setOptUseToday] = useState(true);
+  const [optSetDefault, setOptSetDefault] = useState(true);
 
   const [busySuggest, setBusySuggest] = useState(false);
   const [busySave, setBusySave] = useState(false);
@@ -208,6 +227,14 @@ export default function AffirmationBuilderScreen() {
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
   }, []);
+
+  // NEW: when category changes, load its default into the editor if the editor is empty or showing the previous category's default.
+  useEffect(() => {
+    const def = getDefaultLocal(active);
+    if (!text.trim()) setText(def);
+    // do not auto-select a suggestion here
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   /* ---------- EVA helpers (calls your /api/eva endpoint) ---------- */
   async function askEva() {
@@ -331,7 +358,8 @@ Keep it present-tense, positive, under 12 words, believable:
     if ((navigator as any).vibrate) (navigator as any).vibrate(3);
   }
 
-  async function saveToVaultAndConfidence() {
+  /* ---------- Save actions ---------- */
+  async function save({ saveDefault, useToday }: { saveDefault: boolean; useToday: boolean }) {
     const clean = text.trim();
     if (!clean) {
       setErr("Write or pick an affirmation first.");
@@ -341,6 +369,32 @@ Keep it present-tense, positive, under 12 words, believable:
     setBusySave(true);
     const row: AffirmationRow = { user_id: userId, category: active, text: clean };
 
+    // Best-effort: store raw in a vault list for history
+    await saveToVaultLocal(row);
+
+    // NEW: persistent per-category default
+    if (saveDefault) {
+      setDefaultLocal(active, clean);
+      // Optional Supabase upsert (best-effort). If your schema differs, adjust here.
+      try {
+        if (userId) {
+          // Try a table named "affirmation_defaults" with (user_id, category, text)
+          await supabase.from("affirmation_defaults").upsert(
+            { user_id: userId, category: active, text: clean },
+            { onConflict: "user_id,category" } as any
+          );
+        }
+      } catch {
+        // ignore if table not present
+      }
+    }
+
+    // Send to Confidence for today
+    if (useToday) {
+      await sendToConfidenceTodayLocal(row);
+    }
+
+    // Optional: keep a full list of authored affirmations in Supabase
     try {
       if (userId) {
         await supabase.from("affirmations").insert({
@@ -353,14 +407,24 @@ Keep it present-tense, positive, under 12 words, believable:
       // best-effort only
     }
 
-    await saveToVaultLocal(row);
-    await sendToConfidenceTodayLocal(row);
-
     setBusySave(false);
     if ((navigator as any).vibrate) (navigator as any).vibrate(6);
   }
 
+  // Convenience single button (uses the two toggles)
+  async function saveClick() {
+    await save({ saveDefault: optSetDefault, useToday: optUseToday });
+  }
+
+  // Quick helper: load current default for this category into the editor
+  function loadDefaultIntoEditor() {
+    const def = getDefaultLocal(active);
+    setText(def);
+    setSelectedIdx(null);
+  }
+
   const activeColor = colorOf(active);
+  const currentDefault = getDefaultLocal(active);
 
   return (
     <div className="page-affirmation-builder" style={{ maxWidth: "100%", overflowX: "hidden" }}>
@@ -368,7 +432,7 @@ Keep it present-tense, positive, under 12 words, believable:
         {/* Header (EVA) */}
         <div className="card" style={{ position: "relative" }}>
           <h1 style={{ margin: 0 }}>Affirmation Builder</h1>
-          <div className="muted">Create personal, powerful lines — then send them to Confidence.</div>
+          <div className="muted">Create personal, powerful lines — then set category defaults and/or use them today in Confidence.</div>
           <button
             onClick={() => setShowHelp(true)}
             aria-label="Open builder help"
@@ -532,6 +596,26 @@ Keep it present-tense, positive, under 12 words, believable:
             Tip: Read it aloud once — if it feels clunky, tweak the words until it feels natural.
           </div>
 
+          {/* NEW: Save options */}
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <input type="checkbox" checked={optSetDefault} onChange={(e) => setOptSetDefault(e.target.checked)} />
+              <span>Set as default for <b>{CATS.find(c=>c.key===active)?.label}</b></span>
+            </label>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <input type="checkbox" checked={optUseToday} onChange={(e) => setOptUseToday(e.target.checked)} />
+              <span>Also use in <b>Confidence</b> today</span>
+            </label>
+            <span className="muted" style={{ marginLeft: "auto" }}>
+              Current default: {currentDefault ? <em>“{currentDefault}”</em> : <em>None</em>}
+            </span>
+            {currentDefault && (
+              <button onClick={loadDefaultIntoEditor} title="Load current default into editor">
+                Load default
+              </button>
+            )}
+          </div>
+
           {/* Actions */}
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
             {err && <div style={{ color: "red", marginRight: "auto" }}>{err}</div>}
@@ -539,12 +623,12 @@ Keep it present-tense, positive, under 12 words, believable:
               Clear
             </button>
             <button
-              onClick={saveToVaultAndConfidence}
+              onClick={saveClick}
               className="btn-primary"
               disabled={!text || busySave}
               style={{ borderRadius: 10 }}
             >
-              {busySave ? "Saving…" : "Save & send to Confidence"}
+              {busySave ? "Saving…" : "Save"}
             </button>
           </div>
         </div>
