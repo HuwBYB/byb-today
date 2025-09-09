@@ -1,199 +1,6 @@
-// src/FocusScreen.tsx
-import { useEffect, useRef, useState, type ReactNode, useMemo } from "react";
+// src/FocusAlfredScreen.tsx
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
-
-/* =========================================================
-   Small, app-wide Focus Service (singleton on window)
-   Keeps ticking even when this screen unmounts (mobile-friendly)
-   ========================================================= */
-type Phase = "focus" | "short" | "long";
-type PresetKey = "pomodoro" | "swift" | "deep" | "custom";
-type PresetVals = { focusMin: number; shortMin: number; longMin: number; cyclesBeforeLong: number };
-
-type ServiceSnapshot = {
-  v: 1;
-  running: boolean;
-  phase: Phase;
-  cycle: number;
-  targetAt: number | null;       // epoch ms
-  remaining: number;             // seconds
-  presetKey: PresetKey;
-  custom: PresetVals;
-  autoStartNext: boolean;
-  taskTitle: string;
-};
-
-type Service = {
-  get(): ServiceSnapshot;
-  start(): void;
-  pause(): void;
-  resetToPreset(presetKey: PresetKey, custom: PresetVals): void;
-  setAutoStartNext(v: boolean): void;
-  setTaskTitle(t: string): void;
-  applyCustom(custom: PresetVals): void;
-  setPresetKey(k: PresetKey): void;
-  // lifecycle (internal)
-};
-
-const PRESETS_BASE: { key: Exclude<PresetKey, "custom">; focusMin: number; shortMin: number; longMin: number; cyclesBeforeLong: number }[] = [
-  { key: "pomodoro", focusMin: 25, shortMin: 5,  longMin: 15, cyclesBeforeLong: 4 },
-  { key: "swift",    focusMin: 20, shortMin: 5,  longMin: 15, cyclesBeforeLong: 4 },
-  { key: "deep",     focusMin: 50, shortMin: 10, longMin: 20, cyclesBeforeLong: 2 },
-];
-
-const LS_SERVICE_KEY = "byb:focus_service_state:v1";
-
-function clamp(n: number, lo: number, hi: number) { return Math.min(hi, Math.max(lo, n)); }
-function nowSecToTarget(targetAt: number) { return Math.max(0, Math.ceil((targetAt - Date.now()) / 1000)); }
-function durationFor(ph: Phase, p: PresetVals) {
-  return (ph === "focus" ? p.focusMin : ph === "short" ? p.shortMin : p.longMin) * 60;
-}
-function presetByKey(key: PresetKey, custom: PresetVals): PresetVals {
-  if (key === "custom") return custom;
-  const base = PRESETS_BASE.find(b => b.key === key)!;
-  return { focusMin: base.focusMin, shortMin: base.shortMin, longMin: base.longMin, cyclesBeforeLong: base.cyclesBeforeLong };
-}
-function computeNext(ph: Phase, cycle: number, p: PresetVals, endedAtMs: number) {
-  if (ph === "focus") {
-    const nextCycle = cycle + 1;
-    const useLong = nextCycle >= p.cyclesBeforeLong;
-    const nextPhase: Phase = useLong ? "long" : "short";
-    const dur = useLong ? p.longMin * 60 : p.shortMin * 60;
-    const nextTargetAt = endedAtMs + dur * 1000;
-    return { phase: nextPhase, cycle: useLong ? 0 : nextCycle, targetAt: nextTargetAt };
-  }
-  const dur = p.focusMin * 60;
-  return { phase: "focus" as Phase, cycle, targetAt: endedAtMs + dur * 1000 };
-}
-
-declare global {
-  interface Window { __BYB_FOCUS_SERVICE__?: Service; }
-}
-
-function initService(): Service {
-  if (window.__BYB_FOCUS_SERVICE__) return window.__BYB_FOCUS_SERVICE__;
-  // restore or defaults
-  let state: ServiceSnapshot = (() => {
-    try {
-      const raw = localStorage.getItem(LS_SERVICE_KEY);
-      if (raw) {
-        const s = JSON.parse(raw) as ServiceSnapshot;
-        if (s && s.v === 1) {
-          // if it was running, recompute remaining and fast-forward phases if needed
-          if (s.running && s.targetAt) {
-            const p = presetByKey(s.presetKey, s.custom);
-            let ph = s.phase, cyc = s.cycle, tgt = s.targetAt, guard = 0;
-            while (tgt <= Date.now() && guard++ < 50) {
-              const next = computeNext(ph, cyc, p, tgt);
-              ph = next.phase; cyc = next.cycle; tgt = next.targetAt;
-            }
-            const rem = nowSecToTarget(tgt);
-            return { ...s, phase: ph, cycle: cyc, targetAt: tgt, remaining: rem, running: true };
-          }
-          const p = presetByKey(s.presetKey, s.custom);
-          const rem = Math.max(0, s.remaining || durationFor(s.phase, p));
-          return { ...s, remaining: rem, running: false, targetAt: null };
-        }
-      }
-    } catch {}
-    return {
-      v: 1, running: false, phase: "focus", cycle: 0, targetAt: null, remaining: PRESETS_BASE[0].focusMin * 60,
-      presetKey: "pomodoro", custom: { focusMin: 25, shortMin: 5, longMin: 15, cyclesBeforeLong: 4 },
-      autoStartNext: true, taskTitle: ""
-    };
-  })();
-
-  // single interval ticker
-  let intervalId: number | null = null;
-
-  function save() {
-    try { localStorage.setItem(LS_SERVICE_KEY, JSON.stringify(state)); } catch {}
-  }
-  function broadcast() {
-    window.dispatchEvent(new CustomEvent("byb:focus:update", { detail: state }));
-  }
-  function schedule() {
-    if (intervalId !== null || !state.running || !state.targetAt) return;
-    intervalId = window.setInterval(() => {
-      if (!state.running || !state.targetAt) return;
-      const rem = nowSecToTarget(state.targetAt);
-      state = { ...state, remaining: rem };
-      if (rem <= 0) {
-        // phase end
-        const p = presetByKey(state.presetKey, state.custom);
-        const ended = state.phase;
-        const now = Date.now();
-        const next = computeNext(ended, state.cycle, p, now);
-        if (state.autoStartNext) {
-          const rem2 = nowSecToTarget(next.targetAt);
-          state = { ...state, phase: next.phase, cycle: next.cycle, targetAt: next.targetAt, remaining: rem2, running: true };
-        } else {
-          state = { ...state, phase: next.phase, cycle: next.cycle, targetAt: null, remaining: durationFor(next.phase, p), running: false };
-          if (intervalId) { clearInterval(intervalId); intervalId = null; }
-        }
-        save();
-        broadcast();
-        window.dispatchEvent(new CustomEvent("byb:focus:ended", { detail: { phase: ended } }));
-        return;
-      }
-      save();
-      broadcast();
-    }, 1000) as unknown as number;
-  }
-  function start() {
-    if (state.running) return;
-    const p = presetByKey(state.presetKey, state.custom);
-    const base = state.remaining > 0 ? state.remaining : durationFor(state.phase, p);
-    const tgt = Date.now() + base * 1000;
-    state = { ...state, running: true, targetAt: tgt };
-    save(); broadcast(); schedule();
-  }
-  function pause() {
-    if (!state.running) return;
-    const rem = state.targetAt ? nowSecToTarget(state.targetAt) : state.remaining;
-    state = { ...state, running: false, targetAt: null, remaining: rem };
-    if (intervalId) { clearInterval(intervalId); intervalId = null; }
-    save(); broadcast();
-  }
-  function resetToPreset(presetKey: PresetKey, custom: PresetVals) {
-    const p = presetByKey(presetKey, custom);
-    state = {
-      ...state,
-      presetKey, custom,
-      running: false, phase: "focus", cycle: 0, targetAt: null, remaining: p.focusMin * 60
-    };
-    if (intervalId) { clearInterval(intervalId); intervalId = null; }
-    save(); broadcast();
-  }
-  function setAutoStartNext(v: boolean) {
-    state = { ...state, autoStartNext: v }; save(); broadcast();
-  }
-  function setTaskTitle(t: string) {
-    state = { ...state, taskTitle: t }; save(); broadcast();
-  }
-  function applyCustom(custom: PresetVals) {
-    // cap focus max 240 here too as a guard
-    const safe = { ...custom, focusMin: clamp(custom.focusMin, 1, 240) };
-    state = { ...state, custom: safe };
-    // if current preset is custom and not running, also reset remaining for current phase
-    if (state.presetKey === "custom" && !state.running) {
-      const p = presetByKey("custom", safe);
-      const rem = durationFor(state.phase, p);
-      state = { ...state, remaining: rem };
-    }
-    save(); broadcast();
-  }
-  function setPresetKey(k: PresetKey) {
-    state = { ...state, presetKey: k };
-    save(); broadcast();
-  }
-
-  const service: Service = { get: () => state, start, pause, resetToPreset, setAutoStartNext, setTaskTitle, applyCustom, setPresetKey };
-  window.__BYB_FOCUS_SERVICE__ = service;
-  // if it was running on restore, restart interval
-  if (state.running && state.targetAt) schedule();
-  return service;
-}
 
 /* ---------- Tiny helpers ---------- */
 function mmss(sec: number) {
@@ -203,29 +10,131 @@ function mmss(sec: number) {
   return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
 }
 function todayStartISO() {
-  const d = new Date(); d.setHours(0,0,0,0); return d.toISOString();
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
 }
 function startOfWeekMondayISO() {
-  const d = new Date(); const day = (d.getDay()+6)%7; d.setDate(d.getDate()-day); d.setHours(0,0,0,0); return d.toISOString();
+  const d = new Date();
+  const day = (d.getDay() + 6) % 7; // Monday=0
+  d.setDate(d.getDate() - day);
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
 }
-function parseIntSafe(s: string) { const m = (s ?? "").match(/\d+/); return m ? parseInt(m[0], 10) : NaN; }
+function clamp(n: number, lo: number, hi: number) {
+  return Math.min(hi, Math.max(lo, n));
+}
+function parseIntSafe(s: string) {
+  const m = (s ?? "").match(/\d+/);
+  return m ? parseInt(m[0], 10) : NaN;
+}
+
+/* ---------- Notifications & sound (INLINE to fix build) ---------- */
+function playBeep(times = 2, enabled = true) {
+  if (!enabled) return;
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    let t = ctx.currentTime;
+    for (let i = 0; i < times; i++) {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "sine";
+      o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.2, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+      o.connect(g).connect(ctx.destination);
+      o.start(t);
+      o.stop(t + 0.26);
+      t += 0.32;
+    }
+  } catch {}
+}
+
+async function ensureNotifPermission(): Promise<boolean> {
+  if (typeof window === "undefined" || !("Notification" in window)) return false;
+  if (Notification.permission === "granted") return true;
+  if (Notification.permission === "denied") return false;
+  const res = await Notification.requestPermission();
+  return res === "granted";
+}
+function sendNotification(enabled: boolean, title: string, body: string) {
+  if (!enabled) return;
+  if (!("Notification" in window)) return;
+  if (Notification.permission !== "granted") return;
+  try {
+    new Notification(title, { body });
+  } catch {}
+}
+
+/* ---------- Presets ---------- */
+type PresetKey = "pomodoro" | "swift" | "deep" | "custom";
+type Preset = {
+  key: PresetKey;
+  label: string;
+  focusMin: number;
+  shortMin: number;
+  longMin: number;
+  cyclesBeforeLong: number;
+};
+const PRESETS_BASE: Omit<Preset, "label">[] = [
+  { key: "pomodoro", focusMin: 25, shortMin: 5, longMin: 15, cyclesBeforeLong: 4 },
+  { key: "swift", focusMin: 20, shortMin: 5, longMin: 15, cyclesBeforeLong: 4 },
+  { key: "deep", focusMin: 50, shortMin: 10, longMin: 20, cyclesBeforeLong: 2 },
+];
 
 /* ---------- Modal ---------- */
-function Modal({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+function Modal({
+  open,
+  onClose,
+  title,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: ReactNode;
+}) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     if (open) window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
   if (!open) return null;
   return (
-    <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 2000 }}>
-      <div onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 760, width: "100%", background: "#fff", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.2)", padding: 20 }}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,.35)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+        zIndex: 2000,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: 760,
+          width: "100%",
+          background: "#fff",
+          borderRadius: 12,
+          boxShadow: "0 10px 30px rgba(0,0,0,.2)",
+          padding: 20,
+        }}
+      >
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
           <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
-          <button onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>✕</button>
+          <button onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>
+            ✕
+          </button>
         </div>
         <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
       </div>
@@ -237,47 +146,80 @@ function Modal({ open, onClose, title, children }: { open: boolean; onClose: () 
 function FocusHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
-      <p><em>Short, focused bursts with deliberate breaks — perfect for deep work without burnout.</em></p>
+      <p>
+        <em>Short, focused bursts with deliberate breaks — perfect for deep work without burnout.</em>
+      </p>
       <h4 style={{ margin: 0 }}>How this timer works</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li><b>Focus</b> for the set minutes (no context-switching).</li>
-        <li>Take a <b>Short break</b> after each focus cycle.</li>
-        <li>After several cycles, enjoy a <b>Long break</b>.</li>
-        <li>Use a preset or make a <b>Custom</b> one.</li>
-      </ul>
-      <h4 style={{ margin: 0 }}>Tips</h4>
-      <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Type a task to anchor your session, then Start.</li>
-        <li>Breaks are for movement/water — not doomscrolling.</li>
-        <li>Tap <b>Distraction +</b> when you get pulled away to keep awareness high.</li>
-        <li>Stuck? Ask <b>Eva</b> for a quick 25-minute action plan.</li>
+        <li>
+          <b>Focus</b> for the set minutes (no context-switching).
+        </li>
+        <li>
+          Take a <b>Short break</b> after each focus cycle.
+        </li>
+        <li>
+          After several cycles, enjoy a <b>Long break</b>.
+        </li>
+        <li>
+          Use a preset or make a <b>Custom</b> one.
+        </li>
       </ul>
       <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-        Shortcuts: <b>Space</b> start/pause • <b>R</b> reset • “<b>Mini</b>” opens a floating timer (Chrome).
+        Shortcuts: <b>Space</b> start/pause • <b>R</b> reset.
       </p>
     </div>
   );
 }
 
+/* ---------- Persisted state ---------- */
+type Phase = "focus" | "short" | "long";
+type SavedState = {
+  v: 3;
+  presetKey: PresetKey;
+  custom: { focusMin: number; shortMin: number; longMin: number; cyclesBeforeLong: number };
+  phase: Phase;
+  running: boolean;
+  cycle: number;
+  targetAt: number | null;
+  remaining: number;
+  autoStartNext: boolean;
+  taskTitle: string;
+  soundOn: boolean;
+  notifOn: boolean;
+};
+const LS_KEY = "byb:focus_timer_state:v3";
+
 /* ---------- Confetti (light) ---------- */
-function ConfettiBurst({ show }:{ show:boolean }) {
+function ConfettiBurst({ show }: { show: boolean }) {
   if (!show) return null;
   const pieces = Array.from({ length: 16 });
   return (
-    <div aria-hidden style={{ position:"fixed", inset:0, pointerEvents:"none", overflow:"hidden", zIndex:3000 }}>
+    <div aria-hidden style={{ position: "fixed", inset: 0, pointerEvents: "none", overflow: "hidden", zIndex: 3000 }}>
       {pieces.map((_, i) => (
-        <span key={i}
-          style={{ position:"absolute", left: `${(i / pieces.length) * 100}%`, top: -10, width:6, height:10, borderRadius:1, background:"hsl(var(--pastel-hsl))", animation: `fall ${600 + i*20}ms ease-out forwards` }}/>
+        <span
+          key={i}
+          style={{
+            position: "absolute",
+            left: `${(i / pieces.length) * 100}%`,
+            top: -10,
+            width: 6,
+            height: 10,
+            borderRadius: 1,
+            background: "hsl(var(--pastel-hsl))",
+            animation: `fall ${600 + i * 20}ms ease-out forwards`,
+          }}
+        />
       ))}
       <style>{`@keyframes fall{ to { transform: translateY(100vh) rotate(260deg); opacity:.2; } }`}</style>
     </div>
   );
 }
 
-/* ---------- Summary (unchanged) ---------- */
-function FocusSummary({ userId }:{ userId: string | null }) {
+/* ---------- Summary ---------- */
+function FocusSummary({ userId }: { userId: string | null }) {
   const [todayMin, setTodayMin] = useState(0);
   const [weekMin, setWeekMin] = useState(0);
+
   useEffect(() => {
     if (!userId) return;
     const load = async () => {
@@ -288,19 +230,29 @@ function FocusSummary({ userId }:{ userId: string | null }) {
         .eq("user_id", userId)
         .gte("started_at", sinceWeek)
         .order("started_at", { ascending: false });
-      if (error || !data) { setTodayMin(0); setWeekMin(0); return; }
+      if (error || !data) {
+        setTodayMin(0);
+        setWeekMin(0);
+        return;
+      }
       const week = data.reduce((a, x) => a + (x.minutes || 0), 0);
       const today = data
-        .filter(x => new Date(x.started_at) >= new Date(todayStartISO()))
+        .filter((x) => new Date(x.started_at) >= new Date(todayStartISO()))
         .reduce((a, x) => a + (x.minutes || 0), 0);
-      setWeekMin(week); setTodayMin(today);
+      setWeekMin(week);
+      setTodayMin(today);
     };
     load();
   }, [userId]);
+
   return (
-    <div className="card" style={{ display:"flex", gap:16, alignItems:"center", flexWrap:"wrap" }}>
-      <div><strong>Today</strong>: {todayMin} min</div>
-      <div><strong>This week</strong>: {weekMin} min</div>
+    <div className="card" style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+      <div>
+        <strong>Today</strong>: {todayMin} min
+      </div>
+      <div>
+        <strong>This week</strong>: {weekMin} min
+      </div>
     </div>
   );
 }
@@ -308,204 +260,447 @@ function FocusSummary({ userId }:{ userId: string | null }) {
 /* =========================================================
    Page
    ========================================================= */
-export default function FocusScreen() {
-  // bind to the singleton service
-  const serviceRef = useRef<Service | null>(null);
-  if (!serviceRef.current) serviceRef.current = initService();
-  const service = serviceRef.current;
+export default function FocusAlfredScreen() {
+  // preset state
+  const [presetKey, setPresetKey] = useState<PresetKey>("pomodoro");
+  const [custom, setCustom] = useState({ focusMin: 25, shortMin: 5, longMin: 15, cyclesBeforeLong: 4 });
 
-  // local reactive mirror of service state
-  const [snap, setSnap] = useState<ServiceSnapshot>(() => service.get());
-
-  // UI state not owned by service
-  const [showHelp, setShowHelp] = useState(false);
-  const [soundOn, setSoundOn] = useState(true);
-  const [notifOn, setNotifOn] = useState(true);
-  const [celebrate, setCelebrate] = useState(false);
-  const [autoCreateTask, setAutoCreateTask] = useState<boolean>(() => {
-    try { return JSON.parse(localStorage.getItem("byb:focus:autoCreateTask") || "false"); } catch { return false; }
-  });
-
-  // auth (for logging sessions)
-  const [userId, setUserId] = useState<string | null>(null);
-  useEffect(() => { supabase.auth.getUser().then(({data}) => setUserId(data.user?.id ?? null)); }, []);
-
-  // subscribe to service updates
-  useEffect(() => {
-    const onUpdate = (e: any) => setSnap(e.detail as ServiceSnapshot);
-    const onEnded = async (e: any) => {
-      const endedPhase: Phase = e.detail?.phase;
-      if (document.visibilityState !== "visible") {
-        sendNotification(notifOn, endedPhase === "focus" ? "Break time!" : "Back to focus!", endedPhase === "focus" ? "Focus block complete" : "Break finished");
-      }
-      playBeep(2, soundOn);
-
-      // Log focus session when a focus block ends
-      if (endedPhase === "focus" && userId) {
-        const p = presetByKey(snap.presetKey, snap.custom);
-        try {
-          await supabase.from("focus_sessions").insert({
-            user_id: userId,
-            started_at: new Date(Date.now() - p.focusMin * 60 * 1000).toISOString(),
-            ended_at: new Date().toISOString(),
-            phase: "focus",
-            preset: snap.presetKey,
-            minutes: p.focusMin,
-            interruptions: 0, // simplified in service mode; keep extension if you want
-            task_title: snap.taskTitle || null,
-          });
-        } catch {}
-        setCelebrate(true);
-        if ((navigator as any).vibrate) (navigator as any).vibrate(8);
-        setTimeout(() => setCelebrate(false), 900);
-      }
-    };
-    window.addEventListener("byb:focus:update", onUpdate as any);
-    window.addEventListener("byb:focus:ended", onEnded as any);
-    // prime once (handles hot nav back to this screen)
-    setSnap(service.get());
-    return () => {
-      window.removeEventListener("byb:focus:update", onUpdate as any);
-      window.removeEventListener("byb:focus:ended", onEnded as any);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, soundOn, notifOn]);
-
-  // document title live
-  useEffect(() => {
-    const label = snap.phase === "focus" ? "Focus" : snap.phase === "short" ? "Short break" : "Long break";
-    document.title = snap.running ? `${mmss(snap.remaining)} • ${label}` : "Focus Timer";
-  }, [snap.running, snap.remaining, snap.phase]);
-
-  // persist the “create task on start” preference
-  useEffect(() => {
-    try { localStorage.setItem("byb:focus:autoCreateTask", JSON.stringify(autoCreateTask)); } catch {}
-  }, [autoCreateTask]);
-
-  /* ----- Custom inputs (free typing, with caps) ----- */
-  const [focusStr, setFocusStr]   = useState("");
-  const [shortStr, setShortStr]   = useState("");
-  const [longStr, setLongStr]     = useState("");
+  // free-typing buffers for custom inputs (allow blanks)
+  const [focusStr, setFocusStr] = useState("");
+  const [shortStr, setShortStr] = useState("");
+  const [longStr, setLongStr] = useState("");
   const [cyclesStr, setCyclesStr] = useState("");
 
-  // when switching to custom, show blanks to allow free typing
   useEffect(() => {
-    if (snap.presetKey === "custom") {
-      setFocusStr(""); setShortStr(""); setLongStr(""); setCyclesStr("");
+    if (presetKey === "custom") {
+      setFocusStr("");
+      setShortStr("");
+      setLongStr("");
+      setCyclesStr("");
     }
-  }, [snap.presetKey]);
+  }, [presetKey]);
 
-  // fill with numbers if still blank (first paint)
   useEffect(() => {
-    if (snap.presetKey !== "custom") return;
-    if (focusStr === "")  setFocusStr(String(snap.custom.focusMin));
-    if (shortStr === "")  setShortStr(String(snap.custom.shortMin));
-    if (longStr === "")   setLongStr(String(snap.custom.longMin));
-    if (cyclesStr === "") setCyclesStr(String(snap.custom.cyclesBeforeLong));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snap.custom]);
+    if (presetKey !== "custom") return;
+    if (focusStr === "") setFocusStr(String(custom.focusMin));
+    if (shortStr === "") setShortStr(String(custom.shortMin));
+    if (longStr === "") setLongStr(String(custom.longMin));
+    if (cyclesStr === "") setCyclesStr(String(custom.cyclesBeforeLong));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [custom]);
 
+  // commit handlers (focus max 240 min = 4h)
   function commitFocus() {
     const n = parseIntSafe(focusStr);
-    if (isNaN(n)) { setFocusStr(String(snap.custom.focusMin)); return; }
-    const v = clamp(n, 1, 240); // 4h max
-    service.applyCustom({ ...snap.custom, focusMin: v });
+    if (isNaN(n)) {
+      setFocusStr(String(custom.focusMin));
+      return;
+    }
+    const v = clamp(n, 1, 240);
+    setCustom((c) => ({ ...c, focusMin: v }));
     setFocusStr(String(v));
   }
   function commitShort() {
     const n = parseIntSafe(shortStr);
-    if (isNaN(n)) { setShortStr(String(snap.custom.shortMin)); return; }
+    if (isNaN(n)) {
+      setShortStr(String(custom.shortMin));
+      return;
+    }
     const v = clamp(n, 1, 180);
-    service.applyCustom({ ...snap.custom, shortMin: v });
+    setCustom((c) => ({ ...c, shortMin: v }));
     setShortStr(String(v));
   }
   function commitLong() {
     const n = parseIntSafe(longStr);
-    if (isNaN(n)) { setLongStr(String(snap.custom.longMin)); return; }
+    if (isNaN(n)) {
+      setLongStr(String(custom.longMin));
+      return;
+    }
     const v = clamp(n, 1, 180);
-    service.applyCustom({ ...snap.custom, longMin: v });
+    setCustom((c) => ({ ...c, longMin: v }));
     setLongStr(String(v));
   }
   function commitCycles() {
     const n = parseIntSafe(cyclesStr);
-    if (isNaN(n)) { setCyclesStr(String(snap.custom.cyclesBeforeLong)); return; }
+    if (isNaN(n)) {
+      setCyclesStr(String(custom.cyclesBeforeLong));
+      return;
+    }
     const v = clamp(n, 1, 12);
-    service.applyCustom({ ...snap.custom, cyclesBeforeLong: v });
+    setCustom((c) => ({ ...c, cyclesBeforeLong: v }));
     setCyclesStr(String(v));
   }
 
-  /* ----- Controls ----- */
-  async function start() {
-    if (snap.presetKey === "custom") { commitFocus(); commitShort(); commitLong(); commitCycles(); }
-    if (notifOn) await ensureNotifPermission().catch(()=>{});
-    // optional: auto-create a task when starting
+  const presets: Preset[] = useMemo(() => {
+    const base = PRESETS_BASE.map((p) => ({
+      ...p,
+      label: `${p.focusMin} / ${p.shortMin} (x${p.cyclesBeforeLong} → ${p.longMin})`,
+    })) as Preset[];
+    return [
+      ...base,
+      {
+        key: "custom",
+        label: "Custom…",
+        focusMin: custom.focusMin,
+        shortMin: custom.shortMin,
+        longMin: custom.longMin,
+        cyclesBeforeLong: custom.cyclesBeforeLong,
+      },
+    ];
+  }, [custom]);
+
+  const currentPreset = useMemo(() => presets.find((pp) => pp.key === presetKey)!, [presets, presetKey]);
+
+  // phase / timing
+  const [phase, setPhase] = useState<Phase>("focus");
+  const [remaining, setRemaining] = useState(() => currentPreset.focusMin * 60);
+  const [running, setRunning] = useState(false);
+  const [cycle, setCycle] = useState(0);
+  const [autoStartNext, setAutoStartNext] = useState(true);
+  const [currentTaskTitle, setCurrentTaskTitle] = useState("");
+
+  // audio / notifications
+  const [soundOn, setSoundOn] = useState(true);
+  const [notifOn, setNotifOn] = useState(true);
+
+  // visibility interruption counter
+  const [manualDistractions, setManualDistractions] = useState(0);
+  const interruptionsRef = useRef(0);
+
+  // absolute deadline for the current phase
+  const [targetAt, setTargetAt] = useState<number | null>(null);
+
+  // UI
+  const [showHelp, setShowHelp] = useState(false);
+  const tickRef = useRef<number | null>(null);
+  const notifTimeoutRef = useRef<number | null>(null);
+
+  // wake lock (keep screen awake on mobile)
+  const wakeRef = useRef<any>(null);
+
+  // auth (for logging sessions)
+  const [userId, setUserId] = useState<string | null>(null);
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
+  }, []);
+
+  /* ===== persistence ===== */
+  function saveState(toSave?: Partial<SavedState>) {
+    const snapshot: SavedState = {
+      v: 3,
+      presetKey,
+      custom,
+      phase,
+      running,
+      cycle,
+      targetAt,
+      remaining,
+      autoStartNext,
+      taskTitle: currentTaskTitle,
+      soundOn,
+      notifOn,
+      ...toSave,
+    } as SavedState;
     try {
-      if (autoCreateTask && userId && snap.taskTitle.trim()) {
-        await supabase.from("tasks").insert({
-          user_id: userId,
-          title: snap.taskTitle.trim(),
-          status: "in_progress",
-          priority: 0,
-          due_date: new Date().toISOString().slice(0,10),
-          source: "focus_timer",
-        });
+      localStorage.setItem(LS_KEY, JSON.stringify(snapshot));
+    } catch {}
+  }
+  function durationFor(ph: Phase, p: Preset) {
+    return (ph === "focus" ? p.focusMin : ph === "short" ? p.shortMin : p.longMin) * 60;
+  }
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as SavedState;
+      if (!parsed || parsed.v !== 3) return;
+
+      setPresetKey(parsed.presetKey);
+      setCustom(parsed.custom || custom);
+      setPhase(parsed.phase);
+      setCycle(parsed.cycle);
+      setRunning(parsed.running);
+      setAutoStartNext(parsed.autoStartNext ?? true);
+      setCurrentTaskTitle(parsed.taskTitle || "");
+      setSoundOn(parsed.soundOn ?? true);
+      setNotifOn(parsed.notifOn ?? true);
+
+      const now = Date.now();
+      if (parsed.running && parsed.targetAt) {
+        let ph = parsed.phase;
+        let cyc = parsed.cycle;
+        let tgt = parsed.targetAt;
+
+        let guard = 0;
+        while (tgt <= now && guard < 20) {
+          const next = computeNextPhase(ph, cyc, presetByKey(parsed.presetKey, parsed.custom), tgt);
+          ph = next.nextPhase;
+          cyc = next.nextCycle;
+          tgt = next.nextTargetAt;
+          guard++;
+        }
+
+        setPhase(ph);
+        setCycle(cyc);
+        setTargetAt(tgt);
+        const rem = Math.max(0, Math.ceil((tgt - now) / 1000));
+        setRemaining(rem);
+        scheduleBoundaryNotification(tgt, ph);
+        setRunning(true);
+      } else {
+        setTargetAt(null);
+        setRemaining(
+          Math.max(0, parsed.remaining || durationFor(parsed.phase, presetByKey(parsed.presetKey, parsed.custom)))
+        );
       }
     } catch {}
-    service.start();
-  }
-  function pause() { service.pause(); }
-  function resetAll() { service.resetToPreset(snap.presetKey, snap.custom); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  function progressPct() {
-    const p = presetByKey(snap.presetKey, snap.custom);
-    const total = (snap.phase === "focus" ? p.focusMin : snap.phase === "short" ? p.shortMin : p.longMin) * 60;
+  useEffect(() => {
+    saveState();
+  }, [
+    presetKey,
+    custom,
+    phase,
+    running,
+    cycle,
+    targetAt,
+    remaining,
+    autoStartNext,
+    currentTaskTitle,
+    soundOn,
+    notifOn,
+  ]);
+
+  /* ===== wake lock ===== */
+  async function requestWakeLock() {
+    try {
+      // @ts-ignore
+      if ("wakeLock" in navigator && (navigator as any).wakeLock?.request) {
+        // @ts-ignore
+        wakeRef.current = await (navigator as any).wakeLock.request("screen");
+      }
+    } catch {}
+  }
+  function releaseWakeLock() {
+    try {
+      wakeRef.current?.release?.();
+      wakeRef.current = null;
+    } catch {}
+  }
+  useEffect(() => {
+    if (!running) releaseWakeLock();
+  }, [running]);
+
+  /* ===== visibility interruptions ===== */
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "hidden" && phase === "focus" && running) {
+        interruptionsRef.current += 1;
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [phase, running]);
+
+  /* ===== main tick (deadline-based; doesn’t pause when tab changes) ===== */
+  useEffect(() => {
+    if (!running || !targetAt) {
+      if (tickRef.current) {
+        clearInterval(tickRef.current);
+        tickRef.current = null;
+      }
+      return;
+    }
+    tickRef.current = window.setInterval(() => {
+      const now = Date.now();
+      const rem = Math.max(0, Math.ceil((targetAt - now) / 1000));
+      setRemaining(rem);
+      if (rem <= 0) onPhaseEnd();
+    }, 1000) as unknown as number;
+    return () => {
+      if (tickRef.current) {
+        clearInterval(tickRef.current);
+        tickRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, targetAt]);
+
+  /* ===== document title ===== */
+  useEffect(() => {
+    const label = phase === "focus" ? "Focus" : phase === "short" ? "Short break" : "Long break";
+    document.title = running ? `${mmss(remaining)} • ${label}` : "Focus Timer";
+  }, [running, remaining, phase]);
+
+  /* ===== reset when preset changes ===== */
+  useEffect(() => {
+    setRunning(false);
+    setPhase("focus");
+    setCycle(0);
+    setTargetAt(null);
+    setRemaining(currentPreset.focusMin * 60);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetKey, currentPreset.focusMin]);
+
+  /* ===== boundary notifications ===== */
+  function clearBoundaryNotification() {
+    if (notifTimeoutRef.current) {
+      clearTimeout(notifTimeoutRef.current);
+      notifTimeoutRef.current = null;
+    }
+  }
+  function scheduleBoundaryNotification(tgt: number, phaseForLabel?: Phase) {
+    clearBoundaryNotification();
+    const ms = Math.max(0, tgt - Date.now());
+    notifTimeoutRef.current = window.setTimeout(() => {
+      const label = phaseForLabel || phase;
+      const next = label === "focus" ? "Break time!" : "Back to focus!";
+      sendNotification(notifOn, next, label === "focus" ? "Focus block complete" : "Break finished");
+      playBeep(2, soundOn);
+    }, ms) as unknown as number;
+  }
+
+  /* ===== phase transitions ===== */
+  function presetByKey(k: PresetKey, customVals?: SavedState["custom"]): Preset {
+    if (k !== "custom") {
+      const base = PRESETS_BASE.find((p) => p.key === k)!;
+      return { ...base, label: "" } as Preset;
+    }
+    const c = customVals || custom;
+    return { key: "custom", label: "Custom…", ...c };
+  }
+  function computeNextPhase(ph: Phase, cyc: number, p: Preset, endedAtMs: number) {
+    if (ph === "focus") {
+      const nextCycle = cyc + 1;
+      const useLong = nextCycle >= p.cyclesBeforeLong;
+      const nextPhase: Phase = useLong ? "long" : "short";
+      const dur = useLong ? p.longMin * 60 : p.shortMin * 60;
+      const nextTargetAt = endedAtMs + dur * 1000;
+      return { nextPhase, nextCycle: useLong ? 0 : nextCycle, nextTargetAt };
+    }
+    const nextPhase: Phase = "focus";
+    const dur = p.focusMin * 60;
+    const nextTargetAt = endedAtMs + dur * 1000;
+    return { nextPhase, nextCycle: cyc, nextTargetAt };
+  }
+
+  const [celebrate, setCelebrate] = useState(false);
+
+  async function onPhaseEnd() {
+    const justEnded = phase;
+
+    // Notify if not on page
+    if (document.visibilityState !== "visible") {
+      sendNotification(
+        notifOn,
+        justEnded === "focus" ? "Break time!" : "Back to focus!",
+        justEnded === "focus" ? "Focus block complete" : "Break finished"
+      );
+    }
+    playBeep(2, soundOn);
+
+    // Log focus session
+    if (justEnded === "focus" && userId) {
+      try {
+        await supabase.from("focus_sessions").insert({
+          user_id: userId,
+          started_at: new Date(Date.now() - currentPreset.focusMin * 60 * 1000).toISOString(),
+          ended_at: new Date().toISOString(),
+          phase: "focus",
+          preset: presetKey,
+          minutes: currentPreset.focusMin,
+          interruptions: interruptionsRef.current + manualDistractions,
+          task_title: currentTaskTitle || null,
+        });
+      } catch {}
+      interruptionsRef.current = 0;
+      setManualDistractions(0);
+      setCelebrate(true);
+      if ((navigator as any).vibrate) (navigator as any).vibrate(8);
+      setTimeout(() => setCelebrate(false), 900);
+    }
+
+    const now = Date.now();
+    const { nextPhase, nextCycle, nextTargetAt } = computeNextPhase(justEnded, cycle, currentPreset, now);
+
+    setPhase(nextPhase);
+    setCycle(nextCycle);
+
+    if (autoStartNext) {
+      setTargetAt(nextTargetAt);
+      setRunning(true);
+      setRemaining(Math.max(0, Math.ceil((nextTargetAt - now) / 1000)));
+      scheduleBoundaryNotification(nextTargetAt, nextPhase);
+    } else {
+      setTargetAt(null);
+      setRunning(false);
+      setRemaining(durationFor(nextPhase, currentPreset));
+      clearBoundaryNotification();
+    }
+  }
+
+  /* ===== controls ===== */
+  async function start() {
+    if (presetKey === "custom") {
+      commitFocus();
+      commitShort();
+      commitLong();
+      commitCycles();
+    }
+    if (notifOn) await ensureNotifPermission().catch(() => {});
+    await requestWakeLock();
+    const base = remaining > 0 ? remaining : durationFor(phase, currentPreset);
+    const tgt = Date.now() + base * 1000;
+    setTargetAt(tgt);
+    setRunning(true);
+    scheduleBoundaryNotification(tgt, phase);
+  }
+  function pause() {
+    if (running && targetAt) {
+      const rem = Math.max(0, Math.ceil((targetAt - Date.now()) / 1000));
+      setRemaining(rem);
+    }
+    setRunning(false);
+    setTargetAt(null);
+    clearBoundaryNotification();
+    releaseWakeLock();
+  }
+  function resetAll() {
+    setRunning(false);
+    setPhase("focus");
+    setCycle(0);
+    setTargetAt(null);
+    setRemaining(currentPreset.focusMin * 60);
+    clearBoundaryNotification();
+    releaseWakeLock();
+  }
+  function progressPct(ph: Phase, rem: number, p: Preset) {
+    const total = (ph === "focus" ? p.focusMin : ph === "short" ? p.shortMin : p.longMin) * 60;
     if (total <= 0) return 0;
-    const done = Math.max(0, Math.min(1, 1 - snap.remaining / total));
+    const done = Math.max(0, Math.min(1, 1 - rem / total));
     return Math.round(done * 100);
   }
 
-  // Keyboard: optional on mobile, harmless if no hardware keyboard
+  // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e as any).isComposing) return;
-      if (e.key === ' ') { e.preventDefault(); snap.running ? pause() : start(); }
-      if (e.key.toLowerCase() === 'r') { e.preventDefault(); resetAll(); }
+      if (tag === "INPUT" || tag === "TEXTAREA" || (e as any).isComposing) return;
+      if (e.key === " ") {
+        e.preventDefault();
+        running ? pause() : start();
+      }
+      if (e.key.toLowerCase() === "r") {
+        e.preventDefault();
+        resetAll();
+      }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [snap.running, snap.presetKey, snap.custom]);
-
-  // Optional mini PiP (desktop Chrome)
-  async function openMiniTimer() {
-    // @ts-ignore
-    const dip = (window as any).documentPictureInPicture;
-    if (!dip?.requestWindow) return;
-    const pip = await dip.requestWindow({ width: 220, height: 120 });
-    const el = pip.document.createElement('div');
-    el.style.cssText = 'font: 700 28px system-ui; display:grid; place-items:center; height:100%;';
-    pip.document.body.style.margin = "0";
-    pip.document.body.appendChild(el);
-    const i = setInterval(() => { el.textContent = mmss(snap.remaining); }, 250);
-    pip.addEventListener('pagehide', () => clearInterval(i));
-  }
-
-  function toggleFullscreen() {
-    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
-    else document.exitFullscreen?.();
-  }
-
-  const presets: (PresetVals & { key: PresetKey; label: string })[] = useMemo(() => {
-    const base = PRESETS_BASE.map(p => ({
-      key: p.key as PresetKey,
-      label: `${p.focusMin} / ${p.shortMin} (x${p.cyclesBeforeLong} → ${p.longMin})`,
-      focusMin: p.focusMin, shortMin: p.shortMin, longMin: p.longMin, cyclesBeforeLong: p.cyclesBeforeLong
-    }));
-    return [
-      ...base,
-      { key: "custom", label: "Custom…", ...snap.custom }
-    ];
-  }, [snap.custom]);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [running, phase, remaining, targetAt]);
 
   return (
     <div className="page-focus">
@@ -515,117 +710,140 @@ export default function FocusScreen() {
           <button
             onClick={() => setShowHelp(true)}
             aria-label="Open Focus help"
-            title="Need a hand? Ask Eva"
-            style={{ position: "absolute", top: 8, right: 8, border: "1px solid var(--border)", background: "#fff", padding: "6px 10px", borderRadius: 999 }}
+            title="Help"
+            style={{
+              position: "absolute",
+              top: 8,
+              right: 8,
+              border: "1px solid var(--border)",
+              background: "#fff",
+              padding: "6px 10px",
+              borderRadius: 999,
+              cursor: "pointer",
+            }}
           >
             ?
           </button>
           <h1 style={{ margin: 0 }}>Focus Timer</h1>
-          <div className="muted">Deep work intervals with smart breaks. Stuck? Ask <b>Eva</b> for a 25-minute plan.</div>
+          <div className="muted">Deep work intervals with smart breaks.</div>
         </div>
 
-        {/* Controls */}
+        {/* Controls row */}
         <div className="card" style={{ display: "grid", gap: 10 }}>
+          {/* Preset & status */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
               <span className="muted">Preset</span>
-              <select
-                value={snap.presetKey}
-                onChange={e => {
-                  const k = e.target.value as PresetKey;
-                  service.setPresetKey(k);
-                  service.resetToPreset(k, snap.custom);
-                }}>
-                {presets.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+              <select value={presetKey} onChange={(e) => setPresetKey(e.target.value as PresetKey)}>
+                {presets.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {p.label}
+                  </option>
+                ))}
               </select>
             </label>
 
-            {snap.presetKey === "custom" && (
-              <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+            {presetKey === "custom" && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 <label>
                   Focus{" "}
                   <input
-                    type="text" inputMode="numeric" placeholder="min"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="min"
                     value={focusStr}
-                    onChange={e => setFocusStr(e.target.value)}
+                    onChange={(e) => setFocusStr(e.target.value)}
                     onBlur={commitFocus}
-                    onKeyDown={e => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
-                    style={{ width:70 }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+                    }}
+                    style={{ width: 70 }}
                     aria-label="Custom focus minutes (max 240)"
                   />
                 </label>
                 <label>
                   Short{" "}
                   <input
-                    type="text" inputMode="numeric" placeholder="min"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="min"
                     value={shortStr}
-                    onChange={e => setShortStr(e.target.value)}
+                    onChange={(e) => setShortStr(e.target.value)}
                     onBlur={commitShort}
-                    onKeyDown={e => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
-                    style={{ width:70 }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+                    }}
+                    style={{ width: 70 }}
                     aria-label="Custom short break minutes"
                   />
                 </label>
                 <label>
                   Long{" "}
                   <input
-                    type="text" inputMode="numeric" placeholder="min"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="min"
                     value={longStr}
-                    onChange={e => setLongStr(e.target.value)}
+                    onChange={(e) => setLongStr(e.target.value)}
                     onBlur={commitLong}
-                    onKeyDown={e => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
-                    style={{ width:70 }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+                    }}
+                    style={{ width: 70 }}
                     aria-label="Custom long break minutes"
                   />
                 </label>
                 <label>
                   Cycles{" "}
                   <input
-                    type="text" inputMode="numeric" placeholder="x"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="x"
                     value={cyclesStr}
-                    onChange={e => setCyclesStr(e.target.value)}
+                    onChange={(e) => setCyclesStr(e.target.value)}
                     onBlur={commitCycles}
-                    onKeyDown={e => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
-                    style={{ width:70 }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+                    }}
+                    style={{ width: 70 }}
                     aria-label="Cycles before long break"
                   />
                 </label>
-                <span className="muted" style={{ fontSize: 12 }}>Focus max 240 min (4h)</span>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Focus max 240 min (4h)
+                </span>
               </div>
             )}
 
-            <label style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
-              <input type="checkbox" checked={snap.autoStartNext} onChange={e => service.setAutoStartNext(e.target.checked)} />
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <input type="checkbox" checked={autoStartNext} onChange={(e) => setAutoStartNext(e.target.checked)} />
               Auto-start next
             </label>
 
-            <label style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
-              <input type="checkbox" checked={soundOn} onChange={e => setSoundOn(e.target.checked)} />
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <input type="checkbox" checked={soundOn} onChange={(e) => setSoundOn(e.target.checked)} />
               Sound
             </label>
 
-            <label style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
-              <input type="checkbox" checked={notifOn} onChange={e => setNotifOn(e.target.checked)} />
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <input type="checkbox" checked={notifOn} onChange={(e) => setNotifOn(e.target.checked)} />
               Notifications
             </label>
 
-            <label style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
-              <input type="checkbox" checked={autoCreateTask} onChange={e => setAutoCreateTask(e.target.checked)} />
-              Create task on Start
-            </label>
-
-            <span className="badge" title="Completed focus cycles in this set">Cycles: {snap.cycle}/{presetByKey(snap.presetKey, snap.custom).cyclesBeforeLong}</span>
+            <span className="badge" title="Completed focus cycles in this set">
+              Cycles: {cycle}/{currentPreset.cyclesBeforeLong}
+            </span>
             <span className="badge" style={{ background: "#eef2ff", border: "1px solid var(--border)" }}>
-              {snap.phase === "focus" ? "Focus" : snap.phase === "short" ? "Short break" : "Long break"}
+              {phase === "focus" ? "Focus" : phase === "short" ? "Short break" : "Long break"}
             </span>
 
             <div style={{ flex: 1 }} />
 
-            <label style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span className="muted">Task</span>
               <input
-                value={snap.taskTitle}
-                onChange={e=> service.setTaskTitle(e.target.value)}
+                value={currentTaskTitle}
+                onChange={(e) => setCurrentTaskTitle(e.target.value)}
                 placeholder="Optional: what are you focusing on?"
                 style={{ minWidth: 220 }}
               />
@@ -635,90 +853,56 @@ export default function FocusScreen() {
           {/* Timer + actions */}
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <div style={{ fontSize: 36, fontWeight: 800, letterSpacing: 1, minWidth: 110, textAlign: "right" }}>
-              {mmss(snap.remaining)}
+              {mmss(remaining)}
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {!snap.running ? (
-                <button className="btn-primary" onClick={start} style={{ borderRadius: 8 }}>Start</button>
+              {!running ? (
+                <button className="btn-primary" onClick={start} style={{ borderRadius: 8 }}>
+                  Start
+                </button>
               ) : (
                 <button onClick={pause}>Pause</button>
               )}
               <button onClick={resetAll}>Reset</button>
-              {snap.phase !== "focus" && (
-                <button onClick={() => {
-                  // Force end of current break immediately
-                  const next = computeNext(snap.phase, snap.cycle, presetByKey(snap.presetKey, snap.custom), Date.now());
-                  if (snap.autoStartNext) {
-                    const rem2 = nowSecToTarget(next.targetAt);
-                    const curr = service.get();
-                    // emulate internal transition
-                    (window as any).dispatchEvent(new CustomEvent("byb:focus:ended", { detail: { phase: snap.phase } }));
-                    // update service snapshot quickly by resetting to same preset then starting
-                    service.pause();
-                    service.resetToPreset(curr.presetKey, curr.custom);
-                    // set to next phase running:
-                    const tmp: ServiceSnapshot = { ...service.get(), running: true, phase: next.phase, cycle: next.cycle, targetAt: next.targetAt, remaining: rem2 };
-                    // persist and broadcast
-                    try { localStorage.setItem(LS_SERVICE_KEY, JSON.stringify(tmp)); } catch {}
-                    window.dispatchEvent(new CustomEvent("byb:focus:update", { detail: tmp }));
-                    // restart interval
-                    service.start();
-                  } else {
-                    service.pause();
-                    service.resetToPreset(snap.presetKey, snap.custom);
-                  }
-                }}>Skip break</button>
-              )}
-              <button onClick={() => {
-                const add = 5 * 60;
-                const curr = service.get();
-                if (curr.running && curr.targetAt) {
-                  const tgt = curr.targetAt + add * 1000;
-                  const next = { ...curr, targetAt: tgt, remaining: curr.remaining + add };
-                  try { localStorage.setItem(LS_SERVICE_KEY, JSON.stringify(next)); } catch {}
-                  window.dispatchEvent(new CustomEvent("byb:focus:update", { detail: next }));
-                } else {
-                  const next = { ...curr, remaining: curr.remaining + add };
-                  try { localStorage.setItem(LS_SERVICE_KEY, JSON.stringify(next)); } catch {}
-                  window.dispatchEvent(new CustomEvent("byb:focus:update", { detail: next }));
-                }
-              }}>+5 min</button>
-              <button onClick={openMiniTimer} title="Floating mini-timer (Chrome)">Mini</button>
-              <button onClick={toggleFullscreen} title="Fullscreen timer">Fullscreen</button>
+              {phase !== "focus" && <button onClick={() => onPhaseEnd()}>Skip break</button>}
+              <button
+                onClick={() => {
+                  const extra = 5 * 60;
+                  if (running && targetAt) setTargetAt(targetAt + extra * 1000);
+                  setRemaining((r) => r + extra);
+                }}
+              >
+                +5 min
+              </button>
+              <button onClick={() => setManualDistractions((n) => n + 1)} title="Log a distraction">
+                Distraction +
+              </button>
             </div>
             <div style={{ flex: 1, minWidth: 180 }}>
               <div style={{ height: 10, borderRadius: 999, border: "1px solid var(--border)", background: "#f8fafc", overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${progressPct()}%`, background: "hsl(var(--pastel-hsl, 210 95% 78%))", transition: "width .35s linear" }} />
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${progressPct(phase, remaining, currentPreset)}%`,
+                    background: "hsl(var(--pastel-hsl, 210 95% 78%))",
+                    transition: "width .35s linear",
+                  }}
+                />
               </div>
             </div>
           </div>
 
-          {/* “Currently focusing on …” */}
-          {snap.taskTitle.trim() && (
-            <div className="muted" style={{ fontSize: 12 }}>
-              Currently focusing on: <b>{snap.taskTitle.trim()}</b>
-            </div>
-          )}
+          {/* Distraction count display */}
+          <div className="muted" style={{ fontSize: 12 }}>
+            Logged distractions this focus block: {manualDistractions + (phase === "focus" ? interruptionsRef.current : 0)}
+          </div>
         </div>
 
         {/* Summary */}
         <FocusSummary userId={userId} />
 
-        {/* Guidance */}
-        <div className="card" style={{ display: "grid", gap: 8 }}>
-          <div className="section-title">How to use</div>
-          <ul className="list" style={{ margin: 0 }}>
-            <li>Pick a preset that matches your energy.</li>
-            <li>Choose one task — close other tabs — hit Start.</li>
-            <li>Breaks are for movement or water. After a few cycles, enjoy the longer break.</li>
-          </ul>
-          <div className="muted" style={{ fontSize: 12 }}>
-            Want help chunking your work? Ask <b>Eva</b> to turn your goal into a 3-step plan for your next block.
-          </div>
-        </div>
-
         {/* Help modal */}
-        <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Focus — Help (with Eva)">
+        <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Focus — Help">
           <FocusHelpContent />
         </Modal>
       </div>
