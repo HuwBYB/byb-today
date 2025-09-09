@@ -2,6 +2,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
+// ⬇️ IMPORT your unified categories + helpers (update the path as needed)
+import {
+  CATS,
+  colorOf,
+  labelOf,
+  normalizeCat,
+  type AllowedCategory,
+} from "src/theme.css"; // <-- update this path if your file lives elsewhere
+
 /* ===================== Types ===================== */
 type Task = {
   id: number;
@@ -9,7 +18,7 @@ type Task = {
   title: string;
   due_date: string | null; // YYYY-MM-DD
   priority: number | null;
-  category: string | null;
+  category: string | null; // stored as string in DB; normalize at use-sites
   category_color: string | null;
   completed_at: string | null;
   source: string | null;
@@ -26,25 +35,12 @@ type Task = {
 
 type ViewMode = "month" | "week";
 
-/* ---------- Categories + colours (shared with Goals) ---------- */
-const CATS = [
-  { key: "personal", label: "Personal", color: "#a855f7" },
-  { key: "health", label: "Health", color: "#22c55e" },
-  { key: "career", label: "Business", color: "#3b82f6" },
-  { key: "financial", label: "Finance", color: "#f59e0b" },
-  { key: "other", label: "Other", color: "#6b7280" },
-] as const;
-type CatKey = (typeof CATS)[number]["key"];
-const colorOf = (k: CatKey | null | undefined) =>
-  CATS.find((c) => c.key === k)?.color || "#6b7280";
-
-const CAT_ORDER: Record<string, number> = {
-  personal: 0,
-  health: 1,
-  career: 2,
-  financial: 3,
-  other: 4,
-};
+/* ---------- Categories (from centralized module) ---------- */
+// Build a stable order map from your shared CATS list
+const CAT_ORDER: Record<AllowedCategory, number> = CATS.reduce((acc, c, i) => {
+  acc[c.key] = i;
+  return acc;
+}, {} as Record<AllowedCategory, number>);
 
 /* ========================== MAIN SCREEN ========================== */
 
@@ -130,7 +126,7 @@ export default function CalendarScreen({
 
   // add-task (structured)
   const [newTitle, setNewTitle] = useState("");
-  const [newCat, setNewCat] = useState<CatKey>("other");
+  const [newCat, setNewCat] = useState<AllowedCategory>("personal");
   const [newPriority, setNewPriority] = useState<number>(2);
   const [newFreq, setNewFreq] = useState<RepeatFreq>("");
 
@@ -350,7 +346,8 @@ export default function CalendarScreen({
     setAdding(true);
     setErr(null);
     try {
-      const category = newCat;
+      // normalize and color strictly via central helpers
+      const category = normalizeCat(newCat) as AllowedCategory;
       const category_color = colorOf(category);
 
       let rows: Array<Partial<Task> & { user_id: string }> = [];
@@ -401,10 +398,7 @@ export default function CalendarScreen({
         );
       }
 
-      const { data, error } = await supabase
-        .from("tasks")
-        .insert(rows as any)
-        .select();
+      const { data, error } = await supabase.from("tasks").insert(rows as any).select();
       if (error) throw error;
 
       // Update local month cache
@@ -442,7 +436,9 @@ export default function CalendarScreen({
     try {
       const parsed = parseNlp(raw, selectedISO);
       if (!parsed.title) throw new Error("Please include a title.");
-      const category = parsed.category ?? "other";
+
+      // Normalize whatever came out of NLP into an AllowedCategory using your helper
+      const category = normalizeCat(parsed.category || "personal") as AllowedCategory;
       const category_color = colorOf(category);
 
       let rows: Array<Partial<Task> & { user_id: string }> = [];
@@ -473,10 +469,7 @@ export default function CalendarScreen({
         ];
       }
 
-      const { data, error } = await supabase
-        .from("tasks")
-        .insert(rows as any)
-        .select();
+      const { data, error } = await supabase.from("tasks").insert(rows as any).select();
       if (error) throw error;
 
       const first = toISO(firstDayOfMonth),
@@ -506,6 +499,11 @@ export default function CalendarScreen({
     const list = [...dayTasks];
     const isTimed = (t: Task) => !t.all_day && !!t.due_time;
 
+    const catRank = (t: Task) => {
+      const k = normalizeCat(t.category || "personal") as AllowedCategory;
+      return CAT_ORDER[k] ?? 99;
+    };
+
     const cmpTime = (a: Task, b: Task) => {
       const aTimed = isTimed(a);
       const bTimed = isTimed(b);
@@ -519,8 +517,8 @@ export default function CalendarScreen({
         if (ta !== tb) return ta.localeCompare(tb);
       }
 
-      const ca = CAT_ORDER[a.category || "zz"] ?? 99;
-      const cb = CAT_ORDER[b.category || "zz"] ?? 99;
+      const ca = catRank(a);
+      const cb = catRank(b);
       if (ca !== cb) return ca - cb;
 
       const pa = a.priority ?? 2;
@@ -531,8 +529,8 @@ export default function CalendarScreen({
     };
 
     const cmpCategory = (a: Task, b: Task) => {
-      const ca = CAT_ORDER[a.category || "zz"] ?? 99;
-      const cb = CAT_ORDER[b.category || "zz"] ?? 99;
+      const ca = catRank(a);
+      const cb = catRank(b);
       if (ca !== cb) return ca - cb;
       return cmpTime(a, b);
     };
@@ -683,7 +681,7 @@ export default function CalendarScreen({
                 Year
               </span>
               <button onClick={prevYear} aria-label="Previous year">
-                ←
+                →
               </button>
               <button onClick={nextYear} aria-label="Next year">
                 →
@@ -921,10 +919,7 @@ export default function CalendarScreen({
 
           {/* Sort toggle (no outline box + tiny gap) */}
           <div style={{ marginTop: 8 }}>
-            <div
-              aria-label="Sort tasks"
-              style={{ display: "inline-flex", gap: 4 }}
-            >
+            <div aria-label="Sort tasks" style={{ display: "inline-flex", gap: 4 }}>
               <button
                 onClick={() => setSortMode("time")}
                 aria-pressed={sortMode === "time"}
@@ -1005,7 +1000,7 @@ export default function CalendarScreen({
           />
           <select
             value={newCat}
-            onChange={(e) => setNewCat(e.target.value as CatKey)}
+            onChange={(e) => setNewCat(e.target.value as AllowedCategory)}
             title="Category"
             style={{ height: 40, borderRadius: 10, padding: "0 8px" }}
           >
@@ -1107,53 +1102,57 @@ export default function CalendarScreen({
           <div className="muted">Nothing scheduled.</div>
         )}
         <ul className="list" style={{ margin: 0, padding: 0, listStyle: "none" }}>
-          {sortedDayTasks.map((t: Task) => (
-            <li
-              key={t.id}
-              className="item"
-              style={{ padding: 8, borderBottom: "1px solid #f1f5f9" }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: 10,
-                  width: "100%",
-                }}
+          {sortedDayTasks.map((t: Task) => {
+            const k = normalizeCat(t.category || "personal") as AllowedCategory;
+            const dotColor = t.category_color || colorOf(k);
+            return (
+              <li
+                key={t.id}
+                className="item"
+                style={{ padding: 8, borderBottom: "1px solid #f1f5f9" }}
               >
-                <span
-                  title={t.category || ""}
+                <div
                   style={{
-                    display: "inline-block",
-                    flex: "0 0 auto",
-                    width: 12,
-                    height: 12,
-                    marginTop: 6,
-                    borderRadius: 999,
-                    background: t.category_color || "#e5e7eb",
-                    border: "1px solid #d1d5db",
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    width: "100%",
                   }}
-                />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
+                >
+                  <span
+                    title={labelOf(k)}
                     style={{
-                      textDecoration: t.completed_at ? "line-through" : "none",
-                      fontSize: 15,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
+                      display: "inline-block",
+                      flex: "0 0 auto",
+                      width: 12,
+                      height: 12,
+                      marginTop: 6,
+                      borderRadius: 999,
+                      background: dotColor,
+                      border: "1px solid #d1d5db",
                     }}
-                  >
-                    {t.all_day
-                      ? t.title
-                      : `${(t.due_time || "").slice(0, 5)} — ${t.title}`}
-                  </div>
-                  <div className="muted" style={{ fontSize: 12 }}>
-                    Category: {t.category || "—"} · Priority: {priorityLabel(t.priority)}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        textDecoration: t.completed_at ? "line-through" : "none",
+                        fontSize: 15,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {t.all_day
+                        ? t.title
+                        : `${(t.due_time || "").slice(0, 5)} — ${t.title}`}
+                    </div>
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      Category: {labelOf(k)} · Priority: {priorityLabel(t.priority)}
+                    </div>
                   </div>
                 </div>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
@@ -1239,18 +1238,19 @@ function parseNlp(
 ): {
   title: string;
   occurrences: string[];
-  category?: CatKey;
+  category?: string; // will be normalized later
   priority?: number;
   source?: string;
 } {
   let s = " " + raw.trim() + " ";
   const occurrences: string[] = [];
-  let category: CatKey | undefined = undefined;
+  let category: string | undefined = undefined;
   let priority: number | undefined = undefined;
 
-  const catMatch = s.match(/#(personal|health|career|financial|other)\b/i);
+  // Accept legacy tags and let normalizeCat unify them
+  const catMatch = s.match(/#(personal|health|career|business|financial|relationship|relationships|other)\b/i);
   if (catMatch) {
-    category = catMatch[1].toLowerCase() as CatKey;
+    category = catMatch[1];
     s = s.replace(catMatch[0], " ");
   }
 
@@ -1326,13 +1326,14 @@ function parseNlp(
       if (intMatch) {
         const n = Number(intMatch[1]);
         const unit = intMatch[2].toLowerCase();
-        const freq = unit.startsWith("day")
-          ? "daily"
-          : unit.startsWith("week")
-          ? "weekly"
-          : unit.startsWith("month")
-          ? "monthly"
-          : "annually";
+        const freq =
+          unit.startsWith("day")
+            ? "daily"
+            : unit.startsWith("week")
+            ? "weekly"
+            : unit.startsWith("month")
+            ? "monthly"
+            : "annually";
         rule = { type: "interval", interval: n, freq, until: untilISO, count };
       } else {
         const fMatch = tail.match(
@@ -1406,7 +1407,7 @@ function parseNlp(
   return {
     title,
     occurrences: Array.from(new Set(occurrences)),
-    category,
+    category, // will be normalized by caller
     priority,
     source: "calendar_nlp",
   };
