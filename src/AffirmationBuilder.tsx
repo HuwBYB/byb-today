@@ -2,6 +2,13 @@
 import { useEffect, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
+/* ---------- Shared category palette ---------- */
+import {
+  CATS,
+  colorOf,
+  type AllowedCategory as Category,
+} from "./theme/categories";
+
 /* ---------- Public path helper ---------- */
 function publicPath(p: string) {
   // @ts-ignore
@@ -15,7 +22,6 @@ function publicPath(p: string) {
 const EVA_HELP_IMG = publicPath("/eva/Affirmations_Eva.png");
 
 /* ---------- Types ---------- */
-type Category = "business" | "relationships" | "financial" | "personal" | "health";
 type AffirmationRow = {
   id?: number;
   user_id?: string | null;
@@ -24,22 +30,14 @@ type AffirmationRow = {
   created_at?: string;
 };
 
-/* ---------- Category palette (pastels) ---------- */
-const CATS: ReadonlyArray<{ key: Category; label: string; color: string }> = [
-  { key: "business",      label: "Business",      color: "#C7D2FE" }, // pastel indigo
-  { key: "financial",     label: "Financial",     color: "#A7F3D0" }, // pastel mint
-  { key: "health",        label: "Health",        color: "#99F6E4" }, // pastel teal
-  { key: "personal",      label: "Personal",      color: "#E9D5FF" }, // pastel purple
-  { key: "relationships", label: "Relationships", color: "#FECDD3" }, // pastel rose
-];
-
-const colorOf = (k: Category) => CATS.find(c => c.key === k)?.color || "#e5e7eb";
+/* ---------- Helpers ---------- */
 function hexToRgba(hex: string, alpha = 0.45) {
   const m = hex.replace("#", "");
-  const [r, g, b] = m.length === 3
-    ? [m[0]+m[0], m[1]+m[1], m[2]+m[2]]
-    : [m.slice(0,2), m.slice(2,4), m.slice(4,6)];
-  return `rgba(${parseInt(r,16)}, ${parseInt(g,16)}, ${parseInt(b,16)}, ${alpha})`;
+  const [r, g, b] =
+    m.length === 3
+      ? [m[0] + m[0], m[1] + m[1], m[2] + m[2]]
+      : [m.slice(0, 2), m.slice(2, 4), m.slice(4, 6)];
+  return `rgba(${parseInt(r, 16)}, ${parseInt(g, 16)}, ${parseInt(b, 16)}, ${alpha})`;
 }
 
 /* ---------- Storage keys ---------- */
@@ -49,7 +47,9 @@ const LS_CONF_TODAY_PREFIX = "byb:confidence:today:";
 /* ---------- Utils ---------- */
 const todayISO = () => {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
 };
 const confidenceKeyForToday = () => `${LS_CONF_TODAY_PREFIX}${todayISO()}`;
 
@@ -64,7 +64,9 @@ async function sendToConfidenceTodayLocal(row: AffirmationRow) {
   try {
     const key = confidenceKeyForToday();
     const arr: AffirmationRow[] = JSON.parse(localStorage.getItem(key) || "[]");
-    const exists = arr.some(a => a.category === row.category && a.text.trim() === row.text.trim());
+    const exists = arr.some(
+      (a) => a.category === row.category && a.text.trim() === row.text.trim()
+    );
     if (!exists) {
       arr.push(row);
       localStorage.setItem(key, JSON.stringify(arr));
@@ -74,8 +76,16 @@ async function sendToConfidenceTodayLocal(row: AffirmationRow) {
 
 /* ---------- Modal ---------- */
 function Modal({
-  open, onClose, title, children,
-}: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+  open,
+  onClose,
+  title,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+}) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     if (open) window.addEventListener("keydown", onKey);
@@ -83,13 +93,45 @@ function Modal({
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 2000 }}>
-      <div onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 760, width: "100%", background: "#fff", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.2)", padding: 20 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,.35)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+        zIndex: 2000,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: 760,
+          width: "100%",
+          background: "#fff",
+          borderRadius: 12,
+          boxShadow: "0 10px 30px rgba(0,0,0,.2)",
+          padding: 20,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            marginBottom: 8,
+          }}
+        >
           <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
-          <button onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>✕</button>
+          <button onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>
+            ✕
+          </button>
         </div>
         <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
       </div>
@@ -101,21 +143,40 @@ function Modal({
 function BuilderHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
-      <p><em>Craft affirmations that feel like you — short, present-tense, and believable — then send them to the Confidence page to practice.</em></p>
+      <p>
+        <em>
+          Craft affirmations that feel like you — short, present-tense, and believable — then
+          send them to the Confidence page to practice.
+        </em>
+      </p>
 
       <h4 style={{ margin: 0 }}>How to use</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li><b>Pick an area</b>: Business, Relationships, Financial, Personal, or Health.</li>
-        <li><b>Write your own</b> or click <i>Ask EVA</i> for 2–3 suggestions.</li>
-        <li><b>Tweak tone</b> with one-taps: Shorter, Stronger, Gentler.</li>
-        <li><b>Save</b> to your vault and <b>Send to Confidence</b> for today’s practice set.</li>
+        <li>
+          <b>Pick an area</b>: Business, Relationships, Financial, Personal, or Health.
+        </li>
+        <li>
+          <b>Write your own</b> or click <i>Ask EVA</i> for 2–3 suggestions.
+        </li>
+        <li>
+          <b>Tweak tone</b> with one-taps: Shorter, Stronger, Gentler.
+        </li>
+        <li>
+          <b>Save</b> to your vault and <b>Send to Confidence</b> for today’s practice set.
+        </li>
       </ul>
 
       <h4 style={{ margin: 0 }}>Good affirmation rules</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>Keep it <b>present tense</b> (“I lead with clarity”).</li>
-        <li>Make it <b>short</b> (ideally under 12 words).</li>
-        <li>Focus on what’s <b>in your control</b> (“I show up daily”).</li>
+        <li>
+          Keep it <b>present tense</b> (“I lead with clarity”).
+        </li>
+        <li>
+          Make it <b>short</b> (ideally under 12 words).
+        </li>
+        <li>
+          Focus on what’s <b>in your control</b> (“I show up daily”).
+        </li>
       </ul>
 
       <p className="muted" style={{ margin: 0, fontSize: 12 }}>
@@ -132,8 +193,8 @@ export default function AffirmationBuilderScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [active, setActive] = useState<Category>("business");
 
-  const [text, setText] = useState("");           // editor text
-  const [theme, setTheme] = useState("");         // optional prompt theme
+  const [text, setText] = useState(""); // editor text
+  const [theme, setTheme] = useState(""); // optional prompt theme
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
 
@@ -154,8 +215,7 @@ export default function AffirmationBuilderScreen() {
     setBusySuggest(true);
     setSelectedIdx(null);
     try {
-      const prompt =
-`Help me write 3 short, present-tense affirmations for the "${active}" area.
+      const prompt = `Help me write 3 short, present-tense affirmations for the "${active}" area.
 Theme (optional): ${theme || "(none)"}
 Rules: under 12 words, positive, believable, in my control. Output as bullet points.`;
       const res = await fetch("/api/eva", {
@@ -169,13 +229,18 @@ Rules: under 12 words, positive, believable, in my control. Output as bullet poi
       if (!res.ok) throw new Error(`EVA error: ${res.status}`);
       const data = await res.json();
       const reply: string = data.reply || data.text || "";
-      const lines = reply.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      const lines = reply.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       const bulls = lines
-        .filter(l => /^[-*•]\s+/.test(l) || /^\d+\.\s+/.test(l))
-        .map(l => l.replace(/^([-*•]\s+|\d+\.\s+)/, "").trim());
-      const opts = (bulls.length ? bulls : lines).slice(0, 3).map(s => s.replace(/^"|"$/g, ""));
+        .filter((l) => /^[-*•]\s+/.test(l) || /^\d+\.\s+/.test(l))
+        .map((l) => l.replace(/^([-*•]\s+|\d+\.\s+)/, "").trim());
+      const opts = (bulls.length ? bulls : lines)
+        .slice(0, 3)
+        .map((s) => s.replace(/^"|"$/g, ""));
       setSuggestions(opts);
-      if (opts[0]) { setText(opts[0]); setSelectedIdx(0); }
+      if (opts[0]) {
+        setText(opts[0]);
+        setSelectedIdx(0);
+      }
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -214,8 +279,7 @@ Rules: under 12 words, positive, believable, in my control. Output as bullet poi
     setErr(null);
     setBusySuggest(true);
     try {
-      const prompt =
-`Rewrite this affirmation with a ${kind} tone.
+      const prompt = `Rewrite this affirmation with a ${kind} tone.
 Keep it present-tense, positive, under 12 words, believable:
 "${text}"`;
       const res = await fetch("/api/eva", {
@@ -269,14 +333,21 @@ Keep it present-tense, positive, under 12 words, believable:
 
   async function saveToVaultAndConfidence() {
     const clean = text.trim();
-    if (!clean) { setErr("Write or pick an affirmation first."); return; }
+    if (!clean) {
+      setErr("Write or pick an affirmation first.");
+      return;
+    }
     setErr(null);
     setBusySave(true);
     const row: AffirmationRow = { user_id: userId, category: active, text: clean };
 
     try {
       if (userId) {
-        await supabase.from("affirmations").insert({ user_id: userId, category: active, text: clean });
+        await supabase.from("affirmations").insert({
+          user_id: userId,
+          category: active,
+          text: clean,
+        });
       }
     } catch {
       // best-effort only
@@ -303,8 +374,15 @@ Keep it present-tense, positive, under 12 words, believable:
             aria-label="Open builder help"
             title="Need a hand? Ask EVA"
             style={{
-              position: "absolute", top: 8, right: 8, border: "none",
-              background: "transparent", padding: 0, cursor: "pointer", lineHeight: 0, zIndex: 10,
+              position: "absolute",
+              top: 8,
+              right: 8,
+              border: "none",
+              background: "transparent",
+              padding: 0,
+              cursor: "pointer",
+              lineHeight: 0,
+              zIndex: 10,
             }}
           >
             {imgOk ? (
@@ -317,9 +395,15 @@ Keep it present-tense, positive, under 12 words, believable:
             ) : (
               <span
                 style={{
-                  display: "inline-flex", alignItems: "center", justifyContent: "center",
-                  width: 34, height: 34, borderRadius: 999, border: "1px solid #d1d5db",
-                  background: "#f9fafb", fontWeight: 700,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 34,
+                  height: 34,
+                  borderRadius: 999,
+                  border: "1px solid #d1d5db",
+                  background: "#f9fafb",
+                  fontWeight: 700,
                 }}
               >
                 ?
@@ -330,13 +414,15 @@ Keep it present-tense, positive, under 12 words, believable:
 
         {/* Category tabs */}
         <div className="card" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {CATS.map(c => {
+          {CATS.map((c) => {
             const isActive = c.key === active;
             const col = c.color;
             return (
               <button
                 key={c.key}
-                onClick={() => { setActive(c.key); }}
+                onClick={() => {
+                  setActive(c.key);
+                }}
                 style={{
                   padding: "8px 12px",
                   borderRadius: 8,
@@ -358,7 +444,10 @@ Keep it present-tense, positive, under 12 words, believable:
           <div className="section-title">Write your own</div>
           <input
             value={text}
-            onChange={e => { setText(e.target.value); setSelectedIdx(null); }}
+            onChange={(e) => {
+              setText(e.target.value);
+              setSelectedIdx(null);
+            }}
             placeholder="e.g., I lead with calm, decisive action."
             aria-label="Affirmation text"
           />
@@ -367,7 +456,7 @@ Keep it present-tense, positive, under 12 words, believable:
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <input
               value={theme}
-              onChange={e => setTheme(e.target.value)}
+              onChange={(e) => setTheme(e.target.value)}
               placeholder="Theme (optional) — e.g., money, calm, leadership"
               aria-label="Theme for EVA"
               style={{ flex: 1, minWidth: 220 }}
@@ -412,9 +501,15 @@ Keep it present-tense, positive, under 12 words, believable:
 
           {/* Tone nudges */}
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <button onClick={() => refineTone("shorter")} disabled={!text || busySuggest}>Shorter</button>
-            <button onClick={() => refineTone("stronger")} disabled={!text || busySuggest}>Stronger</button>
-            <button onClick={() => refineTone("gentler")} disabled={!text || busySuggest}>Gentler</button>
+            <button onClick={() => refineTone("shorter")} disabled={!text || busySuggest}>
+              Shorter
+            </button>
+            <button onClick={() => refineTone("stronger")} disabled={!text || busySuggest}>
+              Stronger
+            </button>
+            <button onClick={() => refineTone("gentler")} disabled={!text || busySuggest}>
+              Gentler
+            </button>
           </div>
 
           {/* Preview card */}
@@ -440,8 +535,15 @@ Keep it present-tense, positive, under 12 words, believable:
           {/* Actions */}
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
             {err && <div style={{ color: "red", marginRight: "auto" }}>{err}</div>}
-            <button onClick={() => { setText(""); setSelectedIdx(null); }} disabled={!text}>Clear</button>
-            <button onClick={saveToVaultAndConfidence} className="btn-primary" disabled={!text || busySave} style={{ borderRadius: 10 }}>
+            <button onClick={() => { setText(""); setSelectedIdx(null); }} disabled={!text}>
+              Clear
+            </button>
+            <button
+              onClick={saveToVaultAndConfidence}
+              className="btn-primary"
+              disabled={!text || busySave}
+              style={{ borderRadius: 10 }}
+            >
               {busySave ? "Saving…" : "Save & send to Confidence"}
             </button>
           </div>
