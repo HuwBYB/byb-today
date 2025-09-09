@@ -371,10 +371,10 @@ Otherwise, return short bullet points (max ~8).`;
 
       const rows: any[] = [];
       if (asChecklist) {
-        const body = chosen.map(s => `□ ${s.title}${s.why ? ` — ${s.why}` : ""}`).join("\n");
+        // Single checklist task; keep it lightweight (no unused vars)
         rows.push({
           user_id: userId,
-          title: `${plan.title || "Plan"} — checklist`,
+          title: `${plan.title || "Plan"} — checklist (${chosen.length} step${chosen.length>1?"s":""})`,
           due_date: base,
           status: "pending",
           priority: 0,
@@ -382,7 +382,6 @@ Otherwise, return short bullet points (max ~8).`;
           goal_id: null,
           category,
           category_color,
-          // notes: body, // uncomment if your tasks table has a notes column
         });
       } else {
         if (respectOffsets) {
@@ -434,7 +433,6 @@ Otherwise, return short bullet points (max ~8).`;
   /* ---------- UI helpers ---------- */
   const canOfferTask = actionItems.length === 1;
   const canOfferGoal = actionItems.length > 1;
-  const canOfferStepsToTasks = (plan && (plan.steps?.length ?? 0) > 0) || actionItems.length > 1;
 
   // keep modals in sync with suggestions
   useEffect(() => {
