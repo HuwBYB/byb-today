@@ -4,6 +4,7 @@ import { supabase } from "./lib/supabaseClient";
 import {
   CATS,
   colorOf,
+  normalizeCat,              // ← NEW: import the normalizer
   type AllowedCategory,
 } from "./theme/categories";
 
@@ -82,16 +83,16 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
       }
     };
 
-    const onFocusIn = (ev: FocusEvent) => {
-      const t = ev.target as HTMLElement | null;
+    const onFocusIn = (e: FocusEvent) => {
+      const t = e.target as HTMLElement | null;
       if (!t) return;
       if (root.contains(t) && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || (t as HTMLElement).isContentEditable)) {
         lastFocusedEl.current = t as HTMLInputElement;
       }
     };
 
-    const onFocusOut = (ev: FocusEvent) => {
-      const next = ev.relatedTarget as Node | null;
+    const onFocusOut = (e: FocusEvent) => {
+      const next = e.relatedTarget as Node | null;
       const pointerActive = pointerWindow.current !== null;
       if (pointerActive) return;
       if (lastFocusedEl.current && (!next || !root.contains(next))) {
@@ -177,14 +178,17 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
       const userId = userData.user?.id;
       if (!userId) throw new Error("Not signed in.");
 
+      // Normalize category BEFORE writing
+      const catKey: AllowedCategory = normalizeCat(category);
+
       // 1) create goal
       const { data: goal, error: gerr } = await supabase.from("goals")
         .insert({
           user_id: userId,
           title: title.trim(),
           goal_type: "big",
-          category,
-          category_color: catColor, // stored for now, but UI always derives from palette
+          category: catKey,                 // ← normalized
+          category_color: colorOf(catKey),  // stored for convenience; UI still derives
           start_date: startDate,
           target_date: targetDate,
           halfway_note: halfwayNote || null,
@@ -195,28 +199,28 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         .single();
       if (gerr) throw gerr;
 
-      // 2) seed tasks — ENTIRE span (so midpoint "Yes" means continue with current steps)
+      // 2) seed tasks — use NORMALIZED category key from DB row (defensive)
       const start = fromISO(startDate);
       const end   = fromISO(targetDate);
       if (end < start) throw new Error("Target date is before start date.");
 
       const tasks: any[] = [];
-      const cat = (goal.category as AllowedCategory) || "personal";
-      const col = colorOf(cat); // ← derive from palette (ignore stored category_color)
+      const catFromGoal: AllowedCategory = normalizeCat((goal as any).category);  // ← normalized again, defensive
+      const col = colorOf(catFromGoal);
 
       // Milestones
       tasks.push({
-        user_id: userId, goal_id: goal.id,
+        user_id: userId, goal_id: (goal as any).id,
         title: `BIG GOAL — Target: ${goal.title}`,
         due_date: targetDate, source: "big_goal_target", priority: 2,
-        category: cat, category_color: col
+        category: catFromGoal, category_color: col
       });
       if (computedHalfDate) {
         tasks.push({
-          user_id: userId, goal_id: goal.id,
+          user_id: userId, goal_id: (goal as any).id,
           title: `BIG GOAL — Midpoint Review${halfwayNote.trim() ? `: ${halfwayNote.trim()}` : ""}`,
           due_date: computedHalfDate, source: "big_goal_midpoint_review", priority: 2,
-          category: cat, category_color: col
+          category: catFromGoal, category_color: col
         });
       }
 
@@ -225,10 +229,10 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         let d = addMonthsClamped(start, 1, start.getDate());
         while (d <= end) {
           tasks.push({
-            user_id: userId, goal_id: goal.id,
+            user_id: userId, goal_id: (goal as any).id,
             title: `BIG GOAL — Monthly: ${monthlyCommit.trim()}`,
             due_date: toISO(d), source: "big_goal_monthly", priority: 2,
-            category: cat, category_color: col
+            category: catFromGoal, category_color: col
           });
           d = addMonthsClamped(d, 1, start.getDate());
         }
@@ -238,10 +242,10 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         let d = new Date(start); d.setDate(d.getDate() + 7);
         while (d <= end) {
           tasks.push({
-            user_id: userId, goal_id: goal.id,
+            user_id: userId, goal_id: (goal as any).id,
             title: `BIG GOAL — Weekly: ${weeklyCommit.trim()}`,
             due_date: toISO(d), source: "big_goal_weekly", priority: 2,
-            category: cat, category_color: col
+            category: catFromGoal, category_color: col
           });
           d.setDate(d.getDate() + 7);
         }
@@ -251,15 +255,16 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
         let d = clampDay(new Date(Math.max(Date.now(), start.getTime())));
         while (d <= end) {
           tasks.push({
-            user_id: userId, goal_id: goal.id,
+            user_id: userId, goal_id: (goal as any).id,
             title: `BIG GOAL — Daily: ${dailyCommit.trim()}`,
             due_date: toISO(d), source: "big_goal_daily", priority: 2,
-            category: cat, category_color: col
+            category: catFromGoal, category_color: col
           });
           d.setDate(d.getDate() + 1);
         }
       }
 
+      // Batched insert
       for (let i = 0; i < tasks.length; i += 500) {
         const slice = tasks.slice(i, i + 500);
         const { error: terr } = await supabase.from("tasks").insert(slice);
