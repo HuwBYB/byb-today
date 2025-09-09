@@ -6,18 +6,40 @@ import { supabase } from "./lib/supabaseClient";
    EVA (Alfred) — Actionable Chat
    ============================================= */
 
-/* ---------- Categories (banked) ---------- */
+/* ---------- Categories (labels from TS, colours from CSS) ---------- */
 export type AllowedCategory = "business" | "financial" | "health" | "personal" | "relationships";
 
-const CATS: ReadonlyArray<{ key: AllowedCategory; label: string; color: string }> = [
-  { key: "business",      label: "Business",      color: "#C7D2FE" }, // pastel indigo
-  { key: "financial",     label: "Financial",     color: "#A7F3D0" }, // pastel mint
-  { key: "health",        label: "Health",        color: "#99F6E4" }, // pastel teal
-  { key: "personal",      label: "Personal",      color: "#E9D5FF" }, // pastel purple
-  { key: "relationships", label: "Relationships", color: "#FECDD3" }, // pastel rose
-] as const;
+const CAT_LABELS: Record<AllowedCategory, string> = {
+  business: "Business",
+  financial: "Financial",
+  health: "Health",
+  personal: "Personal",
+  relationships: "Relationships",
+};
 
-const colorOf = (k: AllowedCategory) => CATS.find(s => s.key === k)?.color || "#E5E7EB";
+/** Fallbacks in case theme.css isn't loaded yet (match your palette).
+ *  Note: Financial uses AMBER to stay distinct from Health’s teal.
+ */
+const FALLBACK_COLORS: Record<AllowedCategory, string> = {
+  business: "#C7D2FE",      // pastel indigo
+  financial: "#FDE68A",     // pastel amber (distinct)
+  health: "#99F6E4",        // pastel teal
+  personal: "#E9D5FF",      // pastel purple
+  relationships: "#FECDD3", // pastel rose
+};
+
+/** Read a CSS variable from :root, with fallback. */
+function cssVar(varName: string, fallback: string) {
+  if (typeof window === "undefined") return fallback;
+  const root = document.documentElement;
+  const value = getComputedStyle(root).getPropertyValue(varName).trim();
+  return value || fallback;
+}
+
+/** Category → colour from CSS variables in src/theme.css */
+function colorOf(k: AllowedCategory) {
+  return cssVar(`--cat-${k}`, FALLBACK_COLORS[k]);
+}
 
 /* ---------- Types ---------- */
 type ChatMessage = { role: "user" | "assistant"; content: string; ts: number };
@@ -50,7 +72,7 @@ function extractBullets(txt: string): string[] {
     .filter(l => /^([-*•]\s+|\d+\.\s+)/.test(l))
     .map(l => l.replace(/^([-*•]\s+|\d+\.\s+)/, "").trim());
   if (bullets.length) return bullets;
-  // fallback: split by sentences and pick imperative-looking short items
+  // fallback: split by sentences and pick short items
   const sentences = txt.split(/(?<=[.!?])\s+/).map(s => s.trim());
   return sentences.filter(s => s.length > 0 && s.length <= 120);
 }
@@ -204,7 +226,7 @@ export default function AlfredScreen() {
         priority: 0,
         source: "eva_quick",
         category: cat,
-        category_color: colorOf(cat),
+        category_color: colorOf(cat), // derive from CSS
       };
       const { error } = await supabase.from("tasks").insert(row as any);
       if (error) throw error;
@@ -238,7 +260,7 @@ export default function AlfredScreen() {
           halfway_date: halfISO,
           status: "active",
           category: cat,
-          category_color: colorOf(cat),
+          category_color: colorOf(cat), // derive from CSS
         })
         .select("id")
         .single();
@@ -287,6 +309,13 @@ export default function AlfredScreen() {
   /* ----- Styles (soft) ----- */
   const headerColor = colorOf(cat);
 
+  // Build the tabs once (labels fixed; colours read live from CSS each render)
+  const CAT_LIST: { key: AllowedCategory; label: string }[] = useMemo(
+    () => (["business","financial","health","personal","relationships"] as AllowedCategory[])
+      .map(k => ({ key: k, label: CAT_LABELS[k] })),
+    []
+  );
+
   return (
     <div style={{ display: "grid", gap: 12 }}>
       {/* Header */}
@@ -298,8 +327,9 @@ export default function AlfredScreen() {
 
       {/* Category tabs */}
       <div className="card" style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-        {CATS.map(c => {
+        {CAT_LIST.map(c => {
           const active = c.key === cat;
+          const col = colorOf(c.key);
           return (
             <button
               key={c.key}
@@ -309,7 +339,7 @@ export default function AlfredScreen() {
               style={{
                 borderRadius: 999,
                 border: `1px solid ${active ? "#c7cbd6" : "var(--border)"}`,
-                background: active ? `${c.color}` : "#fff",
+                background: active ? col : "#fff",
                 fontWeight: active ? 700 : 500
               }}
               title={c.label}
@@ -323,12 +353,12 @@ export default function AlfredScreen() {
       {/* Composer */}
       <div className="card" style={{ display:"grid", gap:8 }}>
         <label style={{ display:"grid", gap:6 }}>
-          <div className="muted">Your question to EVA ({CATS.find(x=>x.key===cat)?.label})</div>
+          <div className="muted">Your question to EVA ({CAT_LABELS[cat]})</div>
           <textarea
             value={input}
             onChange={e => setInput(e.target.value)}
             rows={3}
-            placeholder={`e.g., In ${CATS.find(x=>x.key===cat)?.label}, I want to... What should I do next?`}
+            placeholder={`e.g., In ${CAT_LABELS[cat]}, I want to... What should I do next?`}
             style={{ resize:"vertical" }}
           />
         </label>
@@ -400,7 +430,7 @@ export default function AlfredScreen() {
               <div className="muted">Category</div>
               <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                 <select value={cat} onChange={e=>setCat(e.target.value as AllowedCategory)}>
-                  {CATS.map(c=> <option key={c.key} value={c.key}>{c.label}</option>)}
+                  {CAT_LIST.map(c=> <option key={c.key} value={c.key}>{c.label}</option>)}
                 </select>
                 <span style={{ width:14, height:14, borderRadius:999, background: colorOf(cat), border:"1px solid #d1d5db" }} />
               </div>
@@ -432,7 +462,7 @@ export default function AlfredScreen() {
               <div className="muted">Category</div>
               <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                 <select value={cat} onChange={e=>setCat(e.target.value as AllowedCategory)}>
-                  {CATS.map(c=> <option key={c.key} value={c.key}>{c.label}</option>)}
+                  {CAT_LIST.map(c=> <option key={c.key} value={c.key}>{c.label}</option>)}
                 </select>
                 <span style={{ width:14, height:14, borderRadius:999, background: colorOf(cat), border:"1px solid #d1d5db" }} />
               </div>
