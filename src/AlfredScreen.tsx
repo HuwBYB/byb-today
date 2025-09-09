@@ -1,45 +1,11 @@
 // src/AlfredScreen.tsx
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
+import { CATS, colorOf, labelOf, type AllowedCategory } from "./theme/categories";
 
 /* =============================================
    EVA (Alfred) — Actionable Chat
    ============================================= */
-
-/* ---------- Categories (labels from TS, colours from CSS) ---------- */
-export type AllowedCategory = "business" | "financial" | "health" | "personal" | "relationships";
-
-const CAT_LABELS: Record<AllowedCategory, string> = {
-  business: "Business",
-  financial: "Financial",
-  health: "Health",
-  personal: "Personal",
-  relationships: "Relationships",
-};
-
-/** Fallbacks in case theme.css isn't loaded yet (match your palette).
- *  Note: Financial uses AMBER to stay distinct from Health’s teal.
- */
-const FALLBACK_COLORS: Record<AllowedCategory, string> = {
-  business: "#C7D2FE",      // pastel indigo
-  financial: "#FDE68A",     // pastel amber (distinct)
-  health: "#99F6E4",        // pastel teal
-  personal: "#E9D5FF",      // pastel purple
-  relationships: "#FECDD3", // pastel rose
-};
-
-/** Read a CSS variable from :root, with fallback. */
-function cssVar(varName: string, fallback: string) {
-  if (typeof window === "undefined") return fallback;
-  const root = document.documentElement;
-  const value = getComputedStyle(root).getPropertyValue(varName).trim();
-  return value || fallback;
-}
-
-/** Category → colour from CSS variables in src/theme.css */
-function colorOf(k: AllowedCategory) {
-  return cssVar(`--cat-${k}`, FALLBACK_COLORS[k]);
-}
 
 /* ---------- Types ---------- */
 type ChatMessage = { role: "user" | "assistant"; content: string; ts: number };
@@ -84,7 +50,7 @@ function halfwayDate(startISO: string, targetISO: string) {
 }
 const uid = () => Math.random().toString(36).slice(2,10);
 
-/* ---------- Local parsing helpers ---------- */
+/* ---------- Text parsing helpers ---------- */
 function extractBullets(txt: string): string[] {
   const lines = txt.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const bullets = lines
@@ -98,12 +64,12 @@ function extractBullets(txt: string): string[] {
 function guessCadence(line: string): Cadence {
   const s = line.toLowerCase();
   if (/(daily|every day|each day|today)/.test(s)) return "daily";
-  if (/(weekly|every week|per week|on (mon|tue|wed|thu|fri|sat|sun))/i.test(s)) return "weekly";
   if (/(weekdays|workdays|monday to friday)/.test(s)) return "weekdays";
+  if (/(weekly|every week|per week|on (mon|tue|wed|thu|fri|sat|sun))/i.test(s)) return "weekly";
   return line.split(/\s+/).length <= 6 ? "daily" : "weekly";
 }
 
-/* ---------- Expand cadence ---------- */
+/* ---------- Cadence expander ---------- */
 function expandDates(baseISO: string, count: number, cadence: Cadence) {
   if (cadence === "none") return Array(count).fill(baseISO);
   const out: string[] = [];
@@ -144,7 +110,7 @@ function Modal({
   );
 }
 
-/* ---------- Try to parse EVA structured plan (JSON) ---------- */
+/* ---------- Parse EVA structured plan (JSON) ---------- */
 function parseEvaPlan(area: AllowedCategory, text: string): EvaPlan | null {
   const raw = text.trim();
   let obj: any = null;
@@ -210,7 +176,7 @@ export default function AlfredScreen() {
   const [daily, setDaily]     = useState<string[]>([]);
   const [creatingGoal, setCreatingGoal] = useState(false);
 
-  // NEW: steps → tasks modal
+  // steps → tasks modal
   const [stepsOpen, setStepsOpen] = useState(false);
   const [plan, setPlan] = useState<EvaPlan | null>(null);
   const [steps, setSteps] = useState<EvaStep[]>([]);
@@ -279,17 +245,18 @@ Otherwise, return short bullet points (max ~8).`;
         } else if (bullets.length > 1) {
           const convTitle =
             q.length > 3 ? q[0].toUpperCase() + q.slice(1) : "New Plan";
+          const stepsList = bullets.map((b,i)=>({ title: b, offsetDays: i, cadence: guessCadence(b) }));
           setPlan({
             id: uid(),
             area: cat,
             title: convTitle,
             summary: "",
-            steps: bullets.map((b,i)=>({ title: b, offsetDays: i, cadence: guessCadence(b) })),
+            steps: stepsList,
             suggestedCadence: "weekly",
             created_at: new Date().toISOString(),
           });
-          setSteps(bullets.map((b,i)=>({ title: b, offsetDays: i, cadence: guessCadence(b) })));
-          setSelected(bullets.map(()=>true));
+          setSteps(stepsList);
+          setSelected(stepsList.map(()=>true));
           setCadence("weekly");
         }
       }
@@ -327,7 +294,7 @@ Otherwise, return short bullet points (max ~8).`;
         priority: 0,
         source: "eva_quick",
         category: cat,
-        category_color: colorOf(cat), // derive from CSS
+        category_color: colorOf(cat),
       };
       const { error } = await supabase.from("tasks").insert(row as any);
       if (error) throw error;
@@ -361,7 +328,7 @@ Otherwise, return short bullet points (max ~8).`;
           halfway_date: halfISO,
           status: "active",
           category: cat,
-          category_color: colorOf(cat), // derive from CSS
+          category_color: colorOf(cat),
         })
         .select("id")
         .single();
@@ -415,7 +382,7 @@ Otherwise, return short bullet points (max ~8).`;
           goal_id: null,
           category,
           category_color,
-          // If you have a notes column in tasks, add: notes: body
+          // notes: body, // uncomment if your tasks table has a notes column
         });
       } else {
         if (respectOffsets) {
@@ -491,15 +458,8 @@ Otherwise, return short bullet points (max ~8).`;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastAssistant]);
 
-  /* ----- Styles (soft) ----- */
-  const headerColor = colorOf(cat);
-
-  // Build the tabs once (labels fixed; colours read live from CSS each render)
-  const CAT_LIST: { key: AllowedCategory; label: string }[] = useMemo(
-    () => (["business","financial","health","personal","relationships"] as AllowedCategory[])
-      .map(k => ({ key: k, label: CAT_LABELS[k] })),
-    []
-  );
+  // Use your central categories list for tabs & selects
+  const CAT_LIST = CATS;
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
@@ -507,7 +467,7 @@ Otherwise, return short bullet points (max ~8).`;
       <div className="card" style={{ position:"relative" }}>
         <h1 style={{ margin: 0 }}>Ask EVA</h1>
         <div className="muted">Ask for help in a life area — then action it.</div>
-        <div style={{ position:"absolute", top:10, right:10, width:12, height:12, borderRadius:999, background: headerColor, border:"1px solid #d1d5db" }} />
+        <div style={{ position:"absolute", top:10, right:10, width:12, height:12, borderRadius:999, background: colorOf(cat), border:"1px solid #d1d5db" }} />
       </div>
 
       {/* Category tabs */}
@@ -538,12 +498,12 @@ Otherwise, return short bullet points (max ~8).`;
       {/* Composer */}
       <div className="card" style={{ display:"grid", gap:8 }}>
         <label style={{ display:"grid", gap:6 }}>
-          <div className="muted">Your question to EVA ({CAT_LABELS[cat]})</div>
+          <div className="muted">Your question to EVA ({labelOf(cat)})</div>
           <textarea
             value={input}
             onChange={e => setInput(e.target.value)}
             rows={3}
-            placeholder={`e.g., In ${CAT_LABELS[cat]}, I want to... What should I do next?`}
+            placeholder={`e.g., In ${labelOf(cat)}, I want to... What should I do next?`}
             style={{ resize:"vertical" }}
           />
         </label>
@@ -596,7 +556,7 @@ Otherwise, return short bullet points (max ~8).`;
               Create goal from these
             </button>
           )}
-          {(canOfferStepsToTasks) && (
+          {((plan && (plan.steps?.length ?? 0) > 0) || actionItems.length > 1) && (
             <button className="btn-primary" onClick={() => setStepsOpen(true)} style={{ borderRadius: 10 }}>
               Add steps as tasks
             </button>
@@ -620,8 +580,7 @@ Otherwise, return short bullet points (max ~8).`;
               <div className="muted">Category</div>
               <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                 <select value={cat} onChange={e=>setCat(e.target.value as AllowedCategory)}>
-                  {(["business","financial","health","personal","relationships"] as AllowedCategory[])
-                    .map(k=> <option key={k} value={k}>{CAT_LABELS[k]}</option>)}
+                  {CATS.map(c=> <option key={c.key} value={c.key}>{c.label}</option>)}
                 </select>
                 <span style={{ width:14, height:14, borderRadius:999, background: colorOf(cat), border:"1px solid #d1d5db" }} />
               </div>
@@ -653,8 +612,7 @@ Otherwise, return short bullet points (max ~8).`;
               <div className="muted">Category</div>
               <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                 <select value={cat} onChange={e=>setCat(e.target.value as AllowedCategory)}>
-                  {(["business","financial","health","personal","relationships"] as AllowedCategory[])
-                    .map(k=> <option key={k} value={k}>{CAT_LABELS[k]}</option>)}
+                  {CATS.map(c=> <option key={c.key} value={c.key}>{c.label}</option>)}
                 </select>
                 <span style={{ width:14, height:14, borderRadius:999, background: colorOf(cat), border:"1px solid #d1d5db" }} />
               </div>
@@ -716,7 +674,7 @@ Otherwise, return short bullet points (max ~8).`;
         </div>
       </Modal>
 
-      {/* NEW: Steps → Tasks Modal */}
+      {/* Steps → Tasks Modal */}
       <Modal open={stepsOpen} onClose={() => setStepsOpen(false)} title="Add steps as tasks">
         {!plan || !steps.length ? (
           <div className="muted">No steps detected yet — ask EVA for a multi-step plan.</div>
