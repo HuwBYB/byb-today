@@ -1,16 +1,10 @@
 // src/TodayScreen.tsx
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-// ✅ Pull categories from your central module (NOT from CSS)
-import {
-  colorOf,
-  normalizeCat,
-  type AllowedCategory,
-  // labelOf, CATS // (available if you need them later)
-} from "./theme/categories";
-// ✅ Keep your global CSS as a side-effect import
+// ✅ Pull just what we use from the central categories module
+import { colorOf, normalizeCat } from "./theme/categories";
+// ✅ Keep global CSS as a side-effect import
 import "./theme.css";
 
 /* =============================================
