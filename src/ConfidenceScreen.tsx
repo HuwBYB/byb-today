@@ -4,15 +4,24 @@ import { supabase } from "./lib/supabaseClient";
 
 /* ---------- tiny helpers ---------- */
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
-const toISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const toISO = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const todayISO = () => toISO(new Date());
 
 /* Use the public image directly. The query string busts browser cache after deploy. */
 const POWER_POSE_SRC = "/PowerPoseArtDoll.png?v=2";
 
 /* ---------- Modal ---------- */
-function Modal({ open, onClose, title, children }:{
-  open: boolean; onClose: () => void; title: string; children: ReactNode;
+function Modal({
+  open,
+  onClose,
+  title,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: ReactNode;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -21,13 +30,38 @@ function Modal({ open, onClose, title, children }:{
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 2000 }}>
-      <div onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 760, width: "100%", background: "#fff", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.2)", padding: 20 }}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,.35)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+        zIndex: 2000,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: 760,
+          width: "100%",
+          background: "#fff",
+          borderRadius: 12,
+          boxShadow: "0 10px 30px rgba(0,0,0,.2)",
+          padding: 20,
+        }}
+      >
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
           <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
-          <button onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>✕</button>
+          <button onClick={onClose} aria-label="Close help" title="Close" style={{ borderRadius: 8 }}>
+            ✕
+          </button>
         </div>
         <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
       </div>
@@ -39,12 +73,23 @@ function Modal({ open, onClose, title, children }:{
 function ConfidenceHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
-      <p><em>Use this page for a one-minute reset before a meeting, interview, or whenever you want to feel steady and bold.</em></p>
+      <p>
+        <em>
+          Use this page for a one-minute reset before a meeting, interview, or whenever you want to feel steady and
+          bold.
+        </em>
+      </p>
       <h4 style={{ margin: 0 }}>What’s here</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li><b>Daily prompt</b> — quick check-in that builds a streak.</li>
-        <li><b>Confidence reps</b> — track pose, breath, and affirmation reps.</li>
-        <li><b>Wins reflection</b> — one short line after each minute.</li>
+        <li>
+          <b>Daily prompt</b> — quick check-in that builds a streak.
+        </li>
+        <li>
+          <b>Confidence reps</b> — track pose, breath, and affirmation reps.
+        </li>
+        <li>
+          <b>Wins reflection</b> — one short line after each minute.
+        </li>
       </ul>
       <h4 style={{ margin: 0 }}>60-second flow</h4>
       <ol style={{ paddingLeft: 18, margin: 0 }}>
@@ -63,9 +108,9 @@ function ConfidenceHelpContent() {
 type BreathPatternKey = "box" | "478" | "coherent";
 type Pattern = { name: string; phases: { label: "Inhale" | "Hold" | "Exhale"; secs: number }[] };
 const PATTERNS: Record<BreathPatternKey, Pattern> = {
-  box: { name: "Box 4-4-4-4", phases: [{label:"Inhale",secs:4},{label:"Hold",secs:4},{label:"Exhale",secs:4},{label:"Hold",secs:4}] },
-  "478": { name: "4-7-8", phases: [{label:"Inhale",secs:4},{label:"Hold",secs:7},{label:"Exhale",secs:8}] },
-  coherent: { name: "Coherent 5/5", phases: [{label:"Inhale",secs:5},{label:"Exhale",secs:5}] },
+  box: { name: "Box 4-4-4-4", phases: [{ label: "Inhale", secs: 4 }, { label: "Hold", secs: 4 }, { label: "Exhale", secs: 4 }, { label: "Hold", secs: 4 }] },
+  "478": { name: "4-7-8", phases: [{ label: "Inhale", secs: 4 }, { label: "Hold", secs: 7 }, { label: "Exhale", secs: 8 }] },
+  coherent: { name: "Coherent 5/5", phases: [{ label: "Inhale", secs: 5 }, { label: "Exhale", secs: 5 }] },
 };
 
 /* ---------- Persistence (Supabase + local) ---------- */
@@ -116,7 +161,9 @@ async function loadEntries(userId: string | null, sinceISO: string): Promise<Con
   try {
     const arr: ConfEntry[] = JSON.parse(localStorage.getItem(LS_CONF) || "[]");
     return arr.filter((x) => x.entry_date >= sinceISO);
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 /* ---------- Confetti ---------- */
@@ -126,15 +173,19 @@ function Confetti({ show }: { show: boolean }) {
   return (
     <div aria-hidden style={{ position: "fixed", inset: 0, pointerEvents: "none", overflow: "hidden", zIndex: 3000 }}>
       {pieces.map((_, i) => (
-        <span key={i}
+        <span
+          key={i}
           style={{
-            position:"absolute",
+            position: "absolute",
             left: `${(i / pieces.length) * 100}%`,
             top: -10,
-            width:6, height:10, borderRadius:1,
-            background:"hsl(var(--pastel-hsl))",
-            animation: `fall ${600 + i*20}ms ease-out forwards`,
-          }} />
+            width: 6,
+            height: 10,
+            borderRadius: 1,
+            background: "hsl(var(--pastel-hsl))",
+            animation: `fall ${600 + i * 20}ms ease-out forwards`,
+          }}
+        />
       ))}
       <style>{`@keyframes fall{ to { transform: translateY(100vh) rotate(260deg); opacity:.2; } }`}</style>
     </div>
@@ -153,15 +204,23 @@ export default function ConfidenceScreen() {
   const [showHelp, setShowHelp] = useState(false);
 
   const [userId, setUserId] = useState<string | null>(null);
-  useEffect(() => { supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null)); }, []);
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
+  }, []);
 
   // keyboard: Space start/pause, R reset
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
-      if (e.key === " ") { e.preventDefault(); running ? pause() : start(); }
-      if (e.key.toLowerCase() === "r") { e.preventDefault(); reset(); }
+      if (e.key === " ") {
+        e.preventDefault();
+        running ? pause() : start();
+      }
+      if (e.key.toLowerCase() === "r") {
+        e.preventDefault();
+        reset();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -183,9 +242,17 @@ export default function ConfidenceScreen() {
     }
   }, [seconds, running]);
 
-  function start() { setSeconds(60); setRunning(true); }
-  function pause() { setRunning(false); }
-  function reset() { setRunning(false); setSeconds(60); }
+  function start() {
+    setSeconds(60);
+    setRunning(true);
+  }
+  function pause() {
+    setRunning(false);
+  }
+  function reset() {
+    setRunning(false);
+    setSeconds(60);
+  }
 
   // daily prompt + reps + streaks data
   const [entries, setEntries] = useState<ConfEntry[]>([]);
@@ -197,29 +264,38 @@ export default function ConfidenceScreen() {
     loadEntries(userId, since).then((rows) => {
       setEntries(rows);
       const days: Record<string, boolean> = {};
-      rows.forEach((r) => { if (["prompt","pose","breath","affirm","reflection"].includes(r.kind)) days[r.entry_date] = true; });
-      let current = 0, best = 0, run = 0;
+      rows.forEach((r) => {
+        if (["prompt", "pose", "breath", "affirm", "reflection"].includes(r.kind)) days[r.entry_date] = true;
+      });
+      let current = 0,
+        best = 0,
+        run = 0;
       for (let i = 120; i >= 0; i--) {
         const d = toISO(new Date(new Date().setDate(new Date().getDate() - i)));
-        if (days[d]) { run++; best = Math.max(best, run); } else run = 0;
+        if (days[d]) {
+          run++;
+          best = Math.max(best, run);
+        } else run = 0;
       }
       const todayDone = !!days[todayISO()];
       if (todayDone) {
         let c = 0;
         for (let i = 0; i < 120; i++) {
           const d = toISO(new Date(new Date().setDate(new Date().getDate() - i)));
-          if (days[d]) c++; else break;
+          if (days[d]) c++;
+          else break;
         }
         current = c;
       } else current = 0;
-      setStreak(current); setBestStreak(best);
+      setStreak(current);
+      setBestStreak(best);
     });
   }, [userId]);
 
   async function log(kind: ConfKind, data?: Partial<ConfEntry>) {
     const row: ConfEntry = { entry_date: todayISO(), kind, reps: null, pattern: null, text: null, ...data };
     await saveEntry(userId, row);
-    setEntries(prev => [row, ...prev]);
+    setEntries((prev) => [row, ...prev]);
   }
 
   return (
@@ -231,7 +307,17 @@ export default function ConfidenceScreen() {
             onClick={() => setShowHelp(true)}
             aria-label="Open Confidence help"
             title="Help"
-            style={{ position: "absolute", top: 8, right: 8, border: "1px solid #e5e7eb", background: "#fff", padding: "6px 10px", borderRadius: 8, cursor: "pointer", lineHeight: 1 }}
+            style={{
+              position: "absolute",
+              top: 8,
+              right: 8,
+              border: "1px solid #e5e7eb",
+              background: "#fff",
+              padding: "6px 10px",
+              borderRadius: 8,
+              cursor: "pointer",
+              lineHeight: 1,
+            }}
           >
             Help
           </button>
@@ -241,14 +327,24 @@ export default function ConfidenceScreen() {
         </div>
 
         {/* Daily prompt & streak */}
-        <DailyPromptCard onRespond={async (txt) => { await log("prompt", { text: txt }); }} streak={streak} best={bestStreak} />
+        <DailyPromptCard
+          onRespond={async (txt) => {
+            await log("prompt", { text: txt });
+          }}
+          streak={streak}
+          best={bestStreak}
+        />
 
         {/* Timer card */}
         <div className="card" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <button onClick={start} className="btn-primary" style={{ borderRadius: 8 }}>Start 1-minute</button>
+          <button onClick={start} className="btn-primary" style={{ borderRadius: 8 }}>
+            Start 1-minute
+          </button>
           <button onClick={pause}>Pause</button>
           <button onClick={reset}>Reset</button>
-          <div className="muted" style={{ marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>{seconds}s</div>
+          <div className="muted" style={{ marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>
+            {seconds}s
+          </div>
         </div>
 
         {/* Tabs */}
@@ -258,12 +354,34 @@ export default function ConfidenceScreen() {
           <TabButton active={tab === "affirm"} onClick={() => setTab("affirm")} label="Affirmations" />
         </div>
 
-        {tab === "pose"   && <PowerPose onRep={async () => { await log("pose", { reps: 1 }); }} />}
-        {tab === "breath" && <BloomBreath running={running} onRep={async (pattern) => { await log("breath", { reps: 1, pattern }); }} />}
-        {tab === "affirm" && <AffirmationsList running={running} onRep={async (text) => { await log("affirm", { reps: 1, text }); }} />}
+        {tab === "pose" && (
+          <PowerPose
+            onRep={async () => {
+              await log("pose", { reps: 1 });
+            }}
+          />
+        )}
+
+        {tab === "breath" && (
+          <BloomBreath
+            running={running}
+            onRep={async (pattern) => {
+              await log("breath", { reps: 1, pattern });
+            }}
+          />
+        )}
+
+        {tab === "affirm" && <AffirmationsList />}
 
         {/* Reflection after timer */}
-        <ReflectionCard enabled={!running && seconds === 0} onSave={async (t) => { await log("reflection", { text: t }); setCelebrate(true); setTimeout(()=>setCelebrate(false),900); }} />
+        <ReflectionCard
+          enabled={!running && seconds === 0}
+          onSave={async (t) => {
+            await log("reflection", { text: t });
+            setCelebrate(true);
+            setTimeout(() => setCelebrate(false), 900);
+          }}
+        />
 
         {/* Recent history snapshot */}
         <RecentHistory entries={entries.slice(0, 8)} />
@@ -301,7 +419,15 @@ function TabButton({ active, onClick, label }: { active: boolean; onClick: () =>
 /* =========================================================
    Daily Prompt + Streak
    ========================================================= */
-function DailyPromptCard({ onRespond, streak, best }:{ onRespond:(txt:string)=>void|Promise<void>; streak:number; best:number }) {
+function DailyPromptCard({
+  onRespond,
+  streak,
+  best,
+}: {
+  onRespond: (txt: string) => void | Promise<void>;
+  streak: number;
+  best: number;
+}) {
   const prompts = [
     "What’s one reason you’ll show up boldly today?",
     "Name one strength you can lean on right now.",
@@ -317,29 +443,42 @@ function DailyPromptCard({ onRespond, streak, best }:{ onRespond:(txt:string)=>v
     if (!t) return;
     await onRespond(t);
     setText("");
-    setI((i+1) % prompts.length);
+    setI((i + 1) % prompts.length);
     if ((navigator as any).vibrate) (navigator as any).vibrate(5);
   }
 
   return (
-    <div className="card" style={{ display:"grid", gap:8 }}>
-      <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+    <div className="card" style={{ display: "grid", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <div className="section-title">Daily prompt</div>
         <StreakChip current={streak} best={best} />
       </div>
       <div style={{ fontWeight: 600 }}>{prompts[i]}</div>
-      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-        <input value={text} onChange={e=>setText(e.target.value)} placeholder="One short line…" style={{ flex:1, minWidth: 220 }} />
-        <button className="btn-primary" onClick={save} style={{ borderRadius: 8 }}>Log</button>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="One short line…" style={{ flex: 1, minWidth: 220 }} />
+        <button className="btn-primary" onClick={save} style={{ borderRadius: 8 }}>
+          Log
+        </button>
       </div>
     </div>
   );
 }
-function StreakChip({ current, best }:{ current:number; best:number }) {
+function StreakChip({ current, best }: { current: number; best: number }) {
   return (
-    <span title={`Current streak ${current} · Best ${best}`}
-      style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"6px 10px", borderRadius:999, border:"1px solid var(--border)", background:"var(--card)", fontWeight:700 }}>
-      🔥 {current} <span className="muted" style={{ fontWeight:500 }}>(best {best})</span>
+    <span
+      title={`Current streak ${current} · Best ${best}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "6px 10px",
+        borderRadius: 999,
+        border: "1px solid var(--border)",
+        background: "var(--card)",
+        fontWeight: 700,
+      }}
+    >
+      🔥 {current} <span className="muted" style={{ fontWeight: 500 }}>(best {best})</span>
     </span>
   );
 }
@@ -347,7 +486,7 @@ function StreakChip({ current, best }:{ current:number; best:number }) {
 /* =========================================================
    Power Pose
    ========================================================= */
-function PowerPose({ onRep }:{ onRep: ()=>void|Promise<void> }) {
+function PowerPose({ onRep }: { onRep: () => void | Promise<void> }) {
   const [ok, setOk] = useState(true);
   return (
     <div className="card confidence-layout" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
@@ -372,14 +511,26 @@ function PowerPose({ onRep }:{ onRep: ()=>void|Promise<void> }) {
       <div style={{ display: "grid", gap: 10 }}>
         <h2 style={{ margin: 0 }}>Stand like a superhero</h2>
         <ul className="list" style={{ lineHeight: 1.4 }}>
-          <li><b>Feet</b> shoulder-width apart</li>
-          <li><b>Hands</b> on hips (or arms open)</li>
-          <li><b>Chest</b> up, <b>chin</b> level</li>
-          <li><b>Breathe</b> slow through the nose</li>
-          <li><b>Eyes</b> soften; tiny smile</li>
+          <li>
+            <b>Feet</b> shoulder-width apart
+          </li>
+          <li>
+            <b>Hands</b> on hips (or arms open)
+          </li>
+          <li>
+            <b>Chest</b> up, <b>chin</b> level
+          </li>
+          <li>
+            <b>Breathe</b> slow through the nose
+          </li>
+          <li>
+            <b>Eyes</b> soften; tiny smile
+          </li>
         </ul>
         <div className="muted">Hold for one minute. Picture the best version of you entering the room.</div>
-        <div><button onClick={onRep}>✓ Log pose rep</button></div>
+        <div>
+          <button onClick={onRep}>✓ Log pose rep</button>
+        </div>
       </div>
     </div>
   );
@@ -417,7 +568,7 @@ function PoseSVG() {
 /* =========================================================
    Breathing (Bloom pacer)
    ========================================================= */
-function BloomBreath({ running, onRep }:{ running:boolean; onRep:(pattern: string)=>void|Promise<void> }) {
+function BloomBreath({ running, onRep }: { running: boolean; onRep: (pattern: string) => void | Promise<void> }) {
   const [patternKey, setPatternKey] = useState<BreathPatternKey>("box");
   const pattern = PATTERNS[patternKey];
   const [phaseIdx, setPhaseIdx] = useState(0);
@@ -442,10 +593,12 @@ function BloomBreath({ running, onRep }:{ running:boolean; onRep:(pattern: strin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running, phaseIdx, patternKey]);
 
-  const prevPhaseRef = useRef<"Inhale"|"Hold"|"Exhale">(phase);
+  const prevPhaseRef = useRef<"Inhale" | "Hold" | "Exhale">(phase);
   useEffect(() => {
     const prev = prevPhaseRef.current;
-    if (prev === "Exhale" && phase !== "Exhale") { onRep(patternKey); }
+    if (prev === "Exhale" && phase !== "Exhale") {
+      onRep(patternKey);
+    }
     prevPhaseRef.current = phase;
   }, [phase, onRep, patternKey]);
 
@@ -490,8 +643,8 @@ function BloomBreath({ running, onRep }:{ running:boolean; onRep:(pattern: strin
               </radialGradient>
             </defs>
             <g transform="translate(110,110)">
-              {[0,1,2,3,4,5].map(i => (
-                <g key={i} transform={`rotate(${i*60}) scale(${petalScale})`} style={{ transition: "transform 900ms ease-in-out", opacity: petalOpacity }}>
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <g key={i} transform={`rotate(${i * 60}) scale(${petalScale})`} style={{ transition: "transform 900ms ease-in-out", opacity: petalOpacity }}>
                   <path d="M0 0 C 20 -14, 40 -44, 0 -70 C -40 -44, -20 -14, 0 0 Z" fill="url(#petalGrad)" />
                 </g>
               ))}
@@ -503,8 +656,16 @@ function BloomBreath({ running, onRep }:{ running:boolean; onRep:(pattern: strin
     </div>
   );
 }
-function PatternButton({ current, setKey, k, label }:{
-  current: BreathPatternKey; setKey: (k: BreathPatternKey)=>void; k: BreathPatternKey; label: string;
+function PatternButton({
+  current,
+  setKey,
+  k,
+  label,
+}: {
+  current: BreathPatternKey;
+  setKey: (k: BreathPatternKey) => void;
+  k: BreathPatternKey;
+  label: string;
 }) {
   const active = current === k;
   return (
@@ -524,29 +685,28 @@ function PatternButton({ current, setKey, k, label }:{
 }
 
 /* =========================================================
-   Affirmations — supports today's set, then persistent per-category defaults, else single line
+   Affirmations — prefers today's set, then per-category defaults; no TTS, no log buttons
    ========================================================= */
 type TodayAff = { category?: string; text: string };
 
 const CAT_COLORS: Record<string, { bg: string; border: string; text: string }> = {
-  business:      { bg: "#FEF2F2", border: "#FECACA", text: "#7F1D1D" },
-  financial:     { bg: "#ECFDF5", border: "#A7F3D0", text: "#065F46" },
+  business: { bg: "#FEF2F2", border: "#FECACA", text: "#7F1D1D" },
+  financial: { bg: "#ECFDF5", border: "#A7F3D0", text: "#065F46" },
   relationships: { bg: "#F5F3FF", border: "#DDD6FE", text: "#4C1D95" },
-  personal:      { bg: "#EFF6FF", border: "#BFDBFE", text: "#1E3A8A" },
-  health:        { bg: "#ECFEFF", border: "#A5F3FC", text: "#164E63" },
+  personal: { bg: "#EFF6FF", border: "#BFDBFE", text: "#1E3A8A" },
+  health: { bg: "#ECFEFF", border: "#A5F3FC", text: "#164E63" },
 };
 function colorFor(cat?: string) {
   return CAT_COLORS[(cat || "").toLowerCase()] || { bg: "#F8FAFC", border: "#E5E7EB", text: "#0F172A" };
 }
 
-function AffirmationsList({ running, onRep }:{ running:boolean; onRep:(text:string)=>void|Promise<void> }) {
+function AffirmationsList() {
   // Keys
   const TODAY_KEY = `byb:confidence:today:${todayISO()}`;
   const FALLBACK_LS_KEY = "byb_affirmation";
 
   const [items, setItems] = useState<TodayAff[]>([]);
 
-  // NEW: loader that prefers today's set, then per-category defaults, else nothing (fallback editor shows)
   function loadAffirmationsForConfidence(): TodayAff[] {
     // 1) Today's set override
     try {
@@ -571,80 +731,57 @@ function AffirmationsList({ running, onRep }:{ running:boolean; onRep:(text:stri
     }
     if (defaults.length) return defaults;
 
-    // 3) No set — fall back to single line editor below
+    // 3) No set — fall back to single line editor
     return [];
   }
 
   useEffect(() => {
     setItems(loadAffirmationsForConfidence());
-    // We intentionally do not add deps so it runs once per mount,
-    // and updates when the page is revisited after Builder saves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const hasSet = items.length > 0;
 
-  // Optional: speak through the list while timer runs
-  const [speak, setSpeak] = useState(false);
-  useEffect(() => {
-    if (!speak || !hasSet) return;
-    let i = 0;
-    function sayNext() {
-      try {
-        const u = new SpeechSynthesisUtterance(items[i].text);
-        u.rate = 0.95; u.pitch = 1;
-        u.onend = () => {
-          i = (i + 1) % items.length;
-          if (speak && running) sayNext();
-        };
-        (window.speechSynthesis || {}).speak?.(u);
-      } catch {}
-    }
-    if (running) sayNext();
-    return () => { try { window.speechSynthesis.cancel(); } catch {} };
-  }, [speak, running, hasSet, items]);
-
   // Single-line fallback if no set/defaults exist
   const [singleText, setSingleText] = useState<string>(() => localStorage.getItem(FALLBACK_LS_KEY) || "I speak clearly and stay calm.");
-  useEffect(() => { try { localStorage.setItem(FALLBACK_LS_KEY, singleText); } catch {} }, [singleText]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(FALLBACK_LS_KEY, singleText);
+    } catch {}
+  }, [singleText]);
 
   return (
-    <div className="card" style={{ display:"grid", gap:10 }}>
-      <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
-        <h2 style={{ margin: 0, fontSize: 18 }}>Affirmations</h2>
-        <label style={{ marginLeft:"auto", display:"inline-flex", alignItems:"center", gap:8 }}>
-          <input type="checkbox" checked={speak} onChange={e=>setSpeak(e.target.checked)} />
-          Speak while running
-        </label>
-      </div>
+    <div className="card" style={{ display: "grid", gap: 10 }}>
+      <h2 style={{ margin: 0, fontSize: 18 }}>Affirmations</h2>
 
       {hasSet ? (
-        <ul style={{ display:"grid", gap:8, listStyle:"none", padding:0, margin:0 }}>
+        <ul style={{ display: "grid", gap: 8, listStyle: "none", padding: 0, margin: 0 }}>
           {items.map((a, i) => {
             const c = colorFor(a.category);
+            const label = a.category ? a.category[0].toUpperCase() + a.category.slice(1) : "General";
             return (
-              <li key={i}
-                  style={{
-                    border: `1px solid ${c.border}`,
-                    background: c.bg,
-                    color: c.text,
-                    borderRadius: 12,
-                    padding: "12px 14px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                  }}>
-                <span style={{ fontWeight: 700, minWidth: 96, opacity:.85 }}>
-                  {a.category ? a.category[0].toUpperCase()+a.category.slice(1) : "General"}
-                </span>
-                <span style={{ flex:1 }}>{a.text}</span>
-                <button onClick={() => onRep(a.text)} title="Log rep" style={{ borderRadius: 8 }}>✓ Log</button>
+              <li
+                key={i}
+                style={{
+                  border: `1px solid ${c.border}`,
+                  background: c.bg,
+                  color: c.text,
+                  borderRadius: 12,
+                  padding: "12px 14px",
+                  display: "grid",
+                  gap: 6,
+                }}
+              >
+                {/* Category on top */}
+                <div style={{ fontWeight: 800, opacity: 0.9 }}>{label}</div>
+                {/* Full-width line below */}
+                <div style={{ lineHeight: 1.4, wordBreak: "break-word" }}>{a.text}</div>
               </li>
             );
           })}
         </ul>
       ) : (
-        <div style={{ display:"grid", gap:8 }}>
+        <div style={{ display: "grid", gap: 8 }}>
           <div className="muted">No set yet — create per-category defaults in the Affirmation Builder, or use a single line below.</div>
           <div
             style={{
@@ -654,22 +791,27 @@ function AffirmationsList({ running, onRep }:{ running:boolean; onRep:(text:stri
               fontSize: 20,
               fontWeight: 700,
               textAlign: "center",
+              lineHeight: 1.35,
+              wordBreak: "break-word",
             }}
           >
             {singleText}
           </div>
-          <label style={{ display:"grid", gap:6 }}>
+          <label style={{ display: "grid", gap: 6 }}>
             <div className="section-title">Edit single affirmation</div>
-            <input value={singleText} onChange={e=>setSingleText(e.target.value)} />
+            <input value={singleText} onChange={(e) => setSingleText(e.target.value)} />
           </label>
-          <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {[
               "I follow through on what matters today.",
               "I can handle this — one step at a time.",
               "I speak clearly and stay calm.",
-            ].map((s,idx)=>(<button key={idx} onClick={()=>setSingleText(s)} style={{ textAlign:"left" }}>{s}</button>))}
+            ].map((s, idx) => (
+              <button key={idx} onClick={() => setSingleText(s)} style={{ textAlign: "left" }}>
+                {s}
+              </button>
+            ))}
           </div>
-          <div><button onClick={() => onRep(singleText)} style={{ borderRadius: 8 }}>✓ Log affirmation rep</button></div>
         </div>
       )}
     </div>
@@ -679,15 +821,25 @@ function AffirmationsList({ running, onRep }:{ running:boolean; onRep:(text:stri
 /* =========================================================
    Reflection card
    ========================================================= */
-function ReflectionCard({ enabled, onSave }:{ enabled:boolean; onSave:(t:string)=>void|Promise<void> }) {
+function ReflectionCard({ enabled, onSave }: { enabled: boolean; onSave: (t: string) => void | Promise<void> }) {
   const [text, setText] = useState("");
   if (!enabled) return null;
   return (
-    <div className="card" style={{ display:"grid", gap:8 }}>
+    <div className="card" style={{ display: "grid", gap: 8 }}>
       <div className="section-title">Wins reflection</div>
-      <input value={text} onChange={e=>setText(e.target.value)} placeholder="What felt strong in that minute?" />
-      <div style={{ display:"flex", justifyContent:"flex-end" }}>
-        <button className="btn-primary" onClick={async ()=>{ const v=text.trim(); if(!v) return; await onSave(v); setText(""); }}>Save</button>
+      <input value={text} onChange={(e) => setText(e.target.value)} placeholder="What felt strong in that minute?" />
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button
+          className="btn-primary"
+          onClick={async () => {
+            const v = text.trim();
+            if (!v) return;
+            await onSave(v);
+            setText("");
+          }}
+        >
+          Save
+        </button>
       </div>
     </div>
   );
@@ -696,23 +848,30 @@ function ReflectionCard({ enabled, onSave }:{ enabled:boolean; onSave:(t:string)
 /* =========================================================
    Recent history
    ========================================================= */
-function RecentHistory({ entries }:{ entries: ConfEntry[] }) {
+function RecentHistory({ entries }: { entries: ConfEntry[] }) {
   if (!entries.length) return null;
   return (
-    <div className="card" style={{ display:"grid", gap:8 }}>
+    <div className="card" style={{ display: "grid", gap: 8 }}>
       <div className="section-title">Recent</div>
       <ul className="list" style={{ margin: 0 }}>
         {entries.map((e, i) => (
-          <li key={i} className="item" style={{ alignItems:"center" }}>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                {e.kind === "prompt" ? "Prompt" :
-                 e.kind === "pose" ? "Power pose rep" :
-                 e.kind === "breath" ? `Breath rep (${e.pattern})` :
-                 e.kind === "affirm" ? "Affirmation rep" :
-                 "Reflection"}{e.text ? ` — ${e.text}` : ""}
+          <li key={i} className="item" style={{ alignItems: "center" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {e.kind === "prompt"
+                  ? "Prompt"
+                  : e.kind === "pose"
+                  ? "Power pose rep"
+                  : e.kind === "breath"
+                  ? `Breath rep (${e.pattern})`
+                  : e.kind === "affirm"
+                  ? "Affirmation rep"
+                  : "Reflection"}
+                {e.text ? ` — ${e.text}` : ""}
               </div>
-              <div className="muted" style={{ marginTop:4 }}>{e.entry_date}</div>
+              <div className="muted" style={{ marginTop: 4 }}>
+                {e.entry_date}
+              </div>
             </div>
           </li>
         ))}
