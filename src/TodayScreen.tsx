@@ -369,7 +369,7 @@ const BOOST_LINES = [
   "You’re writing a story you’ll be proud to tell.",
   "You turn ‘someday’ into ‘done’.",
   "Your best is enough.",
-  "Greatness comes from persistance.",
+  "Greatness comes from persistence.",
   "You have got this.",
   "Make your inner voice kind - you listen to it.",
   "Your dreams can become goals when you put a plan in place.",
@@ -1231,3 +1231,4 @@ export default function TodayScreen({ externalDateISO }: Props) {
     </div>
   );
 }
+
