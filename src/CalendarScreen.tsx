@@ -264,53 +264,6 @@ export default function CalendarScreen({
     return toISO(d);
   }
 
-  /* ================= In-app reminders (local) ================= */
-  const notifiedRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (!("Notification" in window)) return;
-
-    const tick = async () => {
-      if (Notification.permission !== "granted") return;
-      const reg = await navigator.serviceWorker?.ready.catch(() => null);
-      const now = Date.now();
-      const all: Task[] = Object.values(tasksByDay).flat();
-
-      for (const t of all) {
-        if (!t.due_at || !t.remind_before_min || t.remind_before_min.length === 0)
-          continue;
-
-        for (const m of t.remind_before_min) {
-          const key = `${t.id}:${m}`;
-          if (notifiedRef.current.has(key)) continue;
-
-          const trigger = new Date(t.due_at).getTime() - m * 60_000;
-          if (now >= trigger && now <= trigger + 60_000) {
-            const title = "Reminder";
-            const body = t.all_day
-              ? t.title
-              : `${(t.due_time || "").slice(0, 5)} — ${t.title}`;
-
-            if (reg?.showNotification) {
-              reg.showNotification(title, {
-                body,
-                tag: key,
-                icon: "/icons/app-icon-192.png",
-                badge: "/icons/app-icon-192.png",
-              });
-            } else {
-              new Notification(title, { body, tag: key });
-            }
-            notifiedRef.current.add(key);
-          }
-        }
-      }
-    };
-
-    tick();
-    const id = setInterval(tick, 30_000);
-    return () => clearInterval(id);
-  }, [tasksByDay]);
-
   /* ============== Week view: make the WEEK GRID itself scrollable ============== */
   const [anchorMondayISO, setAnchorMondayISO] = useState<string>(
     startOfWeekISO(fromISO(selectedISO))
@@ -335,8 +288,7 @@ export default function CalendarScreen({
     if (!el) return;
     const target = el.children[WSPAN] as HTMLElement | undefined;
     if (target) {
-      const left =
-        target.offsetLeft - (el.clientWidth - target.clientWidth) / 2;
+      const left = target.offsetLeft - (el.clientWidth - target.clientWidth) / 2;
       el.scrollTo({ left, top: 0, behavior: "auto" });
     }
     setStripIndex(WSPAN);
@@ -371,6 +323,206 @@ export default function CalendarScreen({
       }
     }
   };
+
+  /* ================= Add task (structured) ================= */
+  async function addTaskToSelected() {
+    if (!userId) return;
+    const title = newTitle.trim();
+    if (!title) return;
+
+    setAdding(true);
+    setErr(null);
+    try {
+      const category = newCat;
+      const category_color = colorOf(category);
+
+      let rows: Array<Partial<Task> & { user_id: string }> = [];
+
+      const buildRow = (iso: string) => {
+        if (timed) {
+          const dt = combineLocalDateTimeISO(iso, timeStr);
+          return {
+            user_id: userId,
+            title,
+            due_date: iso,
+            all_day: false,
+            due_time: `${timeStr}:00`,
+            due_at: dt.toISOString(),
+            duration_min: durationMin,
+            tz: userTz,
+            remind_before_min: remindBefore === "" ? null : [Number(remindBefore)],
+            priority: newPriority,
+            category,
+            category_color,
+            source: newFreq ? `calendar_repeat_${newFreq}` : "calendar_manual",
+          };
+        }
+        // all-day
+        return {
+          user_id: userId,
+          title,
+          due_date: iso,
+          all_day: true,
+          due_time: null,
+          due_at: null,
+          duration_min: null,
+          tz: userTz,
+          remind_before_min: null,
+          priority: newPriority,
+          category,
+          category_color,
+          source: newFreq ? `calendar_repeat_${newFreq}` : "calendar_manual",
+        };
+      };
+
+      if (!newFreq) {
+        rows = [buildRow(selectedISO)];
+      } else {
+        const count = REPEAT_COUNTS[newFreq];
+        rows = Array.from({ length: count }, (_, i) =>
+          buildRow(addInterval(selectedISO, newFreq, i))
+        );
+      }
+
+      const { data, error } = await supabase
+        .from("tasks")
+        .insert(rows as any)
+        .select();
+      if (error) throw error;
+
+      // Update local month cache
+      const first = toISO(firstDayOfMonth),
+        last = toISO(lastDayOfMonth);
+      setTasksByDay((prev) => {
+        const map = { ...prev };
+        for (const t of data as Task[]) {
+          const day = (t.due_date || "").slice(0, 10);
+          if (!day) continue;
+          if (day >= first && day <= last) {
+            (map[day] ||= []).push(t);
+          }
+        }
+        return map;
+      });
+
+      setNewTitle("");
+      setNewFreq("");
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  /* ================= Natural-language add ================= */
+  async function addNlp() {
+    if (!userId) return;
+    const raw = nlp.trim();
+    if (!raw) return;
+
+    setAddingNlp(true);
+    setErr(null);
+    try {
+      const parsed = parseNlp(raw, selectedISO);
+      if (!parsed.title) throw new Error("Please include a title.");
+      const category = parsed.category ?? "other";
+      const category_color = colorOf(category);
+
+      let rows: Array<Partial<Task> & { user_id: string }> = [];
+
+      if (parsed.occurrences && parsed.occurrences.length > 0) {
+        rows = parsed.occurrences.map((iso) => ({
+          user_id: userId,
+          title: parsed.title,
+          due_date: iso,
+          all_day: true,
+          priority: parsed.priority ?? 2,
+          category,
+          category_color,
+          source: parsed.source || "calendar_nlp",
+        }));
+      } else {
+        rows = [
+          {
+            user_id: userId,
+            title: parsed.title,
+            due_date: selectedISO,
+            all_day: true,
+            priority: parsed.priority ?? 2,
+            category,
+            category_color,
+            source: parsed.source || "calendar_nlp",
+          },
+        ];
+      }
+
+      const { data, error } = await supabase
+        .from("tasks")
+        .insert(rows as any)
+        .select();
+      if (error) throw error;
+
+      const first = toISO(firstDayOfMonth),
+        last = toISO(lastDayOfMonth);
+      setTasksByDay((prev) => {
+        const map = { ...prev };
+        for (const t of data as Task[]) {
+          const day = (t.due_date || "").slice(0, 10);
+          if (day && day >= first && day <= last) {
+            (map[day] ||= []).push(t);
+          }
+        }
+        return map;
+      });
+
+      setNlp("");
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setAddingNlp(false);
+    }
+  }
+
+  /* ================= Sorting ================= */
+  const dayTasks: Task[] = tasksByDay[selectedISO] || [];
+  const sortedDayTasks: Task[] = useMemo(() => {
+    const list = [...dayTasks];
+    const isTimed = (t: Task) => !t.all_day && !!t.due_time;
+
+    const cmpTime = (a: Task, b: Task) => {
+      const aTimed = isTimed(a);
+      const bTimed = isTimed(b);
+
+      if (aTimed && !bTimed) return -1;
+      if (!aTimed && bTimed) return 1;
+
+      if (aTimed && bTimed) {
+        const ta = a.due_time || "";
+        const tb = b.due_time || "";
+        if (ta !== tb) return ta.localeCompare(tb);
+      }
+
+      const ca = CAT_ORDER[a.category || "zz"] ?? 99;
+      const cb = CAT_ORDER[b.category || "zz"] ?? 99;
+      if (ca !== cb) return ca - cb;
+
+      const pa = a.priority ?? 2;
+      const pb = b.priority ?? 2;
+      if (pa !== pb) return pa - pb;
+
+      return (a.title || "").localeCompare(b.title || "");
+    };
+
+    const cmpCategory = (a: Task, b: Task) => {
+      const ca = CAT_ORDER[a.category || "zz"] ?? 99;
+      const cb = CAT_ORDER[b.category || "zz"] ?? 99;
+      if (ca !== cb) return ca - cb;
+      return cmpTime(a, b);
+    };
+
+    list.sort(sortMode === "category" ? cmpCategory : cmpTime);
+    return list;
+  }, [dayTasks, sortMode]);
 
   /* ================= UI (mobile-first) ================= */
   return (
@@ -523,7 +675,7 @@ export default function CalendarScreen({
           </div>
         )}
 
-        {/* Label (nice to keep, tiny) */}
+        {/* Label */}
         <strong style={{ fontSize: 14 }}>{monthLabel}</strong>
       </div>
 
@@ -941,7 +1093,7 @@ export default function CalendarScreen({
           <div className="muted">Nothing scheduled.</div>
         )}
         <ul className="list" style={{ margin: 0, padding: 0, listStyle: "none" }}>
-          {sortedDayTasks.map((t) => (
+          {sortedDayTasks.map((t: Task) => (
             <li
               key={t.id}
               className="item"
