@@ -3,35 +3,20 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 import BigGoalWizard from "./BigGoalWizard";
 
-/* ---------- Categories + colours (palette + legacy normalization) ---------- */
-const CATS = [
-  { key: "business",      label: "Business",      color: "#C7D2FE" }, // pastel indigo
-  { key: "financial",     label: "Financial",     color: "#A7F3D0" }, // pastel mint
-  { key: "health",        label: "Health",        color: "#99F6E4" }, // pastel teal
-  { key: "personal",      label: "Personal",      color: "#E9D5FF" }, // pastel purple
-  { key: "relationships", label: "Relationships", color: "#FECDD3" }, // pastel rose
-] as const;
-type CatKey = typeof CATS[number]["key"];
-const colorOf = (k: CatKey) => CATS.find(c => c.key === k)?.color || "#E5E7EB";
-const labelOf = (k: CatKey) => CATS.find(c => c.key === k)?.label || k;
-
-/** Map any stored/legacy/free-text category to one of our 5 keys */
-function normalizeCat(x: string | null | undefined): CatKey {
-  const s = (x || "").toLowerCase().trim();
-  if (s === "career") return "business";
-  if (s === "business") return "business";
-  if (s === "finance") return "financial";
-  if (s === "financial") return "financial";
-  if (s === "relationship") return "relationships";
-  if (s === "relationships") return "relationships";
-  if (s === "health") return "health";
-  if (s === "personal" || s === "personal_development") return "personal";
-  if (s === "other" || !s) return "personal"; // fold legacy/unknown into Personal
-  // default fallback
-  return "personal";
-}
+// ✅ Use the central category module (TS) + keep CSS as side-effect.
+//    If GoalsScreen.tsx is not directly under src/, adjust the relative path.
+import {
+  CATS,
+  colorOf,
+  labelOf,
+  normalizeCat,
+  type AllowedCategory,
+} from "./theme/categories";
+import "./theme.css";
 
 /* ---------- Types ---------- */
+type CatKey = AllowedCategory;
+
 type Goal = {
   id: number;
   user_id: string;
@@ -526,11 +511,11 @@ export default function GoalsScreen() {
 
           {/* Stacked distribution bar */}
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 999, overflow: "hidden", height: 12, display: "flex", marginTop: 6 }}>
-            {(CATS as any as {key:CatKey; color:string}[]).map(c => {
+            {(CATS as {key:CatKey; color:string; label:string}[]).map(c => {
               const pct = (balance.percents[c.key] || 0) * 100;
               if (pct <= 0) return null;
               return (
-                <div key={c.key} style={{ width: `${pct}%`, background: c.color, height: "100%" }} title={`${c.key}: ${Math.round(pct)}%`} />
+                <div key={c.key} style={{ width: `${pct}%`, background: c.color, height: "100%" }} title={`${c.label}: ${Math.round(pct)}%`} />
               );
             })}
           </div>
