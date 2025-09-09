@@ -1,5 +1,9 @@
+// src/WinsScreen.tsx
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
+
+// ✅ Use the shared theme (colors, category styles, utility classes)
+import "./theme.css";
 
 /* ---------- Types ---------- */
 type TaskRow = {
