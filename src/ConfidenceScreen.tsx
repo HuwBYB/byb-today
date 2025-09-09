@@ -524,7 +524,7 @@ function PatternButton({ current, setKey, k, label }:{
 }
 
 /* =========================================================
-   Affirmations — single column, colored by category
+   Affirmations — supports today's set, then persistent per-category defaults, else single line
    ========================================================= */
 type TodayAff = { category?: string; text: string };
 
@@ -540,26 +540,51 @@ function colorFor(cat?: string) {
 }
 
 function AffirmationsList({ running, onRep }:{ running:boolean; onRep:(text:string)=>void|Promise<void> }) {
+  // Keys
   const TODAY_KEY = `byb:confidence:today:${todayISO()}`;
   const FALLBACK_LS_KEY = "byb_affirmation";
 
   const [items, setItems] = useState<TodayAff[]>([]);
-  useEffect(() => {
+
+  // NEW: loader that prefers today's set, then per-category defaults, else nothing (fallback editor shows)
+  function loadAffirmationsForConfidence(): TodayAff[] {
+    // 1) Today's set override
     try {
       const arr = JSON.parse(localStorage.getItem(TODAY_KEY) || "[]");
       if (Array.isArray(arr) && arr.length) {
         const mapped = arr
           .map((a: any) => ({ text: String(a.text || "").trim(), category: a.category || undefined }))
           .filter((a) => a.text.length > 0)
-          .slice(0, 5);
-        setItems(mapped);
+          .slice(0, 8);
+        if (mapped.length) return mapped;
       }
     } catch {}
-  }, [TODAY_KEY]);
+
+    // 2) Persistent per-category defaults
+    const cats = ["business", "financial", "health", "personal", "relationships"];
+    const defaults: TodayAff[] = [];
+    for (const c of cats) {
+      try {
+        const t = (localStorage.getItem(`byb:affirmation:default:${c}`) || "").trim();
+        if (t) defaults.push({ category: c, text: t });
+      } catch {}
+    }
+    if (defaults.length) return defaults;
+
+    // 3) No set — fall back to single line editor below
+    return [];
+  }
+
+  useEffect(() => {
+    setItems(loadAffirmationsForConfidence());
+    // We intentionally do not add deps so it runs once per mount,
+    // and updates when the page is revisited after Builder saves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const hasSet = items.length > 0;
 
-  // Optional: speak through full list while timer runs
+  // Optional: speak through the list while timer runs
   const [speak, setSpeak] = useState(false);
   useEffect(() => {
     if (!speak || !hasSet) return;
@@ -579,7 +604,7 @@ function AffirmationsList({ running, onRep }:{ running:boolean; onRep:(text:stri
     return () => { try { window.speechSynthesis.cancel(); } catch {} };
   }, [speak, running, hasSet, items]);
 
-  // Fallback single line if no set exists
+  // Single-line fallback if no set/defaults exist
   const [singleText, setSingleText] = useState<string>(() => localStorage.getItem(FALLBACK_LS_KEY) || "I speak clearly and stay calm.");
   useEffect(() => { try { localStorage.setItem(FALLBACK_LS_KEY, singleText); } catch {} }, [singleText]);
 
@@ -620,7 +645,7 @@ function AffirmationsList({ running, onRep }:{ running:boolean; onRep:(text:stri
         </ul>
       ) : (
         <div style={{ display:"grid", gap:8 }}>
-          <div className="muted">No set for today — use the Builder, or use a single line below.</div>
+          <div className="muted">No set yet — create per-category defaults in the Affirmation Builder, or use a single line below.</div>
           <div
             style={{
               padding: 18,
