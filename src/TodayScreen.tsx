@@ -833,7 +833,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         overflowX: "hidden",
         width: "100%",
         maxWidth: "100vw",
-        padding: "12px 12px calc(72px + env(safe-area-inset-bottom,0))",
+        padding: "12px 12px calc(56px + env(safe-area-inset-bottom,0))", // reduced for bottom bar
       }}
     >
       {/* Top app bar */}
@@ -1007,26 +1007,70 @@ export default function TodayScreen({ externalDateISO }: Props) {
         )}
       </Section>
 
-      {/* Bottom action row: Boost (left) + Profile (right) */}
-      <div style={{ position: "fixed", left: 12, bottom: "calc(12px + env(safe-area-inset-bottom,0))", zIndex: 70 }}>
-        <button
-          className="btn-soft"
-          onClick={openBoost}
-          title="Need a Boost"
-          style={{ borderRadius: 999, padding: "10px 14px", boxShadow: "0 8px 20px rgba(0,0,0,.08)" }}
+      {/* ===== Fixed Bottom Bar: Boost (left) + Profile (right) ===== */}
+      <div
+        role="toolbar"
+        aria-label="Quick actions"
+        style={{
+          position: "fixed",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 70,
+          paddingBottom: "env(safe-area-inset-bottom,0)",
+          background: "#F9FAFB",
+          borderTop: "1px solid #e5e7eb",
+        }}
+      >
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            width: "100%",
+            maxWidth: "800px",
+            margin: "0 auto",
+            height: 44, // ~half of previous space
+          }}
         >
-          Need a Boost
-        </button>
-      </div>
-      <div style={{ position: "fixed", right: 12, bottom: "calc(12px + env(safe-area-inset-bottom,0))", zIndex: 70 }}>
-        <button
-          className="btn-soft"
-          onClick={async () => { await loadProfileIntoForm(); setProfileOpen(true); }}
-          title="Edit name & nicknames"
-          style={{ borderRadius: 999, padding: "10px 14px", boxShadow: "0 8px 20px rgba(0,0,0,.08)" }}
-        >
-          Profile
-        </button>
+          <button
+            onClick={openBoost}
+            title="Need a Boost"
+            aria-label="Need a Boost"
+            style={{
+              appearance: "none",
+              border: 0,
+              background: "#99F6E4", // pastel teal
+              color: "#000",          // black text
+              fontWeight: 700,
+              fontSize: 14,
+              lineHeight: "44px",
+              height: "100%",
+              width: "100%",
+              borderRight: "1px solid #ffffff88",
+            }}
+          >
+            ⚡ Need a Boost
+          </button>
+
+          <button
+            onClick={async () => { await loadProfileIntoForm(); setProfileOpen(true); }}
+            title="Profile"
+            aria-label="Profile"
+            style={{
+              appearance: "none",
+              border: 0,
+              background: "#E9D5FF", // pastel purple
+              color: "#000",          // black text
+              fontWeight: 700,
+              fontSize: 14,
+              lineHeight: "44px",
+              height: "100%",
+              width: "100%",
+            }}
+          >
+            👤 Profile
+          </button>
+        </div>
       </div>
 
       {/* Boost Modal */}
