@@ -1,23 +1,11 @@
 // src/BigGoalWizard.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
-
-/* -------- Unified categories + pastel colours -------- */
-export type AllowedCategory =
-  | "business"
-  | "financial"
-  | "health"
-  | "personal"
-  | "relationships";
-
-const CATS: ReadonlyArray<{ key: AllowedCategory; label: string; color: string }> = [
-  { key: "business",      label: "Business",      color: "#C7D2FE" }, // pastel indigo
-  { key: "financial",     label: "Financial",     color: "#A7F3D0" }, // pastel mint
-  { key: "health",        label: "Health",        color: "#99F6E4" }, // pastel teal
-  { key: "personal",      label: "Personal",      color: "#E9D5FF" }, // pastel purple
-  { key: "relationships", label: "Relationships", color: "#FECDD3" }, // pastel rose
-];
-const colorOf = (k: AllowedCategory) => CATS.find(c => c.key === k)?.color || "#e5e7eb";
+import {
+  CATS,
+  colorOf,
+  type AllowedCategory,
+} from "./theme/categories";
 
 /* -------- date helpers -------- */
 function toISO(d: Date) {
@@ -58,7 +46,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
 
   // form state
   const [title, setTitle] = useState("");
-  const [category, setCategory] = useState<AllowedCategory>("personal"); // default changed from "other"
+  const [category, setCategory] = useState<AllowedCategory>("personal");
   const [startDate, setStartDate] = useState(todayISO);
   const [targetDate, setTargetDate] = useState("");
   const [halfwayNote, setHalfwayNote] = useState("");
@@ -196,7 +184,7 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
           title: title.trim(),
           goal_type: "big",
           category,
-          category_color: catColor,
+          category_color: catColor, // stored for now, but UI always derives from palette
           start_date: startDate,
           target_date: targetDate,
           halfway_note: halfwayNote || null,
@@ -213,8 +201,8 @@ export default function BigGoalWizard({ onClose, onCreated }: BigGoalWizardProps
       if (end < start) throw new Error("Target date is before start date.");
 
       const tasks: any[] = [];
-      const cat = goal.category as AllowedCategory;
-      const col = goal.category_color as string;
+      const cat = (goal.category as AllowedCategory) || "personal";
+      const col = colorOf(cat); // ← derive from palette (ignore stored category_color)
 
       // Milestones
       tasks.push({
