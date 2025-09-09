@@ -3,6 +3,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
+// ✅ Pull categories from your central module (NOT from CSS)
+import {
+  colorOf,
+  normalizeCat,
+  type AllowedCategory,
+  // labelOf, CATS // (available if you need them later)
+} from "./theme/categories";
+// ✅ Keep your global CSS as a side-effect import
+import "./theme.css";
+
 /* =============================================
    BYB — Today Screen (Profile editor + Boost modal)
    ============================================= */
@@ -11,30 +21,6 @@ import { supabase } from "./lib/supabaseClient";
 const TOAST_LOGO_SRC = "/LogoButterfly.png"; // served from public/
 const TOAST_BG = "#D7F0FA";                   // match App banner
 const TOAST_BORDER = "#bfe5f3";               // subtle border to suit the bg
-
-/* ===== Category palette (banked) ===== */
-type AllowedCategory = "business" | "financial" | "health" | "personal" | "relationships";
-
-const CATS: ReadonlyArray<{ key: AllowedCategory; label: string; color: string }> = [
-  { key: "business",      label: "Business",      color: "#C7D2FE" }, // pastel indigo
-  { key: "financial",     label: "Financial",     color: "#A7F3D0" }, // pastel mint
-  { key: "health",        label: "Health",        color: "#99F6E4" }, // pastel teal
-  { key: "personal",      label: "Personal",      color: "#E9D5FF" }, // pastel purple
-  { key: "relationships", label: "Relationships", color: "#FECDD3" }, // pastel rose
-] as const;
-
-const colorOf = (k: AllowedCategory) => CATS.find(c => c.key === k)?.color || "#E5E7EB";
-
-/** Map any legacy/free-text category to one of our 5 keys */
-function normalizeCat(x: string | null | undefined): AllowedCategory {
-  const s = (x || "").toLowerCase().trim();
-  if (s === "career") return "business";
-  if (s === "finance") return "financial";
-  if (s === "relationship") return "relationships";
-  if (s === "business" || s === "financial" || s === "health" || s === "personal" || s === "relationships") return s as AllowedCategory;
-  // default bucket for unknown/legacy/empty
-  return "personal";
-}
 
 /* ===== Types ===== */
 type Task = {
@@ -47,7 +33,7 @@ type Task = {
   source: string | null;
   goal_id: number | null;
   completed_at: string | null;
-  // NEW: category fields for color dot
+  // category fields
   category?: string | null;
   category_color?: string | null;
 };
@@ -438,7 +424,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                     box-shadow:0 6px 14px rgba(108,140,255,.25); transform:translateZ(0); }
       .btn-primary:active{ transform:scale(.98); }
       .btn-soft{ background:#fff; border:1px solid var(--border); padding:8px 12px; border-radius:12px; }
-      .btn-ghost{ background:transparent; border:0; color:var(--muted); }
+      .btn-ghost{ background:transparent; border:0; color:#fff; }
       input,select,button{ max-width:100%; }
       input,select{ width:100%; border:1px solid var(--border); border-radius:10px; padding:10px 12px; background:#fff; }
       input[type="date"]{ width:100%; max-width:180px; }
