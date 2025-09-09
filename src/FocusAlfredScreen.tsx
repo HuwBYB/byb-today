@@ -1,3 +1,4 @@
+// src/FocusScreen.tsx
 import { useEffect, useRef, useState, type ReactNode, useMemo } from "react";
 import { supabase } from "./lib/supabaseClient";
 
@@ -19,6 +20,12 @@ function startOfWeekMondayISO() {
   d.setDate(d.getDate() - day);
   d.setHours(0, 0, 0, 0);
   return d.toISOString();
+}
+// NEW: small utils for editable numeric inputs
+function clamp(n: number, lo: number, hi: number) { return Math.min(hi, Math.max(lo, n)); }
+function parseIntSafe(s: string) {
+  const m = (s ?? "").match(/\d+/);
+  return m ? parseInt(m[0], 10) : NaN;
 }
 
 /* ---------- Presets ---------- */
@@ -204,6 +211,62 @@ export default function FocusScreen() {
   // preset state
   const [presetKey, setPresetKey] = useState<PresetKey>("pomodoro");
   const [custom, setCustom] = useState({ focusMin: 25, shortMin: 5, longMin: 15, cyclesBeforeLong: 4 });
+
+  // NEW: edit buffers (allow empty / free typing)
+  const [focusStr, setFocusStr]   = useState("");
+  const [shortStr, setShortStr]   = useState("");
+  const [longStr, setLongStr]     = useState("");
+  const [cyclesStr, setCyclesStr] = useState("");
+
+  // when entering custom, start with blanks
+  useEffect(() => {
+    if (presetKey === "custom") {
+      setFocusStr("");
+      setShortStr("");
+      setLongStr("");
+      setCyclesStr("");
+    }
+  }, [presetKey]);
+
+  // keep blanks in sync with current numbers if untouched
+  useEffect(() => {
+    if (presetKey !== "custom") return;
+    if (focusStr === "")  setFocusStr(String(custom.focusMin));
+    if (shortStr === "")  setShortStr(String(custom.shortMin));
+    if (longStr === "")   setLongStr(String(custom.longMin));
+    if (cyclesStr === "") setCyclesStr(String(custom.cyclesBeforeLong));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [custom]);
+
+  // commit handlers (validate ranges; focus max 240 = 4h)
+  function commitFocus() {
+    const n = parseIntSafe(focusStr);
+    if (isNaN(n)) { setFocusStr(String(custom.focusMin)); return; }
+    const v = clamp(n, 1, 240);
+    setCustom(c => ({ ...c, focusMin: v }));
+    setFocusStr(String(v));
+  }
+  function commitShort() {
+    const n = parseIntSafe(shortStr);
+    if (isNaN(n)) { setShortStr(String(custom.shortMin)); return; }
+    const v = clamp(n, 1, 180);
+    setCustom(c => ({ ...c, shortMin: v }));
+    setShortStr(String(v));
+  }
+  function commitLong() {
+    const n = parseIntSafe(longStr);
+    if (isNaN(n)) { setLongStr(String(custom.longMin)); return; }
+    const v = clamp(n, 1, 180);
+    setCustom(c => ({ ...c, longMin: v }));
+    setLongStr(String(v));
+  }
+  function commitCycles() {
+    const n = parseIntSafe(cyclesStr);
+    if (isNaN(n)) { setCyclesStr(String(custom.cyclesBeforeLong)); return; }
+    const v = clamp(n, 1, 12);
+    setCustom(c => ({ ...c, cyclesBeforeLong: v }));
+    setCyclesStr(String(v));
+  }
 
   const presets: Preset[] = useMemo(() => {
     const base = PRESETS_BASE.map(p => ({
@@ -470,6 +533,11 @@ export default function FocusScreen() {
 
   /* ====== controls ====== */
   async function start() {
+    // NEW: commit any uncommitted custom edits before starting
+    if (presetKey === "custom") {
+      commitFocus(); commitShort(); commitLong(); commitCycles();
+    }
+
     if (notifOn) await ensureNotifPermission().catch(()=>{});
     await requestWakeLock();
     const base = remaining > 0 ? remaining : durationFor(phase, currentPreset);
@@ -569,10 +637,65 @@ export default function FocusScreen() {
 
             {presetKey === "custom" && (
               <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
-                <label>Focus <input type="number" min={1} value={custom.focusMin} onChange={e => setCustom(c => ({ ...c, focusMin: Math.max(1, Number(e.target.value)||1) }))} style={{ width:60 }} /></label>
-                <label>Short <input type="number" min={1} value={custom.shortMin} onChange={e => setCustom(c => ({ ...c, shortMin: Math.max(1, Number(e.target.value)||1) }))} style={{ width:60 }} /></label>
-                <label>Long <input type="number" min={1} value={custom.longMin} onChange={e => setCustom(c => ({ ...c, longMin: Math.max(1, Number(e.target.value)||1) }))} style={{ width:60 }} /></label>
-                <label>Cycles <input type="number" min={1} value={custom.cyclesBeforeLong} onChange={e => setCustom(c => ({ ...c, cyclesBeforeLong: Math.max(1, Number(e.target.value)||1) }))} style={{ width:60 }} /></label>
+                <label>
+                  Focus{" "}
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="min"
+                    value={focusStr}
+                    onChange={e => setFocusStr(e.target.value)}
+                    onBlur={commitFocus}
+                    onKeyDown={e => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
+                    style={{ width:70 }}
+                    aria-label="Custom focus minutes (max 240)"
+                  />
+                </label>
+                <label>
+                  Short{" "}
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="min"
+                    value={shortStr}
+                    onChange={e => setShortStr(e.target.value)}
+                    onBlur={commitShort}
+                    onKeyDown={e => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
+                    style={{ width:70 }}
+                    aria-label="Custom short break minutes"
+                  />
+                </label>
+                <label>
+                  Long{" "}
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="min"
+                    value={longStr}
+                    onChange={e => setLongStr(e.target.value)}
+                    onBlur={commitLong}
+                    onKeyDown={e => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
+                    style={{ width:70 }}
+                    aria-label="Custom long break minutes"
+                  />
+                </label>
+                <label>
+                  Cycles{" "}
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="x"
+                    value={cyclesStr}
+                    onChange={e => setCyclesStr(e.target.value)}
+                    onBlur={commitCycles}
+                    onKeyDown={e => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
+                    style={{ width:70 }}
+                    aria-label="Cycles before long break"
+                  />
+                </label>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Focus max 240 min (4h)
+                </span>
               </div>
             )}
 
