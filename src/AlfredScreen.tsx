@@ -44,6 +44,13 @@ function colorOf(k: AllowedCategory) {
 /* ---------- Types ---------- */
 type ChatMessage = { role: "user" | "assistant"; content: string; ts: number };
 
+type Cadence = "none" | "daily" | "weekdays" | "weekly";
+type EvaStep = { title: string; why?: string; durationMins?: number; offsetDays?: number | null; cadence?: Cadence };
+type EvaPlan = {
+  id: string; area: AllowedCategory; title: string; summary?: string;
+  steps: EvaStep[]; suggestedCadence?: Cadence; estDays?: number; created_at: string;
+};
+
 /* ---------- Date helpers ---------- */
 const todayISO = () => {
   const d = new Date();
@@ -57,6 +64,17 @@ function fromISO(s: string) {
   const [y,m,d] = s.split("-").map(Number);
   return new Date(y,(m??1)-1,(d??1));
 }
+function addDaysISO(iso: string, n: number) {
+  const d = fromISO(iso); d.setDate(d.getDate()+n); return toISO(d);
+}
+function isWeekendDate(iso: string) {
+  const d = fromISO(iso); const dow = d.getDay(); return dow === 0 || dow === 6;
+}
+function nextWeekdayFrom(iso: string) {
+  let d = fromISO(iso);
+  while ([0,6].includes(d.getDay())) d.setDate(d.getDate()+1);
+  return toISO(d);
+}
 function halfwayDate(startISO: string, targetISO: string) {
   try {
     const s = fromISO(startISO); const t = fromISO(targetISO);
@@ -64,6 +82,7 @@ function halfwayDate(startISO: string, targetISO: string) {
     return toISO(new Date(mid.getFullYear(), mid.getMonth(), mid.getDate()));
   } catch { return null; }
 }
+const uid = () => Math.random().toString(36).slice(2,10);
 
 /* ---------- Local parsing helpers ---------- */
 function extractBullets(txt: string): string[] {
@@ -76,13 +95,32 @@ function extractBullets(txt: string): string[] {
   const sentences = txt.split(/(?<=[.!?])\s+/).map(s => s.trim());
   return sentences.filter(s => s.length > 0 && s.length <= 120);
 }
-function guessCadence(line: string): "daily" | "weekly" | "monthly" {
+function guessCadence(line: string): Cadence {
   const s = line.toLowerCase();
   if (/(daily|every day|each day|today)/.test(s)) return "daily";
-  if (/(weekly|every week|per week|on mondays|tuesdays|wednesdays|thursdays|fridays|saturdays|sundays)/.test(s)) return "weekly";
-  if (/(monthly|every month|per month)/.test(s)) return "monthly";
-  // heuristics: short habit-like → daily; longer project-like → weekly
+  if (/(weekly|every week|per week|on (mon|tue|wed|thu|fri|sat|sun))/i.test(s)) return "weekly";
+  if (/(weekdays|workdays|monday to friday)/.test(s)) return "weekdays";
   return line.split(/\s+/).length <= 6 ? "daily" : "weekly";
+}
+
+/* ---------- Expand cadence ---------- */
+function expandDates(baseISO: string, count: number, cadence: Cadence) {
+  if (cadence === "none") return Array(count).fill(baseISO);
+  const out: string[] = [];
+  if (cadence === "daily") {
+    for (let i=0;i<count;i++) out.push(addDaysISO(baseISO, i));
+  } else if (cadence === "weekly") {
+    for (let i=0;i<count;i++) out.push(addDaysISO(baseISO, 7*i));
+  } else if (cadence === "weekdays") {
+    let cursor = isWeekendDate(baseISO) ? nextWeekdayFrom(baseISO) : baseISO;
+    let d = fromISO(cursor);
+    while (out.length < count) {
+      const dow = d.getDay();
+      if (dow>=1 && dow<=5) out.push(toISO(d));
+      d.setDate(d.getDate()+1);
+    }
+  }
+  return out;
 }
 
 /* ---------- Minimal Modal ---------- */
@@ -104,6 +142,37 @@ function Modal({
       </div>
     </div>
   );
+}
+
+/* ---------- Try to parse EVA structured plan (JSON) ---------- */
+function parseEvaPlan(area: AllowedCategory, text: string): EvaPlan | null {
+  const raw = text.trim();
+  let obj: any = null;
+  try { obj = JSON.parse(raw); } catch {
+    const m = raw.match(/\{[\s\S]*\}$/); if (m) { try { obj = JSON.parse(m[0]); } catch {} }
+  }
+  if (!obj || !Array.isArray(obj.steps)) return null;
+  const steps: EvaStep[] = obj.steps
+    .map((s: any) => ({
+      title: String(s.title || "").trim(),
+      why: s.why ? String(s.why) : undefined,
+      durationMins: Number.isFinite(s.durationMins) ? Number(s.durationMins) : undefined,
+      offsetDays: Number.isFinite(s.offsetDays) ? Number(s.offsetDays) : 0,
+      cadence: (["none","daily","weekdays","weekly"].includes(s.cadence) ? s.cadence : undefined) as Cadence | undefined
+    }))
+    .filter((s: EvaStep) => !!s.title);
+  if (!steps.length) return null;
+  const plan: EvaPlan = {
+    id: uid(),
+    area,
+    title: String(obj.title || "Plan"),
+    summary: obj.summary ? String(obj.summary) : "",
+    steps,
+    suggestedCadence: (["none","daily","weekdays","weekly"].includes(obj.suggestedCadence) ? obj.suggestedCadence : undefined) as Cadence | undefined,
+    estDays: Number.isFinite(obj.estDays) ? Number(obj.estDays) : undefined,
+    created_at: new Date().toISOString(),
+  };
+  return plan;
 }
 
 /* =============================================
@@ -141,6 +210,17 @@ export default function AlfredScreen() {
   const [daily, setDaily]     = useState<string[]>([]);
   const [creatingGoal, setCreatingGoal] = useState(false);
 
+  // NEW: steps → tasks modal
+  const [stepsOpen, setStepsOpen] = useState(false);
+  const [plan, setPlan] = useState<EvaPlan | null>(null);
+  const [steps, setSteps] = useState<EvaStep[]>([]);
+  const [selected, setSelected] = useState<boolean[]>([]);
+  const [startDate, setStartDate] = useState<string>(() => nextWeekdayFrom(todayISO()));
+  const [cadence, setCadence] = useState<Cadence>("none");
+  const [respectOffsets, setRespectOffsets] = useState(true);
+  const [asChecklist, setAsChecklist] = useState(false);
+  const [pushing, setPushing] = useState(false);
+
   /* ----- auth ----- */
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
@@ -158,11 +238,12 @@ export default function AlfredScreen() {
     setInput("");
 
     try {
-      // nudge EVA to produce concise, actionable answers
+      // Hint EVA to be structured, but allow plain text too.
       const sysHint =
-        `Context: User category=${cat}. If advice implies one clear action, bullet it. ` +
-        `If it's a multi-step outcome, list 3–6 steps (tag daily/weekly/monthly implicitly). ` +
-        `Keep under ~10 bullets.`;
+        `Context: User category=${cat}. Prefer returning a concise, actionable answer. ` +
+        `If the request implies a multi-step outcome, you MAY return STRICT JSON only matching:
+{"title":string,"summary":string,"steps":[{"title":string,"why":string,"durationMins":number,"offsetDays":number}],"suggestedCadence":"none"|"daily"|"weekdays"|"weekly","estDays":number}
+Otherwise, return short bullet points (max ~8).`;
 
       const payload = {
         mode: "friend",
@@ -184,13 +265,33 @@ export default function AlfredScreen() {
       const aiMsg: ChatMessage = { role: "assistant", content: text || "(no reply)", ts: Date.now() };
       setMessages(prev => [...prev, aiMsg]);
 
-      // pre-fill quick creators from the new reply
-      const bullets = extractBullets(text);
-      if (bullets.length === 1) {
-        setTaskTitle(bullets[0]);
-      } else if (bullets.length > 1) {
-        setGoalTitle(q[0].toUpperCase() + q.slice(1));
-        fillStepsFrom(bullets);
+      // Try structured plan first; fallback to bullets
+      const maybePlan = parseEvaPlan(cat, text);
+      if (maybePlan) {
+        setPlan(maybePlan);
+        setSteps(maybePlan.steps);
+        setSelected(maybePlan.steps.map(()=>true));
+        setCadence(maybePlan.suggestedCadence || "none");
+      } else {
+        const bullets = extractBullets(text);
+        if (bullets.length === 1) {
+          setTaskTitle(bullets[0]);
+        } else if (bullets.length > 1) {
+          const convTitle =
+            q.length > 3 ? q[0].toUpperCase() + q.slice(1) : "New Plan";
+          setPlan({
+            id: uid(),
+            area: cat,
+            title: convTitle,
+            summary: "",
+            steps: bullets.map((b,i)=>({ title: b, offsetDays: i, cadence: guessCadence(b) })),
+            suggestedCadence: "weekly",
+            created_at: new Date().toISOString(),
+          });
+          setSteps(bullets.map((b,i)=>({ title: b, offsetDays: i, cadence: guessCadence(b) })));
+          setSelected(bullets.map(()=>true));
+          setCadence("weekly");
+        }
       }
     } catch (e:any) {
       setErr(e.message || String(e));
@@ -205,7 +306,7 @@ export default function AlfredScreen() {
       const c = guessCadence(b);
       if (c === "daily") d.push(b);
       else if (c === "weekly") w.push(b);
-      else m.push(b);
+      else m.push(b); // treat as monthly bucket if needed
     });
     setDaily(d.length ? d : []);
     setWeekly(w.length ? w : []);
@@ -289,9 +390,84 @@ export default function AlfredScreen() {
     }
   }
 
+  /* ----- steps → tasks (the glue) ----- */
+  async function pushStepsAsTasks() {
+    if (!userId || !plan) return;
+    const chosen = steps.filter((_,i)=>selected[i]);
+    if (!chosen.length) { setErr("Select at least one step."); return; }
+
+    setPushing(true); setErr(null);
+    try {
+      const category = plan.area ?? cat;
+      const category_color = colorOf(category as AllowedCategory);
+      const base = startDate || todayISO();
+
+      const rows: any[] = [];
+      if (asChecklist) {
+        const body = chosen.map(s => `□ ${s.title}${s.why ? ` — ${s.why}` : ""}`).join("\n");
+        rows.push({
+          user_id: userId,
+          title: `${plan.title || "Plan"} — checklist`,
+          due_date: base,
+          status: "pending",
+          priority: 0,
+          source: `eva:${plan.id}`,
+          goal_id: null,
+          category,
+          category_color,
+          // If you have a notes column in tasks, add: notes: body
+        });
+      } else {
+        if (respectOffsets) {
+          chosen.forEach((s, idx) => {
+            const off = typeof s.offsetDays === "number" ? Math.max(0, s.offsetDays) : idx;
+            const dueISO = addDaysISO(base, off);
+            rows.push({
+              user_id: userId,
+              title: s.title,
+              due_date: dueISO,
+              status: "pending",
+              priority: 0,
+              source: `eva:${plan.id}`,
+              goal_id: null,
+              category,
+              category_color,
+            });
+          });
+        } else {
+          // ignore offsets; use cadence sequence
+          const dates = expandDates(base, chosen.length, cadence);
+          chosen.forEach((s, idx) => {
+            rows.push({
+              user_id: userId,
+              title: s.title,
+              due_date: dates[idx] || base,
+              status: "pending",
+              priority: 0,
+              source: `eva:${plan.id}`,
+              goal_id: null,
+              category,
+              category_color,
+            });
+          });
+        }
+      }
+
+      const { error } = await supabase.from("tasks").insert(rows as any);
+      if (error) throw error;
+      setStepsOpen(false);
+      alert("Added to your Tasks.");
+    } catch (e:any) {
+      setErr(e.message || String(e));
+    } finally {
+      setPushing(false);
+    }
+  }
+
   /* ---------- UI helpers ---------- */
   const canOfferTask = actionItems.length === 1;
   const canOfferGoal = actionItems.length > 1;
+  const canOfferStepsToTasks = (plan && (plan.steps?.length ?? 0) > 0) || actionItems.length > 1;
 
   // keep modals in sync with suggestions
   useEffect(() => {
@@ -300,8 +476,17 @@ export default function AlfredScreen() {
       setTaskDue(todayISO());
     }
     if (canOfferGoal) {
-      setGoalTitle(messages.find(m => m.role === "user")?.content ?? "New Goal");
+      const lastUserQ = [...messages].reverse().find(m => m.role === "user")?.content ?? "New Goal";
+      setGoalTitle(lastUserQ[0].toUpperCase() + lastUserQ.slice(1));
       fillStepsFrom(actionItems);
+    }
+    // If we didn't get structured plan but have bullets, prep steps modal
+    if (!plan && actionItems.length > 1) {
+      const lastUserQ = [...messages].reverse().find(m => m.role === "user")?.content ?? "Plan";
+      const stepsList = actionItems.map((b,i)=>({ title: b, offsetDays: i, cadence: guessCadence(b) as Cadence }));
+      setPlan({ id: uid(), area: cat, title: lastUserQ[0].toUpperCase()+lastUserQ.slice(1), steps: stepsList, created_at: new Date().toISOString() });
+      setSteps(stepsList);
+      setSelected(stepsList.map(()=>true));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastAssistant]);
@@ -398,17 +583,22 @@ export default function AlfredScreen() {
       </div>
 
       {/* Action bar for last reply */}
-      {lastAssistant && (canOfferTask || canOfferGoal) && (
+      {lastAssistant && (
         <div className="card" style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
           <div className="muted">Make it real:</div>
-          {canOfferTask && (
+          {actionItems.length === 1 && (
             <button className="btn-primary" onClick={() => setAddTaskOpen(true)} style={{ borderRadius: 10 }}>
               Add as task
             </button>
           )}
-          {canOfferGoal && (
+          {actionItems.length > 1 && (
             <button className="btn-primary" onClick={() => setGoalOpen(true)} style={{ borderRadius: 10 }}>
               Create goal from these
+            </button>
+          )}
+          {(canOfferStepsToTasks) && (
+            <button className="btn-primary" onClick={() => setStepsOpen(true)} style={{ borderRadius: 10 }}>
+              Add steps as tasks
             </button>
           )}
         </div>
@@ -430,7 +620,8 @@ export default function AlfredScreen() {
               <div className="muted">Category</div>
               <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                 <select value={cat} onChange={e=>setCat(e.target.value as AllowedCategory)}>
-                  {CAT_LIST.map(c=> <option key={c.key} value={c.key}>{c.label}</option>)}
+                  {(["business","financial","health","personal","relationships"] as AllowedCategory[])
+                    .map(k=> <option key={k} value={k}>{CAT_LABELS[k]}</option>)}
                 </select>
                 <span style={{ width:14, height:14, borderRadius:999, background: colorOf(cat), border:"1px solid #d1d5db" }} />
               </div>
@@ -462,7 +653,8 @@ export default function AlfredScreen() {
               <div className="muted">Category</div>
               <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                 <select value={cat} onChange={e=>setCat(e.target.value as AllowedCategory)}>
-                  {CAT_LIST.map(c=> <option key={c.key} value={c.key}>{c.label}</option>)}
+                  {(["business","financial","health","personal","relationships"] as AllowedCategory[])
+                    .map(k=> <option key={k} value={k}>{CAT_LABELS[k]}</option>)}
                 </select>
                 <span style={{ width:14, height:14, borderRadius:999, background: colorOf(cat), border:"1px solid #d1d5db" }} />
               </div>
@@ -522,6 +714,72 @@ export default function AlfredScreen() {
             </button>
           </div>
         </div>
+      </Modal>
+
+      {/* NEW: Steps → Tasks Modal */}
+      <Modal open={stepsOpen} onClose={() => setStepsOpen(false)} title="Add steps as tasks">
+        {!plan || !steps.length ? (
+          <div className="muted">No steps detected yet — ask EVA for a multi-step plan.</div>
+        ) : (
+          <div style={{ display:"grid", gap:10 }}>
+            <div className="muted">Plan</div>
+            <div style={{ fontWeight: 700 }}>{plan.title}</div>
+            {!!plan.summary && <div className="muted">{plan.summary}</div>}
+
+            <div className="muted" style={{ marginTop:6 }}>Steps</div>
+            <ul style={{ listStyle:"none", padding:0, margin:0, display:"grid", gap:6 }}>
+              {steps.map((s, i) => (
+                <li key={i} style={{ display:"flex", gap:8, alignItems:"flex-start" }}>
+                  <input
+                    type="checkbox"
+                    checked={selected[i] ?? false}
+                    onChange={e=> setSelected(sel => sel.map((v,idx)=> idx===i ? e.target.checked : v))}
+                    style={{ marginTop: 4 }}
+                  />
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontWeight:600 }}>{s.title}</div>
+                    <div className="muted" style={{ fontSize:12 }}>
+                      {(typeof s.offsetDays === "number" ? `Offset ${s.offsetDays}d` : "")}
+                      {(s.cadence ? `${typeof s.offsetDays === "number" ? " · " : ""}${s.cadence}` : "")}
+                      {(s.why ? `${(s.cadence || typeof s.offsetDays==="number") ? " · " : ""}${s.why}` : "")}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+
+            <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", marginTop:8 }}>
+              <label>
+                <div className="muted">Start date</div>
+                <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} />
+              </label>
+              <label>
+                <div className="muted">Cadence</div>
+                <select value={cadence} onChange={e=>setCadence(e.target.value as Cadence)}>
+                  <option value="none">None (keep same date)</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekdays">Weekdays</option>
+                  <option value="weekly">Weekly</option>
+                </select>
+              </label>
+              <label style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
+                <input type="checkbox" checked={respectOffsets} onChange={e=>setRespectOffsets(e.target.checked)} />
+                Respect step offsets
+              </label>
+              <label style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
+                <input type="checkbox" checked={asChecklist} onChange={e=>setAsChecklist(e.target.checked)} />
+                Single checklist task
+              </label>
+            </div>
+
+            <div style={{ display:"flex", justifyContent:"flex-end", gap:8 }}>
+              <button className="btn-soft" onClick={()=>setStepsOpen(false)}>Cancel</button>
+              <button className="btn-primary" onClick={pushStepsAsTasks} disabled={pushing || !selected.some(Boolean)}>
+                {pushing ? "Adding…" : "Add tasks"}
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );
