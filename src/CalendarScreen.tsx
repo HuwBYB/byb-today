@@ -133,6 +133,7 @@ export default function CalendarScreen({
   const [newCat, setNewCat] = useState<CatKey>("other");
   const [newPriority, setNewPriority] = useState<number>(2);
   const [newFreq, setNewFreq] = useState<RepeatFreq>("");
+
   const [adding, setAdding] = useState(false);
 
   // time-based options
@@ -243,8 +244,24 @@ export default function CalendarScreen({
   function goToday() {
     const d = new Date();
     const iso = toISO(d);
+
     setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
     setSelectedISO(iso);
+
+    // Ensure the week strip recenters/snaps back when in week view
+    setAnchorMondayISO(startOfWeekISO(d));
+    if (viewMode === "week") {
+      requestAnimationFrame(() => {
+        const el = weekStripRef.current;
+        if (!el) return;
+        const target = el.children[WSPAN] as HTMLElement | undefined;
+        if (!target) return;
+        const left = target.offsetLeft - (el.clientWidth - target.clientWidth) / 2;
+        el.scrollTo({ left, top: 0, behavior: "smooth" });
+        setStripIndex(WSPAN);
+      });
+    }
+
     if (navigateOnSelect && onSelectDate) onSelectDate(iso);
   }
 
@@ -289,7 +306,7 @@ export default function CalendarScreen({
     const target = el.children[WSPAN] as HTMLElement | undefined;
     if (target) {
       const left = target.offsetLeft - (el.clientWidth - target.clientWidth) / 2;
-      el.scrollTo({ left, top: 0, behavior: "auto" });
+      el.scrollTo({ left, top: 0, behavior: "smooth" }); // smooth recenter
     }
     setStripIndex(WSPAN);
   }, [anchorMondayISO]);
@@ -902,17 +919,11 @@ export default function CalendarScreen({
             </span>
           </div>
 
-          {/* Sort toggle on its own line */}
+          {/* Sort toggle (no outline box + tiny gap) */}
           <div style={{ marginTop: 8 }}>
             <div
-              role="group"
               aria-label="Sort tasks"
-              style={{
-                display: "inline-flex",
-                border: "1px solid var(--border)",
-                borderRadius: 999,
-                overflow: "hidden",
-              }}
+              style={{ display: "inline-flex", gap: 4 }}
             >
               <button
                 onClick={() => setSortMode("time")}
@@ -921,6 +932,8 @@ export default function CalendarScreen({
                   padding: "6px 12px",
                   fontSize: 13,
                   background: sortMode === "time" ? "#eef2ff" : "#fff",
+                  border: "1px solid var(--border)",
+                  borderRadius: 999,
                   minWidth: 72,
                 }}
               >
@@ -933,7 +946,8 @@ export default function CalendarScreen({
                   padding: "6px 12px",
                   fontSize: 13,
                   background: sortMode === "category" ? "#eef2ff" : "#fff",
-                  borderLeft: "1px solid var(--border)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 999,
                   minWidth: 92,
                 }}
               >
