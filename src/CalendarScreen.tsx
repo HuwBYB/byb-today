@@ -30,8 +30,8 @@ type ViewMode = "month" | "week";
 const CATS = [
   { key: "personal", label: "Personal", color: "#a855f7" },
   { key: "health", label: "Health", color: "#22c55e" },
-  { key: "career", label: "Business", color: "#3b82f6" }, // stored as 'career'
-  { key: "financial", label: "Finance", color: "#f59e0b" }, // stored as 'financial'
+  { key: "career", label: "Business", color: "#3b82f6" },
+  { key: "financial", label: "Finance", color: "#f59e0b" },
   { key: "other", label: "Other", color: "#6b7280" },
 ] as const;
 type CatKey = (typeof CATS)[number]["key"];
@@ -58,6 +58,12 @@ const REPEAT_COUNTS: Record<Exclude<RepeatFreq, "">, number> = {
 
 // Only two modes per your request
 type SortMode = "time" | "category";
+
+/** widths tuned for small phones so the top row fits */
+const MONTH_MIN_W = 128;
+const YEAR_MIN_W = 96;
+const TOP_GAP = 8;
+const VIEW_TOGGLE_WIDTH = MONTH_MIN_W + YEAR_MIN_W + TOP_GAP; // aligns under the two selects
 
 export default function CalendarScreen({
   onSelectDate,
@@ -153,9 +159,7 @@ export default function CalendarScreen({
     () =>
       Array.from({ length: 12 }, (_, i) => ({
         value: i,
-        label: new Date(2000, i, 1).toLocaleString(undefined, {
-          month: "long",
-        }),
+        label: new Date(2000, i, 1).toLocaleString(undefined, { month: "long" }),
       })),
     []
   );
@@ -260,215 +264,8 @@ export default function CalendarScreen({
     return toISO(d);
   }
 
-  /* ===== Structured add ===== */
-  async function addTaskToSelected() {
-    if (!userId) return;
-    const title = newTitle.trim();
-    if (!title) return;
-
-    setAdding(true);
-    setErr(null);
-    try {
-      const category = newCat;
-      const category_color = colorOf(category);
-
-      let rows: Array<Partial<Task> & { user_id: string }> = [];
-
-      const buildRow = (iso: string) => {
-        if (timed) {
-          const dt = combineLocalDateTimeISO(iso, timeStr);
-          return {
-            user_id: userId,
-            title,
-            due_date: iso,
-            all_day: false,
-            due_time: `${timeStr}:00`,
-            due_at: dt.toISOString(),
-            duration_min: durationMin,
-            tz: userTz,
-            remind_before_min: remindBefore === "" ? null : [Number(remindBefore)],
-            priority: newPriority,
-            category,
-            category_color,
-            source: newFreq ? `calendar_repeat_${newFreq}` : "calendar_manual",
-          };
-        }
-        // all-day
-        return {
-          user_id: userId,
-          title,
-          due_date: iso,
-          all_day: true,
-          due_time: null,
-          due_at: null,
-          duration_min: null,
-          tz: userTz,
-          remind_before_min: null,
-          priority: newPriority,
-          category,
-          category_color,
-          source: newFreq ? `calendar_repeat_${newFreq}` : "calendar_manual",
-        };
-      };
-
-      if (!newFreq) {
-        rows = [buildRow(selectedISO)];
-      } else {
-        const count = REPEAT_COUNTS[newFreq];
-        rows = Array.from({ length: count }, (_, i) =>
-          buildRow(addInterval(selectedISO, newFreq, i))
-        );
-      }
-
-      const { data, error } = await supabase
-        .from("tasks")
-        .insert(rows as any)
-        .select();
-      if (error) throw error;
-
-      // Update local month cache
-      const first = toISO(firstDayOfMonth),
-        last = toISO(lastDayOfMonth);
-      setTasksByDay((prev) => {
-        const map = { ...prev };
-        for (const t of data as Task[]) {
-          const day = (t.due_date || "").slice(0, 10);
-          if (!day) continue;
-          if (day >= first && day <= last) {
-            (map[day] ||= []).push(t);
-          }
-        }
-        return map;
-      });
-
-      setNewTitle("");
-      setNewFreq("");
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
-      setAdding(false);
-    }
-  }
-
-  /* ================= Natural-language add ================= */
-  async function addNlp() {
-    if (!userId) return;
-    const raw = nlp.trim();
-    if (!raw) return;
-
-    setAddingNlp(true);
-    setErr(null);
-    try {
-      const parsed = parseNlp(raw, selectedISO);
-      if (!parsed.title) throw new Error("Please include a title.");
-      const category = parsed.category ?? "other";
-      const category_color = colorOf(category);
-
-      let rows: Array<Partial<Task> & { user_id: string }> = [];
-
-      if (parsed.occurrences && parsed.occurrences.length > 0) {
-        rows = parsed.occurrences.map((iso) => ({
-          user_id: userId,
-          title: parsed.title,
-          due_date: iso,
-          all_day: true, // NLP quick-add remains all-day for now
-          priority: parsed.priority ?? 2,
-          category,
-          category_color,
-          source: parsed.source || "calendar_nlp",
-        }));
-      } else {
-        rows = [
-          {
-            user_id: userId,
-            title: parsed.title,
-            due_date: selectedISO,
-            all_day: true,
-            priority: parsed.priority ?? 2,
-            category,
-            category_color,
-            source: parsed.source || "calendar_nlp",
-          },
-        ];
-      }
-
-      const { data, error } = await supabase
-        .from("tasks")
-        .insert(rows as any)
-        .select();
-      if (error) throw error;
-
-      // update month cache
-      const first = toISO(firstDayOfMonth),
-        last = toISO(lastDayOfMonth);
-      setTasksByDay((prev) => {
-        const map = { ...prev };
-        for (const t of data as Task[]) {
-          const day = (t.due_date || "").slice(0, 10);
-          if (day && day >= first && day <= last) {
-            (map[day] ||= []).push(t);
-          }
-        }
-        return map;
-      });
-
-      setNlp("");
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
-      setAddingNlp(false);
-    }
-  }
-
-  const dayTasks = tasksByDay[selectedISO] || [];
-
-  /* ================= Sorting ================= */
-  const sortedDayTasks = useMemo(() => {
-    const list = [...dayTasks];
-
-    const isTimed = (t: Task) => !t.all_day && !!t.due_time;
-
-    // Sort by time: timed first (earliest -> latest), then all-day.
-    const cmpTime = (a: Task, b: Task) => {
-      const aTimed = isTimed(a);
-      const bTimed = isTimed(b);
-
-      if (aTimed && !bTimed) return -1;
-      if (!aTimed && bTimed) return 1;
-
-      if (aTimed && bTimed) {
-        const ta = a.due_time || "";
-        const tb = b.due_time || "";
-        if (ta !== tb) return ta.localeCompare(tb); // "HH:MM:SS" lexicographic works
-      }
-
-      // both all-day or same time: fallbacks
-      const ca = CAT_ORDER[a.category || "zz"] ?? 99;
-      const cb = CAT_ORDER[b.category || "zz"] ?? 99;
-      if (ca !== cb) return ca - cb;
-
-      const pa = a.priority ?? 2;
-      const pb = b.priority ?? 2;
-      if (pa !== pb) return pa - pb;
-
-      return (a.title || "").localeCompare(b.title || "");
-    };
-
-    // Category sort: group by category, then use cmpTime within group
-    const cmpCategory = (a: Task, b: Task) => {
-      const ca = CAT_ORDER[a.category || "zz"] ?? 99;
-      const cb = CAT_ORDER[b.category || "zz"] ?? 99;
-      if (ca !== cb) return ca - cb;
-      return cmpTime(a, b);
-    };
-
-    list.sort(sortMode === "category" ? cmpCategory : cmpTime);
-    return list;
-  }, [dayTasks, sortMode]);
-
   /* ================= In-app reminders (local) ================= */
   const notifiedRef = useRef<Set<string>>(new Set());
-
   useEffect(() => {
     if (!("Notification" in window)) return;
 
@@ -515,11 +312,9 @@ export default function CalendarScreen({
   }, [tasksByDay]);
 
   /* ============== Week view: make the WEEK GRID itself scrollable ============== */
-  // Center the strip around the Monday of the selected date’s week.
   const [anchorMondayISO, setAnchorMondayISO] = useState<string>(
     startOfWeekISO(fromISO(selectedISO))
   );
-
   useEffect(() => {
     setAnchorMondayISO(startOfWeekISO(fromISO(selectedISO)));
   }, [selectedISO]);
@@ -535,7 +330,6 @@ export default function CalendarScreen({
   const weekStripRef = useRef<HTMLDivElement | null>(null);
   const [stripIndex, setStripIndex] = useState<number>(WSPAN);
 
-  // Keep the middle panel in view when the anchor changes (or on mount)
   useEffect(() => {
     const el = weekStripRef.current;
     if (!el) return;
@@ -568,12 +362,10 @@ export default function CalendarScreen({
 
     if (bestIdx !== stripIndex) {
       setStripIndex(bestIdx);
-      // Keep month cursor roughly in sync with the week now in view
       const mondayIso = weekPanels[bestIdx];
       const dd = fromISO(mondayIso);
       setCursor(new Date(dd.getFullYear(), dd.getMonth(), 1));
 
-      // If user nears the ends, recenter around that monday to allow endless scroll
       if (bestIdx <= 2 || bestIdx >= kids.length - 3) {
         setAnchorMondayISO(mondayIso);
       }
@@ -584,93 +376,90 @@ export default function CalendarScreen({
   return (
     <div style={{ display: "grid", gap: 12, padding: 12 }}>
       {/* Title & top controls */}
-      <div
-        className="card"
-        style={{ position: "relative", display: "grid", gap: 10, padding: 12 }}
-      >
+      <div className="card" style={{ display: "grid", gap: 10, padding: 12 }}>
         <h1 style={{ margin: 0, fontSize: 20 }}>Calendar</h1>
 
-        {/* Row: Left controls + View toggle (stack on mobile) */}
+        {/* --- TOP ROW: Today + Month + Year (single line on mobile) --- */}
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "1fr auto",
-            gap: 8,
+            display: "flex",
+            alignItems: "center",
+            gap: TOP_GAP,
+            flexWrap: "nowrap",
+            overflow: "hidden",
           }}
         >
-          <div
-            style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+          <button
+            onClick={goToday}
+            title="Go to today"
+            aria-label="Go to today"
+            style={{
+              minWidth: 64,
+              height: 40,
+              padding: "0 12px",
+              borderRadius: 10,
+              border: "1px solid var(--border)",
+              background: "#fff",
+              fontWeight: 700,
+              flex: "0 0 auto",
+            }}
           >
-            <button
-              onClick={goToday}
-              title="Go to today"
-              aria-label="Go to today"
-              style={{
-                minWidth: 64,
-                height: 40,
-                padding: "0 12px",
-                borderRadius: 10,
-                border: "1px solid var(--border)",
-                background: "#fff",
-                fontWeight: 700,
-              }}
-            >
-              Today
-            </button>
+            Today
+          </button>
 
-            {/* Month + Year dropdowns */}
-            <select
-              value={cursor.getMonth()}
-              onChange={(e) =>
-                setCursor(new Date(cursor.getFullYear(), Number(e.target.value), 1))
-              }
-              title="Month"
-              style={{
-                height: 40,
-                borderRadius: 10,
-                padding: "0 10px",
-                minWidth: 140,
-                fontSize: 14,
-              }}
-            >
-              {months.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-            <select
-              value={cursor.getFullYear()}
-              onChange={(e) =>
-                setCursor(new Date(Number(e.target.value), cursor.getMonth(), 1))
-              }
-              title="Year"
-              style={{
-                height: 40,
-                borderRadius: 10,
-                padding: "0 10px",
-                minWidth: 110,
-                fontSize: 14,
-              }}
-            >
-              {years.map((y) => (
-                <option key={y} value={y}>
-                  {y}
-                </option>
-              ))}
-            </select>
+          {/* Month + Year dropdowns */}
+          <select
+            value={cursor.getMonth()}
+            onChange={(e) =>
+              setCursor(new Date(cursor.getFullYear(), Number(e.target.value), 1))
+            }
+            title="Month"
+            style={{
+              height: 40,
+              borderRadius: 10,
+              padding: "0 10px",
+              minWidth: MONTH_MIN_W,
+              fontSize: 14,
+              flex: "0 0 auto",
+            }}
+          >
+            {months.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <select
+            value={cursor.getFullYear()}
+            onChange={(e) =>
+              setCursor(new Date(Number(e.target.value), cursor.getMonth(), 1))
+            }
+            title="Year"
+            style={{
+              height: 40,
+              borderRadius: 10,
+              padding: "0 10px",
+              minWidth: YEAR_MIN_W,
+              fontSize: 14,
+              flex: "0 0 auto",
+            }}
+          >
+            {years.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+        </div>
 
-            <strong style={{ marginLeft: 4, fontSize: 14 }}>{monthLabel}</strong>
-          </div>
-
-          {/* View toggle — two separate buttons, slight gap, sized to match the selects */}
+        {/* --- UNDERNEATH: Month / Week toggle (separate buttons with a gap) --- */}
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <div
             aria-label="View mode"
             style={{
               display: "flex",
               gap: 8,
-              width: "calc(140px + 110px + 8px)", // visually matches the Month+Year selects
-              justifyContent: "flex-end",
+              width: VIEW_TOGGLE_WIDTH,
             }}
           >
             <button
@@ -733,6 +522,9 @@ export default function CalendarScreen({
             </div>
           </div>
         )}
+
+        {/* Label (nice to keep, tiny) */}
+        <strong style={{ fontSize: 14 }}>{monthLabel}</strong>
       </div>
 
       {/* Weekday header (Mon..Sun) */}
