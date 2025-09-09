@@ -1,31 +1,17 @@
+// src/VisionBoardScreen.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-/* ---------- Categories (banked) ---------- */
-export type AllowedCategory = "business" | "financial" | "health" | "personal" | "relationships";
+// ✅ Use the central categories module (TypeScript)
+import {
+  CATS,
+  colorOf,
+  normalizeCat,
+  type AllowedCategory,
+} from "./theme/categories";
 
-const CATS: ReadonlyArray<{ key: AllowedCategory; label: string; color: string }> = [
-  { key: "business",      label: "Business",      color: "#C7D2FE" }, // pastel indigo
-  { key: "financial",     label: "Financial",     color: "#A7F3D0" }, // pastel mint
-  { key: "health",        label: "Health",        color: "#99F6E4" }, // pastel teal
-  { key: "personal",      label: "Personal",      color: "#E9D5FF" }, // pastel purple
-  { key: "relationships", label: "Relationships", color: "#FECDD3" }, // pastel rose
-] as const;
-
-const colorOf = (k: AllowedCategory) => CATS.find(s => s.key === k)?.color || "#E5E7EB";
-
-/** Map any legacy/free-text section to our 5 allowed categories */
-function normalizeCat(x: string | null | undefined): AllowedCategory {
-  const s = (x || "").toLowerCase().trim();
-  if (s === "career") return "business";
-  if (s === "finance") return "financial";
-  if (s === "relationship") return "relationships";
-  if (s === "other" || s === "" || !s) return "personal";
-  if ((["business","financial","health","personal","relationships"] as const).includes(s as any)) {
-    return s as AllowedCategory;
-  }
-  return "personal";
-}
+// ✅ Bring in your global styles (side-effect import; no named exports)
+import "./theme.css";
 
 /* ---------- Storage ---------- */
 const VISION_BUCKET = "vision";
