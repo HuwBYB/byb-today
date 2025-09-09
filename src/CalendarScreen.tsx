@@ -9,7 +9,7 @@ import {
   labelOf,
   normalizeCat,
   type AllowedCategory,
-} from "src/theme.css"; // <-- update this path if your file lives elsewhere
+} from "./theme/categories"; // <-- update this path if your file lives elsewhere
 
 /* ===================== Types ===================== */
 type Task = {
