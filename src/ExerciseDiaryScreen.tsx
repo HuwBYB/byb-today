@@ -1545,13 +1545,12 @@ function CardioSummary({ item }: { item: Item }) {
 
 /* ---------- Quick Add (updated) ---------- */
 function QuickAddCard({
-  onAddWeights, onAddCardio, onOpenLoadTemplate, onOpenSaveTemplate, onCompleteSession
+ onAddWeights, onAddCardio, onOpenLoadTemplate, onOpenSaveTemplate
 }: {
   onAddWeights: (name: string) => void;
   onAddCardio: (kind: Item["kind"], title: string, distanceKm: number | null, mmss: string) => void;
   onOpenLoadTemplate: () => void;
   onOpenSaveTemplate: () => void;
-  onCompleteSession: () => void;
 }) {
   const [kind, setKind] = useState<Item["kind"]>("weights");
   const [title, setTitle] = useState("");
