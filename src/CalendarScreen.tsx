@@ -970,7 +970,7 @@ export default function CalendarScreen({
               if (e.key === "Enter" && nlp.trim() && !addingNlp) addNlp();
             }}
           />
-          <button
+      
           <button
   className="btn-primary"
   onClick={addNlp}
@@ -1049,29 +1049,45 @@ export default function CalendarScreen({
             Timed
           </label>
 
-          {timed && (
-            <>
-       /* ===================== Digital time picker (hours + minutes) ===================== */
-function DigitalTimePicker({
-  value,
-  onChange,
-  minuteStep = 5,
-}: {
-  value: string; // "HH:MM"
-  onChange: (v: string) => void;
-  minuteStep?: number;
-}) {
-  const [h, m] = value.split(":").map((n) => Number(n) || 0);
-  const hours = Array.from({ length: 24 }, (_, i) => i);
-  const minutes = Array.from(
-    { length: Math.floor(60 / minuteStep) },
-    (_, i) => i * minuteStep
-  );
+      {timed && (
+  <>
+    <DigitalTimePicker value={timeStr} onChange={setTimeStr} minuteStep={5} />
 
-  const update = (hh: number, mm: number) => {
-    const v = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
-    onChange(v);
-  };
+    <DurationPicker
+      h={durationH}
+      m={durationM}
+      onChange={(hh, mm) => {
+        setDurationH(hh);
+        setDurationM(mm);
+      }}
+    />
+
+    <select
+      value={remindBefore === "" ? "" : String(remindBefore)}
+      onChange={(e) => setRemindBefore(e.target.value === "" ? "" : Number(e.target.value))}
+      title="Reminder"
+      style={{ height: 40, borderRadius: 10, padding: "0 8px" }}
+    >
+      <option value="">No reminder</option>
+      <option value="0">At time</option>
+      <option value="1">1 min before</option>
+      <option value="5">5 min before</option>
+      <option value="10">10 min before</option>
+      <option value="15">15 min before</option>
+      <option value="30">30 min before</option>
+      <option value="60">1 hour before</option>
+    </select>
+  </>
+)}
+function DurationPicker({
+  h, m, onChange,
+}: {
+  h: number;
+  m: number;
+  onChange: (h: number, m: number) => void;
+}) {
+  const hours = Array.from({ length: 13 }, (_, i) => i); // 0..12h
+  const minutes = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
 
   return (
     <div
@@ -1085,18 +1101,19 @@ function DigitalTimePicker({
         background: "#fff",
         height: 40,
       }}
-      aria-label="Time picker"
+      aria-label="Duration"
       role="group"
+      title="Duration"
     >
       <select
         aria-label="Hours"
         value={h}
-        onChange={(e) => update(Number(e.target.value), m)}
+        onChange={(e) => onChange(Number(e.target.value), m)}
         style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
       >
         {hours.map((hr) => (
           <option key={hr} value={hr}>
-            {String(hr).padStart(2, "0")}
+            {hr}h
           </option>
         ))}
       </select>
@@ -1104,12 +1121,12 @@ function DigitalTimePicker({
       <select
         aria-label="Minutes"
         value={m}
-        onChange={(e) => update(h, Number(e.target.value))}
+        onChange={(e) => onChange(h, Number(e.target.value))}
         style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
       >
         {minutes.map((mm) => (
           <option key={mm} value={mm}>
-            {String(mm).padStart(2, "0")}
+            {String(mm).padStart(2, "0")}m
           </option>
         ))}
       </select>
@@ -1172,7 +1189,6 @@ function DurationPicker({
     </div>
   );
 }
-
 
               <select
                 value={remindBefore === "" ? "" : String(remindBefore)}
