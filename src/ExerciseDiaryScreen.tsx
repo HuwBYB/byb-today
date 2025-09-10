@@ -1153,8 +1153,7 @@ function openRecentSession(s: Session) {
                     onAddCardio={(kind, title, km, mmss) => addCardio(kind, title, km, mmss)}
                     onOpenLoadTemplate={openLoadTemplate}
                     onOpenSaveTemplate={openTemplateModal}
-                    onCompleteSession={openConfirmComplete}
-                  />
+                                      />
                 </div>
 
                 {/* Items */}
