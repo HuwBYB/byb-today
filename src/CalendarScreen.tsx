@@ -1051,13 +1051,73 @@ export default function CalendarScreen({
 
           {timed && (
             <>
-        <DigitalTimePicker value={timeStr} onChange={setTimeStr} minuteStep={5} />
-<DurationPicker
-  h={durationH}
-  m={durationM}
-  onChange={(hh, mm) => { setDurationH(hh); setDurationM(mm); }}
-/>
-              /* ===================== Duration (hours + minutes) ===================== */
+       /* ===================== Digital time picker (hours + minutes) ===================== */
+function DigitalTimePicker({
+  value,
+  onChange,
+  minuteStep = 5,
+}: {
+  value: string; // "HH:MM"
+  onChange: (v: string) => void;
+  minuteStep?: number;
+}) {
+  const [h, m] = value.split(":").map((n) => Number(n) || 0);
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const minutes = Array.from(
+    { length: Math.floor(60 / minuteStep) },
+    (_, i) => i * minuteStep
+  );
+
+  const update = (hh: number, mm: number) => {
+    const v = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+    onChange(v);
+  };
+
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "4px 8px",
+        border: "1px solid var(--border)",
+        borderRadius: 10,
+        background: "#fff",
+        height: 40,
+      }}
+      aria-label="Time picker"
+      role="group"
+    >
+      <select
+        aria-label="Hours"
+        value={h}
+        onChange={(e) => update(Number(e.target.value), m)}
+        style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
+      >
+        {hours.map((hr) => (
+          <option key={hr} value={hr}>
+            {String(hr).padStart(2, "0")}
+          </option>
+        ))}
+      </select>
+      <span style={{ fontWeight: 700, lineHeight: "32px" }}>:</span>
+      <select
+        aria-label="Minutes"
+        value={m}
+        onChange={(e) => update(h, Number(e.target.value))}
+        style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
+      >
+        {minutes.map((mm) => (
+          <option key={mm} value={mm}>
+            {String(mm).padStart(2, "0")}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/* ===================== Duration (hours + minutes) ===================== */
 function DurationPicker({
   h, m, onChange,
 }: {
@@ -1112,6 +1172,7 @@ function DurationPicker({
     </div>
   );
 }
+
 
               <select
                 value={remindBefore === "" ? "" : String(remindBefore)}
