@@ -135,8 +135,8 @@ export default function CalendarScreen({
   // time-based options
   const [timed, setTimed] = useState(false); // all-day by default
   const [timeStr, setTimeStr] = useState("09:00"); // "HH:MM"
-  const [durationH, setDurationH] = useState<number>(1);  // default 1 hour
-  const [durationM, setDurationM] = useState<number>(0);  // default 0 minutes
+  const [durationH, setDurationH] = useState<number>(1); // default 1 hour
+  const [durationM, setDurationM] = useState<number>(0); // default 0 minutes
   const [remindBefore, setRemindBefore] = useState<number | "">(""); // minutes before ("" = none)
   const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
@@ -514,7 +514,7 @@ export default function CalendarScreen({
 
       if (aTimed && bTimed) {
         const ta = a.due_time || "";
-        const tb = b.due_time || "";
+               const tb = b.due_time || "";
         if (ta !== tb) return ta.localeCompare(tb);
       }
 
@@ -970,15 +970,14 @@ export default function CalendarScreen({
               if (e.key === "Enter" && nlp.trim() && !addingNlp) addNlp();
             }}
           />
-      
           <button
-  className="btn-primary"
-  onClick={addNlp}
-  disabled={!nlp.trim() || addingNlp}
-  style={{ borderRadius: 10, height: 40, padding: "0 14px" }}
->
-  {addingNlp ? "Adding…" : "Quick add"}
-</button>
+            className="btn-primary"
+            onClick={addNlp}
+            disabled={!nlp.trim() || addingNlp}
+            style={{ borderRadius: 10, height: 40, padding: "0 14px" }}
+          >
+            {addingNlp ? "Adding…" : "Quick add"}
+          </button>
         </div>
 
         {/* Structured add */}
@@ -996,8 +995,7 @@ export default function CalendarScreen({
               flex: "1 1 200px",
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && newTitle.trim() && !adding)
-                addTaskToSelected();
+              if (e.key === "Enter" && newTitle.trim() && !adding) addTaskToSelected();
             }}
           />
           <select
@@ -1049,146 +1047,18 @@ export default function CalendarScreen({
             Timed
           </label>
 
-      {timed && (
-  <>
-    <DigitalTimePicker value={timeStr} onChange={setTimeStr} minuteStep={5} />
+          {timed && (
+            <>
+              <DigitalTimePicker value={timeStr} onChange={setTimeStr} minuteStep={5} />
 
-    <DurationPicker
-      h={durationH}
-      m={durationM}
-      onChange={(hh, mm) => {
-        setDurationH(hh);
-        setDurationM(mm);
-      }}
-    />
-
-    <select
-      value={remindBefore === "" ? "" : String(remindBefore)}
-      onChange={(e) => setRemindBefore(e.target.value === "" ? "" : Number(e.target.value))}
-      title="Reminder"
-      style={{ height: 40, borderRadius: 10, padding: "0 8px" }}
-    >
-      <option value="">No reminder</option>
-      <option value="0">At time</option>
-      <option value="1">1 min before</option>
-      <option value="5">5 min before</option>
-      <option value="10">10 min before</option>
-      <option value="15">15 min before</option>
-      <option value="30">30 min before</option>
-      <option value="60">1 hour before</option>
-    </select>
-  </>
-)}
-function DurationPicker({
-  h, m, onChange,
-}: {
-  h: number;
-  m: number;
-  onChange: (h: number, m: number) => void;
-}) {
-  const hours = Array.from({ length: 13 }, (_, i) => i); // 0..12h
-  const minutes = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
-
-  return (
-    <div
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "4px 8px",
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        background: "#fff",
-        height: 40,
-      }}
-      aria-label="Duration"
-      role="group"
-      title="Duration"
-    >
-      <select
-        aria-label="Hours"
-        value={h}
-        onChange={(e) => onChange(Number(e.target.value), m)}
-        style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
-      >
-        {hours.map((hr) => (
-          <option key={hr} value={hr}>
-            {hr}h
-          </option>
-        ))}
-      </select>
-      <span style={{ fontWeight: 700, lineHeight: "32px" }}>:</span>
-      <select
-        aria-label="Minutes"
-        value={m}
-        onChange={(e) => onChange(h, Number(e.target.value))}
-        style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
-      >
-        {minutes.map((mm) => (
-          <option key={mm} value={mm}>
-            {String(mm).padStart(2, "0")}m
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
-/* ===================== Duration (hours + minutes) ===================== */
-function DurationPicker({
-  h, m, onChange,
-}: {
-  h: number;
-  m: number;
-  onChange: (h: number, m: number) => void;
-}) {
-  const hours = Array.from({ length: 13 }, (_, i) => i); // 0..12h
-  const minutes = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
-
-  return (
-    <div
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "4px 8px",
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        background: "#fff",
-        height: 40,
-      }}
-      aria-label="Duration"
-      role="group"
-      title="Duration"
-    >
-      <select
-        aria-label="Hours"
-        value={h}
-        onChange={(e) => onChange(Number(e.target.value), m)}
-        style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
-      >
-        {hours.map((hr) => (
-          <option key={hr} value={hr}>
-            {hr}h
-          </option>
-        ))}
-      </select>
-      <span style={{ fontWeight: 700, lineHeight: "32px" }}>:</span>
-      <select
-        aria-label="Minutes"
-        value={m}
-        onChange={(e) => onChange(h, Number(e.target.value))}
-        style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
-      >
-        {minutes.map((mm) => (
-          <option key={mm} value={mm}>
-            {String(mm).padStart(2, "0")}m
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
+              <DurationPicker
+                h={durationH}
+                m={durationM}
+                onChange={(hh, mm) => {
+                  setDurationH(hh);
+                  setDurationM(mm);
+                }}
+              />
 
               <select
                 value={remindBefore === "" ? "" : String(remindBefore)}
@@ -1210,14 +1080,14 @@ function DurationPicker({
             </>
           )}
 
-        <button
-  className="btn-primary"
-  onClick={addTaskToSelected}
-  disabled={!newTitle.trim() || adding}
-  style={{ borderRadius: 10, height: 40, padding: "0 14px" }}
->
-  {adding ? "Adding…" : "Add task"}
-</button>
+          <button
+            className="btn-primary"
+            onClick={addTaskToSelected}
+            disabled={!newTitle.trim() || adding}
+            style={{ borderRadius: 10, height: 40, padding: "0 14px" }}
+          >
+            {adding ? "Adding…" : "Add task"}
+          </button>
         </div>
 
         {sortedDayTasks.length === 0 && !loading && (
@@ -1348,6 +1218,64 @@ function DigitalTimePicker({
   );
 }
 
+/* ===================== Duration (hours + minutes) ===================== */
+function DurationPicker({
+  h,
+  m,
+  onChange,
+}: {
+  h: number;
+  m: number;
+  onChange: (h: number, m: number) => void;
+}) {
+  const hours = Array.from({ length: 13 }, (_, i) => i); // 0..12h
+  const minutes = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "4px 8px",
+        border: "1px solid var(--border)",
+        borderRadius: 10,
+        background: "#fff",
+        height: 40,
+      }}
+      aria-label="Duration"
+      role="group"
+      title="Duration"
+    >
+      <select
+        aria-label="Hours"
+        value={h}
+        onChange={(e) => onChange(Number(e.target.value), m)}
+        style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
+      >
+        {hours.map((hr) => (
+          <option key={hr} value={hr}>
+            {hr}h
+          </option>
+        ))}
+      </select>
+      <span style={{ fontWeight: 700, lineHeight: "32px" }}>:</span>
+      <select
+        aria-label="Minutes"
+        value={m}
+        onChange={(e) => onChange(h, Number(e.target.value))}
+        style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
+      >
+        {minutes.map((mm) => (
+          <option key={mm} value={mm}>
+            {String(mm).padStart(2, "0")}m
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 /* ===================== helpers ===================== */
 function combineLocalDateTimeISO(dateISO: string, hhmm: string) {
   return new Date(`${dateISO}T${hhmm}:00`);
@@ -1370,7 +1298,9 @@ function parseNlp(
   let priority: number | undefined = undefined;
 
   // Accept legacy tags and let normalizeCat unify them
-  const catMatch = s.match(/#(personal|health|career|business|financial|relationship|relationships|other)\b/i);
+  const catMatch = s.match(
+    /#(personal|health|career|business|financial|relationship|relationships|other)\b/i
+  );
   if (catMatch) {
     category = catMatch[1];
     s = s.replace(catMatch[0], " ");
