@@ -196,6 +196,8 @@ export default function ExerciseDiaryScreen() {
 
   // undo last template insert
   const [undoBanner, setUndoBanner] = useState<{ itemIds: number[] } | null>(null);
+  // allow cancelling right after reopen (even if items exist)
+const [justReopened, setJustReopened] = useState(false);
 
   // === NEW: Persist/restore scroll per active session+date
   const scrollKey = session ? `byb:exercise_scroll:${session.id}:${dateISO}` : "";
@@ -380,6 +382,7 @@ export default function ExerciseDiaryScreen() {
       await loadItems(newS.id);
       await loadRecent();
       setScrollToQuickAdd(true);
+      setJustReopened(false); // new session, not a reopened one
     } catch (e: any) { setErr(e.message || String(e)); }
     finally { setBusy(false); }
   }
@@ -389,54 +392,70 @@ export default function ExerciseDiaryScreen() {
     localStorage.setItem(FIN_KEY(session.id, dateISO), "1");
     setFinished(true);
   }
-  function reopenSession() {
-    if (!session) return;
-    localStorage.setItem(FIN_KEY(session.id, dateISO), "0");
-    setFinished(false);
-    setPreviewCollapsed(false);
-  }
+ function reopenSession() {
+  if (!session) return;
+  localStorage.setItem(FIN_KEY(session.id, dateISO), "0");
+  setFinished(false);
+  setPreviewCollapsed(false);
+  setJustReopened(true); // ✅ allow cancelling this reopened session
+}
 
   function switchSessionById(id: number) {
-    const s = sessionsToday.find(x => x.id === id) || null;
-    setSession(s);
-    setItems([]);
-    setSetsByItem({});
-    if (s) loadItems(s.id);
-  }
+  const s = sessionsToday.find(x => x.id === id) || null;
+  setSession(s);
+  setItems([]);
+  setSetsByItem({});
+  setJustReopened(false); // switching clears reopen state
+  if (s) loadItems(s.id);
+}
 
   // cancel/delete current session if empty
-  async function cancelCurrentSession() {
-    if (!session) return;
-    if (items.length > 0) {
-      setErr("This session has exercises, so it can’t be cancelled. Delete the items first if you really want to remove it.");
-      return;
-    }
-    setBusy(true); setErr(null);
-    try {
-      const sid = session.id;
-      const { error } = await supabase.from("workout_sessions").delete().eq("id", sid);
-      if (error) throw error;
+async function cancelCurrentSession() {
+  if (!session) return;
 
-      // remove local finished flag
-      localStorage.removeItem(FIN_KEY(sid, dateISO));
-
-      // update local lists + choose next active
-      setSessionsToday(prev => {
-        const next = prev.filter(s => s.id !== sid);
-        const nextActive = next.length ? next[next.length - 1] : null;
-        setSession(nextActive);
-        if (nextActive) loadItems(nextActive.id);
-        else { setItems([]); setSetsByItem({}); }
-        return next;
-      });
-
-      await loadRecent();
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
-      setBusy(false);
-    }
+  // If it's a reopened session with items, allow full delete with confirmation.
+  if (items.length > 0 && !justReopened) {
+    setErr("This session has exercises, so it can’t be cancelled. Delete the items first if you really want to remove it.");
+    return;
   }
+  if (items.length > 0 && justReopened) {
+    const ok = window.confirm("Cancel this reopened session and delete all its exercises and sets?");
+    if (!ok) return;
+  }
+
+  setBusy(true); setErr(null);
+  try {
+    const sid = session.id;
+
+    // cascade delete items+sets if needed
+    if (items.length > 0) {
+      const itemIds = items.map(i => i.id);
+      await supabase.from("workout_sets").delete().in("item_id", itemIds);
+      await supabase.from("workout_items").delete().in("id", itemIds);
+    }
+
+    const { error } = await supabase.from("workout_sessions").delete().eq("id", sid);
+    if (error) throw error;
+
+    localStorage.removeItem(FIN_KEY(sid, dateISO));
+    setJustReopened(false);
+
+    setSessionsToday(prev => {
+      const next = prev.filter(s => s.id !== sid);
+      const nextActive = next.length ? next[next.length - 1] : null;
+      setSession(nextActive);
+      if (nextActive) loadItems(nextActive.id);
+      else { setItems([]); setSetsByItem({}); }
+      return next;
+    });
+
+    await loadRecent();
+  } catch (e: any) {
+    setErr(e.message || String(e));
+  } finally {
+    setBusy(false);
+  }
+}
 
   // Ensure exactly ONE "success" per weights session (logs to tasks)
   async function ensureWinForSession() {
@@ -1004,10 +1023,11 @@ export default function ExerciseDiaryScreen() {
   }, [items, setsByItem]);
 
   // click handler for RECENT: open that exact session (not just the date)
-  function openRecentSession(s: Session) {
-    desiredSessionIdRef.current = s.id;
-    setDateISO(s.session_date);
-  }
+function openRecentSession(s: Session) {
+  desiredSessionIdRef.current = s.id;
+  setDateISO(s.session_date);
+  setJustReopened(false); // viewing a historical session is not a "reopen"
+}
 
   return (
     <div className="page-exercise" style={{ display: "grid", gap: 12 }}>
@@ -1079,11 +1099,15 @@ export default function ExerciseDiaryScreen() {
                     )}
 
                     {/* Show Cancel when the session is empty and not finished */}
-                    {!finished && !previewCollapsed && items.length === 0 && (
-                      <button className="btn-soft" onClick={cancelCurrentSession} title="Delete this empty session">
-                        Cancel session
-                      </button>
-                    )}
+             {!finished && !previewCollapsed && (items.length === 0 || justReopened) && (
+  <button
+    className="btn-soft"
+    onClick={cancelCurrentSession}
+    title={justReopened ? "Delete this reopened session (including its items)" : "Delete this empty session"}
+  >
+    Cancel session
+  </button>
+)}
 
                     {(finished || previewCollapsed) && <button onClick={reopenSession}>Reopen</button>}
                     <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius: 8 }}>
@@ -1231,7 +1255,7 @@ export default function ExerciseDiaryScreen() {
                 }}
               >
                 <button className="btn-primary" onClick={openConfirmComplete} style={{ borderRadius: 8 }}>
-                  Finish session
+                  complete session
                 </button>
               </div>
             )}
@@ -1570,9 +1594,7 @@ function QuickAddCard({
             </button>
             <button className="btn-soft" onClick={onOpenLoadTemplate}>Add template</button>
             <button className="btn-soft" onClick={onOpenSaveTemplate}>Save as template</button>
-            <button className="btn-primary" onClick={onCompleteSession} style={{ marginLeft: "auto", borderRadius: 8 }}>
-              Complete session
-            </button>
+           
           </>
         ) : (
           <>
