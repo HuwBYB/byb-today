@@ -135,7 +135,8 @@ export default function CalendarScreen({
   // time-based options
   const [timed, setTimed] = useState(false); // all-day by default
   const [timeStr, setTimeStr] = useState("09:00"); // "HH:MM"
-  const [durationMin, setDurationMin] = useState<number>(60);
+  const [durationH, setDurationH] = useState<number>(1);  // default 1 hour
+  const [durationM, setDurationM] = useState<number>(0);  // default 0 minutes
   const [remindBefore, setRemindBefore] = useState<number | "">(""); // minutes before ("" = none)
   const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
@@ -362,7 +363,7 @@ export default function CalendarScreen({
             all_day: false,
             due_time: `${timeStr}:00`,
             due_at: dt.toISOString(),
-            duration_min: durationMin,
+            duration_min: Math.max(5, durationH * 60 + durationM),
             tz: userTz,
             remind_before_min: remindBefore === "" ? null : [Number(remindBefore)],
             priority: newPriority,
@@ -970,13 +971,14 @@ export default function CalendarScreen({
             }}
           />
           <button
-            className="btn-primary"
-            onClick={addNlp}
-            disabled={!nlp.trim() || addingNlp}
-            style={{ borderRadius: 10, height: 40, padding: "0 14px" }}
-          >
-            {addingNlp ? "Adding…" : "Add"}
-          </button>
+          <button
+  className="btn-primary"
+  onClick={addNlp}
+  disabled={!nlp.trim() || addingNlp}
+  style={{ borderRadius: 10, height: 40, padding: "0 14px" }}
+>
+  {addingNlp ? "Adding…" : "Quick add"}
+</button>
         </div>
 
         {/* Structured add */}
@@ -1049,25 +1051,68 @@ export default function CalendarScreen({
 
           {timed && (
             <>
-              <DigitalTimePicker value={timeStr} onChange={setTimeStr} minuteStep={5} />
-              <input
-                type="number"
-                min={5}
-                step={5}
-                value={durationMin}
-                onChange={(e) =>
-                  setDurationMin(Math.max(5, Number(e.target.value) || 60))
-                }
-                title="Duration (min)"
-                style={{
-                  width: 110,
-                  height: 40,
-                  borderRadius: 10,
-                  padding: "0 10px",
-                  border: "1px solid var(--border)",
-                }}
-                placeholder="min"
-              />
+        <DigitalTimePicker value={timeStr} onChange={setTimeStr} minuteStep={5} />
+<DurationPicker
+  h={durationH}
+  m={durationM}
+  onChange={(hh, mm) => { setDurationH(hh); setDurationM(mm); }}
+/>
+              /* ===================== Duration (hours + minutes) ===================== */
+function DurationPicker({
+  h, m, onChange,
+}: {
+  h: number;
+  m: number;
+  onChange: (h: number, m: number) => void;
+}) {
+  const hours = Array.from({ length: 13 }, (_, i) => i); // 0..12h
+  const minutes = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "4px 8px",
+        border: "1px solid var(--border)",
+        borderRadius: 10,
+        background: "#fff",
+        height: 40,
+      }}
+      aria-label="Duration"
+      role="group"
+      title="Duration"
+    >
+      <select
+        aria-label="Hours"
+        value={h}
+        onChange={(e) => onChange(Number(e.target.value), m)}
+        style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
+      >
+        {hours.map((hr) => (
+          <option key={hr} value={hr}>
+            {hr}h
+          </option>
+        ))}
+      </select>
+      <span style={{ fontWeight: 700, lineHeight: "32px" }}>:</span>
+      <select
+        aria-label="Minutes"
+        value={m}
+        onChange={(e) => onChange(h, Number(e.target.value))}
+        style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
+      >
+        {minutes.map((mm) => (
+          <option key={mm} value={mm}>
+            {String(mm).padStart(2, "0")}m
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
               <select
                 value={remindBefore === "" ? "" : String(remindBefore)}
                 onChange={(e) =>
@@ -1088,14 +1133,14 @@ export default function CalendarScreen({
             </>
           )}
 
-          <button
-            className="btn-primary"
-            onClick={addTaskToSelected}
-            disabled={!newTitle.trim() || adding}
-            style={{ borderRadius: 10, height: 40, padding: "0 14px" }}
-          >
-            {adding ? "Adding…" : "Add"}
-          </button>
+        <button
+  className="btn-primary"
+  onClick={addTaskToSelected}
+  disabled={!newTitle.trim() || adding}
+  style={{ borderRadius: 10, height: 40, padding: "0 14px" }}
+>
+  {adding ? "Adding…" : "Add task"}
+</button>
         </div>
 
         {sortedDayTasks.length === 0 && !loading && (
