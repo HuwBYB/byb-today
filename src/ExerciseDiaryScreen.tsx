@@ -62,6 +62,15 @@ function secondsToMMSS(sec?: number | null) {
   const m = Math.floor(sec / 60), s = sec % 60;
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
+function secondsToHHMMSS(total?: number | null) {
+  const sec = Math.max(0, Number(total || 0));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
 function mmssToSeconds(v: string) {
   const [m, s] = v.split(":").map(n => Number(n || 0));
   return (isFinite(m) ? m : 0) * 60 + (isFinite(s) ? s : 0);
@@ -72,6 +81,47 @@ function paceStr(distanceKm?: number, durSec?: number) {
   return `${secondsToMMSS(secPerKm)}/km`;
 }
 const FIN_KEY = (sid: number, dateISO: string) => `byb_session_finished_${sid}_${dateISO}`;
+
+/* ---------- Scroll memory (per-session) ---------- */
+function useScrollMemory(key: string, ready: boolean) {
+  // Save on scroll and lifecycle edges
+  useEffect(() => {
+    if (!key) return;
+
+    const save = () => {
+      try {
+        sessionStorage.setItem(key, String(document.scrollingElement?.scrollTop ?? window.scrollY ?? 0));
+      } catch {}
+    };
+
+    window.addEventListener("scroll", save, { passive: true });
+    const onHide = () => save();
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onHide);
+    window.addEventListener("beforeunload", onHide);
+
+    return () => {
+      window.removeEventListener("scroll", save);
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("beforeunload", onHide);
+    };
+  }, [key]);
+
+  // Restore once, after content is rendered
+  useEffect(() => {
+    if (!key || !ready) return;
+    try {
+      const raw = sessionStorage.getItem(key);
+      if (raw) {
+        const y = Number(raw);
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => window.scrollTo(0, isFinite(y) ? y : 0))
+        );
+      }
+    } catch {}
+  }, [key, ready]);
+}
 
 /* ---------- Lightweight modal ---------- */
 function Modal({
@@ -147,21 +197,9 @@ export default function ExerciseDiaryScreen() {
   // undo last template insert
   const [undoBanner, setUndoBanner] = useState<{ itemIds: number[] } | null>(null);
 
-  // scroll restore (fixes “returns to top after standby”)
-  useEffect(() => {
-    let saved = 0;
-    const onHide = () => { saved = (document.scrollingElement?.scrollTop || window.scrollY || 0); };
-    const onShow = () => { requestAnimationFrame(() => window.scrollTo(0, saved)); };
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") onHide(); else onShow();
-    });
-    window.addEventListener("pagehide", onHide);
-    window.addEventListener("pageshow", onShow);
-    return () => {
-      window.removeEventListener("pagehide", onHide);
-      window.removeEventListener("pageshow", onShow);
-    };
-  }, []);
+  // === NEW: Persist/restore scroll per active session+date
+  const scrollKey = session ? `byb:exercise_scroll:${session.id}:${dateISO}` : "";
+  useScrollMemory(scrollKey, !!session);
 
   /* === Debounced saver for workout_sets === */
   const DEBOUNCE_MS = 300;
@@ -453,8 +491,63 @@ export default function ExerciseDiaryScreen() {
     }
   }
 
+  /* ---------- NEW: Session Timer ---------- */
+  const [elapsedSec, setElapsedSec] = useState<number>(0);
+  const startRef = useRef<number | null>(null);
+
+  // ensure session has a start_time (server) and start ticking locally
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!session) { startRef.current = null; setElapsedSec(0); return; }
+      const fromDb = session.start_time ? Date.parse(session.start_time) : null;
+      if (fromDb && isFinite(fromDb)) {
+        startRef.current = fromDb;
+      } else {
+        const nowISO = new Date().toISOString();
+        try {
+          await supabase.from("workout_sessions").update({ start_time: nowISO } as any).eq("id", session.id);
+          startRef.current = Date.parse(nowISO);
+          setSession(prev => prev ? ({ ...prev, start_time: nowISO }) : prev);
+        } catch {
+          // fallback purely local if column/table not present
+          startRef.current = Date.now();
+        }
+      }
+      if (cancelled) return;
+      setElapsedSec(Math.floor((Date.now() - (startRef.current || Date.now())) / 1000));
+    })();
+    return () => { cancelled = true; };
+  }, [session?.id]);
+
+  // tick every second, recompute from wall time (robust to background)
+  useEffect(() => {
+    if (!session || !startRef.current) return;
+    const tick = () => setElapsedSec(Math.floor((Date.now() - (startRef.current as number)) / 1000));
+    const id = window.setInterval(tick, 1000);
+    const vis = () => tick();
+    document.addEventListener("visibilitychange", vis);
+    tick();
+    return () => { window.clearInterval(id); document.removeEventListener("visibilitychange", vis); };
+  }, [session?.id]);
+
   async function completeSessionNow() {
     if (sessionNameDraft.trim()) await saveSessionName(sessionNameDraft);
+
+    // OPTIONAL: append duration to notes (remove if you later add a dedicated column)
+    try {
+      const dur = secondsToHHMMSS(elapsedSec);
+      const stamp = `Duration: ${dur}`;
+      if (session) {
+        const already = (session.notes || "").includes("Duration:");
+        const merged = session.notes
+          ? (already ? session.notes : `${session.notes}\n${stamp}`)
+          : stamp;
+        await supabase.from("workout_sessions").update({ notes: merged }).eq("id", session.id);
+        setSession(prev => prev ? ({ ...prev, notes: merged }) : prev);
+      }
+    } catch { /* ignore non-fatal */ }
+
     markLocalFinished();
     await ensureWinForSession();
     setConfirmCompleteOpen(false);
@@ -463,7 +556,6 @@ export default function ExerciseDiaryScreen() {
   }
 
   function openConfirmComplete() {
-    // seed with existing name / inferred from notes
     const seed =
       (session?.name || "") ||
       (session?.notes?.startsWith("Session: ") ? session?.notes?.split("\n")[0].replace(/^Session:\s*/, "") : "");
@@ -940,6 +1032,29 @@ export default function ExerciseDiaryScreen() {
         <div className="exercise-layout">
           {/* Left: editor */}
           <div className="card" style={{ display: "grid", gap: 12 }}>
+            {/* Sticky timer bar */}
+            {session && !finished && !previewCollapsed && (
+              <div
+                style={{
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 50,
+                  background: "#fff",
+                  border: "1px solid #eee",
+                  borderRadius: 10,
+                  padding: "8px 10px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10
+                }}
+              >
+                <span className="muted" style={{ fontWeight: 600 }}>Session timer</span>
+                <span aria-live="polite" style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {secondsToHHMMSS(elapsedSec)}
+                </span>
+              </div>
+            )}
+
             {/* Top controls — NO date bar; just New/Cancel/Switch */}
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "space-between" }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -1098,6 +1213,28 @@ export default function ExerciseDiaryScreen() {
             )}
 
             {err && <div style={{ color: "red" }}>{err}</div>}
+
+            {/* Sticky finish bar */}
+            {session && !finished && !previewCollapsed && (
+              <div
+                style={{
+                  position: "sticky",
+                  bottom: 0,
+                  zIndex: 40,
+                  background: "#fff",
+                  borderTop: "1px solid #eee",
+                  padding: "10px",
+                  marginTop: 8,
+                  paddingBottom: "calc(10px + env(safe-area-inset-bottom))",
+                  display: "flex",
+                  justifyContent: "flex-end"
+                }}
+              >
+                <button className="btn-primary" onClick={openConfirmComplete} style={{ borderRadius: 8 }}>
+                  Finish session
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Right: recent + backup */}
