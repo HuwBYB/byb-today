@@ -17,7 +17,7 @@ type Item = {
   id: number;
   session_id: number;
   user_id: string;
-  kind: "weights" | "run" | "jog" | "walk" | "yoga" | "class" | "other" | string;
+  kind: "weights" | "run" | "jog" | "walk" | "yoga" | "class"  | "cycling" | "other" | string;
   title: string;
   order_index: number;
   metrics: any;
@@ -1475,7 +1475,7 @@ function KindBadge({ kind }: { kind: Item["kind"] }) {
   const label = kind[0].toUpperCase() + kind.slice(1);
   const bg = ({
     weights: "#e0f2fe", run: "#fee2e2", jog: "#fee2e2", walk: "#fee2e2",
-    yoga: "#dcfce7", class: "#ede9fe", other: "#f3f4f6"
+    yoga: "#dcfce7", class: "#ede9fe", cycling: "#fee2e2", other: "#f3f4f6"
   } as any)[kind] || "#f3f4f6";
   return <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 999, background: bg, border: "1px solid #e5e7eb" }}>{label}</span>;
 }
@@ -1542,6 +1542,109 @@ function CardioSummary({ item }: { item: Item }) {
   return <div className="muted">{d ? `${d} km` : ""}{(d && sec) ? " • " : ""}{sec ? secondsToMMSS(sec) : ""}{pace ? ` • ${pace}` : ""}</div>;
 }
 
+/* ---------- BYB Kind Picker (logo + options) ---------- */
+function QuickKindPicker({
+  value,
+  onChange,
+}: {
+  value: Item["kind"];
+  onChange: (k: Item["kind"]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!ref.current) return;
+      if (!ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  const KIND_OPTIONS: Array<{ id: Item["kind"]; label: string }> = [
+    { id: "weights", label: "Weights" },
+    { id: "run", label: "Run" },
+    { id: "jog", label: "Jog" },
+    { id: "walk", label: "Walk" },
+    { id: "cycling", label: "Cycling" }, // <-- NEW
+    { id: "yoga", label: "Yoga" },
+    { id: "class", label: "Class (custom title)" },
+  ];
+
+  const currentLabel = KIND_OPTIONS.find(k => k.id === value)?.label ?? value;
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen(v => !v)}
+        className="btn-soft"
+        style={{ minWidth: 140, display: "inline-flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}
+      >
+        <span>{currentLabel}</span>
+        <span aria-hidden>▾</span>
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          aria-label="Choose quick add type"
+          tabIndex={-1}
+          style={{
+            position: "absolute",
+            zIndex: 80,
+            marginTop: 6,
+            minWidth: 240,
+            background: "#fff",
+            border: "1px solid #e5e7eb",
+            borderRadius: 10,
+            boxShadow: "0 10px 30px rgba(0,0,0,0.1)",
+            overflow: "hidden",
+          }}
+        >
+          {/* Logo header */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: "1px solid #f1f5f9" }}>
+            <img
+              src="/LogoButterfly.png"  // <-- uses your public path
+              alt="BYB"
+              style={{ width: 20, height: 20, objectFit: "contain" }}
+            />
+            <div style={{ fontWeight: 600 }}>BYB quick add</div>
+          </div>
+
+          <ul style={{ listStyle: "none", margin: 0, padding: 6 }}>
+            {KIND_OPTIONS.map(opt => (
+              <li key={opt.id}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={opt.id === value}
+                  onClick={() => { onChange(opt.id); setOpen(false); }}
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: opt.id === value ? "#f1f5f9" : "transparent",
+                    cursor: "pointer",
+                  }}
+                >
+                  {opt.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 /* ---------- Quick Add (updated) ---------- */
 function QuickAddCard({
  onAddWeights, onAddCardio, onOpenLoadTemplate, onOpenSaveTemplate
@@ -1565,14 +1668,7 @@ function QuickAddCard({
     <div style={{ border: "1px solid #eee", borderRadius: 10, padding: 10 }}>
       <div className="section-title">Quick add</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <select value={kind} onChange={e => setKind(e.target.value as Item["kind"])}>
-          <option value="weights">Weights</option>
-          <option value="run">Run</option>
-          <option value="jog">Jog</option>
-          <option value="walk">Walk</option>
-          <option value="yoga">Yoga</option>
-          <option value="class">Class (custom title)</option>
-        </select>
+       <QuickKindPicker value={kind} onChange={(k) => setKind(k)} />
 
         {kind === "weights" ? (
           <>
