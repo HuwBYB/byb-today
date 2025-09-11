@@ -510,45 +510,79 @@ async function cancelCurrentSession() {
     }
   }
 
-  /* ---------- NEW: Session Timer ---------- */
-  const [elapsedSec, setElapsedSec] = useState<number>(0);
-  const startRef = useRef<number | null>(null);
+/* ---------- Session Timer (robust) ---------- */
+const [elapsedSec, setElapsedSec] = useState<number>(0);
+const [startMs, setStartMs] = useState<number | null>(null);
 
-  // ensure session has a start_time (server) and start ticking locally
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!session) { startRef.current = null; setElapsedSec(0); return; }
-      const fromDb = session.start_time ? Date.parse(session.start_time) : null;
-      if (fromDb && isFinite(fromDb)) {
-        startRef.current = fromDb;
-      } else {
-        const nowISO = new Date().toISOString();
-        try {
-          await supabase.from("workout_sessions").update({ start_time: nowISO } as any).eq("id", session.id);
-          startRef.current = Date.parse(nowISO);
-          setSession(prev => prev ? ({ ...prev, start_time: nowISO }) : prev);
-        } catch {
-          // fallback purely local if column/table not present
-          startRef.current = Date.now();
-        }
+// Resolve/ensure start time, then set startMs (runs on session change)
+useEffect(() => {
+  let cancelled = false;
+
+  (async () => {
+    // No active session: reset timer
+    if (!session) {
+      setStartMs(null);
+      setElapsedSec(0);
+      return;
+    }
+
+    // If DB already has a start_time, use it
+    const fromDb = session.start_time ? Date.parse(session.start_time) : null;
+    if (fromDb && isFinite(fromDb)) {
+      if (!cancelled) {
+        setStartMs(fromDb);
+        setElapsedSec(Math.floor((Date.now() - fromDb) / 1000));
       }
-      if (cancelled) return;
-      setElapsedSec(Math.floor((Date.now() - (startRef.current || Date.now())) / 1000));
-    })();
-    return () => { cancelled = true; };
-  }, [session?.id]);
+      return;
+    }
 
-  // tick every second, recompute from wall time (robust to background)
-  useEffect(() => {
-    if (!session || !startRef.current) return;
-    const tick = () => setElapsedSec(Math.floor((Date.now() - (startRef.current as number)) / 1000));
-    const id = window.setInterval(tick, 1000);
-    const vis = () => tick();
-    document.addEventListener("visibilitychange", vis);
-    tick();
-    return () => { window.clearInterval(id); document.removeEventListener("visibilitychange", vis); };
-  }, [session?.id]);
+    // Otherwise set it now (try DB, fall back to local)
+    const nowISO = new Date().toISOString();
+    let ms = Date.now();
+    try {
+      await supabase
+        .from("workout_sessions")
+        .update({ start_time: nowISO } as any)
+        .eq("id", session.id);
+
+      ms = Date.parse(nowISO);
+      // reflect in local state so other UI sees it too
+      setSession(prev => (prev ? { ...prev, start_time: nowISO } : prev));
+    } catch {
+      // table/column might not exist; local fallback already in ms
+    }
+
+    if (!cancelled) {
+      setStartMs(ms);
+      setElapsedSec(Math.floor((Date.now() - ms) / 1000));
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+  };
+}, [session?.id]);
+
+// Tick every second once startMs is known
+useEffect(() => {
+  if (!session || !startMs) return;
+
+  const tick = () => {
+    setElapsedSec(Math.floor((Date.now() - startMs) / 1000));
+  };
+
+  // initial paint
+  tick();
+
+  const id = window.setInterval(tick, 1000);
+  const onVis = () => tick();
+  document.addEventListener("visibilitychange", onVis);
+
+  return () => {
+    window.clearInterval(id);
+    document.removeEventListener("visibilitychange", onVis);
+  };
+}, [session?.id, startMs]);
 
 async function completeSessionNow() {
   if (sessionNameDraft.trim()) await saveSessionName(sessionNameDraft);
