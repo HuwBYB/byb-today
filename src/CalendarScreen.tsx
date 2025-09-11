@@ -339,162 +339,140 @@ export default function CalendarScreen({
   };
 
   /* ================= Add task (structured) ================= */
-  async function addTaskToSelected() {
-    if (!userId) return;
-    const title = newTitle.trim();
-    if (!title) return;
+async function addTaskToSelected() {
+  if (!userId) return;
+  const title = newTitle.trim();
+  if (!title) return;
 
-    setAdding(true);
-    setErr(null);
-    try {
-      // normalize and color strictly via central helpers
-      const category = normalizeCat(newCat) as AllowedCategory;
-      const category_color = colorOf(category);
+  setAdding(true);
+  setErr(null);
+  try {
+    // normalize and color strictly via central helpers
+    const category = normalizeCat(newCat) as AllowedCategory;
+    const category_color = colorOf(category);
 
-      let rows: Array<Partial<Task> & { user_id: string }> = [];
+    let rows: Array<Partial<Task> & { user_id: string }> = [];
 
-      const buildRow = (iso: string) => {
-        if (timed) {
-          const dt = combineLocalDateTimeISO(iso, timeStr);
-          return {
-            user_id: userId,
-            title,
-            due_date: iso,
-            all_day: false,
-            due_time: `${timeStr}:00`,
-            due_at: dt.toISOString(),
-            duration_min: Math.max(5, durationH * 60 + durationM),
-            tz: userTz,
-            remind_before_min: remindBefore === "" ? null : [Number(remindBefore)],
-            priority: newPriority,
-            category,
-            category_color,
-            source: newFreq ? `calendar_repeat_${newFreq}` : "calendar_manual",
-          };
-        }
-        // all-day
+    const buildRow = (iso: string) => {
+      if (timed) {
+        const dt = combineLocalDateTimeISO(iso, timeStr);
         return {
           user_id: userId,
           title,
           due_date: iso,
-          all_day: true,
-          due_time: null,
-          due_at: null,
-          duration_min: null,
+          all_day: false,
+          due_time: `${timeStr}:00`,
+          due_at: dt.toISOString(),
+          duration_min: Math.max(5, durationH * 60 + durationM),
           tz: userTz,
-          remind_before_min: null,
+          remind_before_min: remindBefore === "" ? null : [Number(remindBefore)],
           priority: newPriority,
           category,
           category_color,
           source: newFreq ? `calendar_repeat_${newFreq}` : "calendar_manual",
         };
-      };
-
-      if (!newFreq) {
-        rows = [buildRow(selectedISO)];
-      } else {
-        const count = REPEAT_COUNTS[newFreq];
-        rows = Array.from({ length: count }, (_, i) =>
-          buildRow(addInterval(selectedISO, newFreq, i))
-        );
       }
+      // all-day
+      return {
+        user_id: userId,
+        title,
+        due_date: iso,
+        all_day: true,
+        due_time: null,
+        due_at: null,
+        duration_min: null,
+        tz: userTz,
+        remind_before_min: null,
+        priority: newPriority,
+        category,
+        category_color,
+        source: newFreq ? `calendar_repeat_${newFreq}` : "calendar_manual",
+      };
+    };
 
-      const { data, error } = await supabase.from("tasks").insert(rows as any).select();
-      if (error) throw error;
-
-      // Update local month cache
-      const first = toISO(firstDayOfMonth),
-        last = toISO(lastDayOfMonth);
-    setTasksByDay((prev) => {
-  const map = { ...prev };
-  for (const t of data as Task[]) {
-    const day = (t.due_date || "").slice(0, 10);
-    if (!day) continue;
-    if (day >= first && day <= last) {
-      const existing = map[day] || [];
-      map[day] = [...existing, t]; // ✅ new array reference
+    if (!newFreq) {
+      rows = [buildRow(selectedISO)];
+    } else {
+      const count = REPEAT_COUNTS[newFreq];
+      rows = Array.from({ length: count }, (_, i) =>
+        buildRow(addInterval(selectedISO, newFreq, i))
+      );
     }
-  }
-  return map;
-});
 
-      setNewTitle("");
-      setNewFreq("");
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
-      setAdding(false);
-    }
-  }
+    const { error } = await supabase.from("tasks").insert(rows as any);
+    if (error) throw error;
 
+    // ✅ Fresh fetch so UI updates immediately (no page reload)
+    await loadMonthTasks();
+
+    // reset inputs
+    setNewTitle("");
+    setNewFreq("");
+  } catch (e: any) {
+    setErr(e.message || String(e));
+  } finally {
+    setAdding(false);
+  }
+}
+
+ 
   /* ================= Natural-language add ================= */
-  async function addNlp() {
-    if (!userId) return;
-    const raw = nlp.trim();
-    if (!raw) return;
+async function addNlp() {
+  if (!userId) return;
+  const raw = nlp.trim();
+  if (!raw) return;
 
-    setAddingNlp(true);
-    setErr(null);
-    try {
-      const parsed = parseNlp(raw, selectedISO);
-      if (!parsed.title) throw new Error("Please include a title.");
+  setAddingNlp(true);
+  setErr(null);
+  try {
+    const parsed = parseNlp(raw, selectedISO);
+    if (!parsed.title) throw new Error("Please include a title.");
 
-      // Normalize whatever came out of NLP into an AllowedCategory using your helper
-      const category = normalizeCat(parsed.category || "personal") as AllowedCategory;
-      const category_color = colorOf(category);
+    // Normalize whatever came out of NLP into an AllowedCategory using your helper
+    const category = normalizeCat(parsed.category || "personal") as AllowedCategory;
+    const category_color = colorOf(category);
 
-      let rows: Array<Partial<Task> & { user_id: string }> = [];
+    let rows: Array<Partial<Task> & { user_id: string }> = [];
 
-      if (parsed.occurrences && parsed.occurrences.length > 0) {
-        rows = parsed.occurrences.map((iso) => ({
+    if (parsed.occurrences && parsed.occurrences.length > 0) {
+      rows = parsed.occurrences.map((iso) => ({
+        user_id: userId,
+        title: parsed.title,
+        due_date: iso,
+        all_day: true,
+        priority: parsed.priority ?? 2,
+        category,
+        category_color,
+        source: parsed.source || "calendar_nlp",
+      }));
+    } else {
+      rows = [
+        {
           user_id: userId,
           title: parsed.title,
-          due_date: iso,
+          due_date: selectedISO,
           all_day: true,
           priority: parsed.priority ?? 2,
           category,
           category_color,
           source: parsed.source || "calendar_nlp",
-        }));
-      } else {
-        rows = [
-          {
-            user_id: userId,
-            title: parsed.title,
-            due_date: selectedISO,
-            all_day: true,
-            priority: parsed.priority ?? 2,
-            category,
-            category_color,
-            source: parsed.source || "calendar_nlp",
-          },
-        ];
-      }
-
-      const { data, error } = await supabase.from("tasks").insert(rows as any).select();
-      if (error) throw error;
-
-      const first = toISO(firstDayOfMonth),
-        last = toISO(lastDayOfMonth);
-    setTasksByDay((prev) => {
-  const map = { ...prev };
-  for (const t of data as Task[]) {
-    const day = (t.due_date || "").slice(0, 10);
-    if (day && day >= first && day <= last) {
-      const existing = map[day] || [];
-      map[day] = [...existing, t]; // ✅ new array reference
+        },
+      ];
     }
-  }
-  return map;
-});
 
-      setNlp("");
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
-      setAddingNlp(false);
-    }
+    const { error } = await supabase.from("tasks").insert(rows as any);
+    if (error) throw error;
+
+    // ✅ Fresh fetch so UI updates immediately
+    await loadMonthTasks();
+
+    setNlp("");
+  } catch (e: any) {
+    setErr(e.message || String(e));
+  } finally {
+    setAddingNlp(false);
   }
+}
 
   /* ================= Sorting ================= */
   const dayTasks: Task[] = tasksByDay[selectedISO] || [];
@@ -1222,6 +1200,7 @@ function DigitalTimePicker({
 
 /* ===================== Duration (hours + minutes) ===================== */
 function DurationPicker({
+function DurationPicker({
   h,
   m,
   onChange,
@@ -1261,16 +1240,21 @@ function DurationPicker({
           </option>
         ))}
       </select>
+
       <span style={{ fontWeight: 700, lineHeight: "32px" }}>:</span>
+
       <select
         aria-label="Minutes"
         value={m}
         onChange={(e) => onChange(h, Number(e.target.value))}
-        style={{ fontSize: 16, 
-                padding: "6px 8px", 
-                height: 32, 
-                borderRadius: 8
-               minWidth: 78, }}
+        style={{
+          fontSize: 16,
+          padding: "6px 8px",
+          paddingRight: 22,   // extra room for “m” and the caret
+          height: 32,
+          borderRadius: 8,
+          minWidth: 84,       // slightly wider so “00m” never clips
+        }}
       >
         {minutes.map((mm) => (
           <option key={mm} value={mm}>
