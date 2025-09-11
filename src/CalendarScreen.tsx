@@ -1182,12 +1182,19 @@ function DigitalTimePicker({
         ))}
       </select>
       <span style={{ fontWeight: 700, lineHeight: "32px" }}>:</span>
-      <select
-        aria-label="Minutes"
-        value={m - (m % minuteStep)}
-        onChange={(e) => update(h, Number(e.target.value))}
-        style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
-      >
+     <select
+  aria-label="Minutes"
+  value={m - (m % minuteStep)}
+  onChange={(e) => update(h, Number(e.target.value))}
+  style={{
+    fontSize: 16,
+    padding: "6px 10px",
+    height: 32,
+    borderRadius: 8,
+    minWidth: 88,
+    fontVariantNumeric: "tabular-nums",
+  }}
+>
         {minutes.map((mm) => (
           <option key={mm} value={mm}>
             {String(mm).padStart(2, "0")}
@@ -1199,7 +1206,6 @@ function DigitalTimePicker({
 }
 
 /* ===================== Duration (hours + minutes) ===================== */
-function DurationPicker({
 function DurationPicker({
   h,
   m,
@@ -1243,19 +1249,19 @@ function DurationPicker({
 
       <span style={{ fontWeight: 700, lineHeight: "32px" }}>:</span>
 
-      <select
-        aria-label="Minutes"
-        value={m}
-        onChange={(e) => onChange(h, Number(e.target.value))}
-        style={{
-          fontSize: 16,
-          padding: "6px 8px",
-          paddingRight: 22,   // extra room for “m” and the caret
-          height: 32,
-          borderRadius: 8,
-          minWidth: 84,       // slightly wider so “00m” never clips
-        }}
-      >
+    <select
+  aria-label="Minutes"
+  value={m}
+  onChange={(e) => onChange(h, Number(e.target.value))}
+  style={{
+    fontSize: 16,
+    padding: "6px 10px",
+    height: 32,
+    borderRadius: 8,
+    minWidth: 96,
+    fontVariantNumeric: "tabular-nums",
+  }}
+>
         {minutes.map((mm) => (
           <option key={mm} value={mm}>
             {String(mm).padStart(2, "0")}m
