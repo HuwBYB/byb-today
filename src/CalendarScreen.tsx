@@ -1266,7 +1266,11 @@ function DurationPicker({
         aria-label="Minutes"
         value={m}
         onChange={(e) => onChange(h, Number(e.target.value))}
-        style={{ fontSize: 16, padding: "6px 8px", height: 32, borderRadius: 8 }}
+        style={{ fontSize: 16, 
+                padding: "6px 8px", 
+                height: 32, 
+                borderRadius: 8
+               minWidth: 78, }}
       >
         {minutes.map((mm) => (
           <option key={mm} value={mm}>
