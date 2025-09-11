@@ -550,29 +550,47 @@ async function cancelCurrentSession() {
     return () => { window.clearInterval(id); document.removeEventListener("visibilitychange", vis); };
   }, [session?.id]);
 
-  async function completeSessionNow() {
-    if (sessionNameDraft.trim()) await saveSessionName(sessionNameDraft);
+async function completeSessionNow() {
+  if (sessionNameDraft.trim()) await saveSessionName(sessionNameDraft);
 
-    // OPTIONAL: append duration to notes (remove if you later add a dedicated column)
-    try {
-      const dur = secondsToHHMMSS(elapsedSec);
-      const stamp = `Duration: ${dur}`;
-      if (session) {
-        const already = (session.notes || "").includes("Duration:");
-        const merged = session.notes
-          ? (already ? session.notes : `${session.notes}\n${stamp}`)
-          : stamp;
-        await supabase.from("workout_sessions").update({ notes: merged }).eq("id", session.id);
-        setSession(prev => prev ? ({ ...prev, notes: merged }) : prev);
-      }
-    } catch { /* ignore non-fatal */ }
+  // ⬇️ Fetch fresh notes/name so we don't overwrite the "Session: ..." prefix
+  let currentNotes = session?.notes || "";
+  try {
+    if (session) {
+      const { data: fresh } = await supabase
+        .from("workout_sessions")
+        .select("notes,name")
+        .eq("id", session.id)
+        .single();
+      if (fresh?.notes != null) currentNotes = fresh.notes as string;
+    }
+  } catch {/* ignore */}
 
-    markLocalFinished();
-    await ensureWinForSession();
-    setConfirmCompleteOpen(false);
-    setPreviewCollapsed(false);
-    await loadRecent(); // refresh recent list to show new name
-  }
+  // Append duration safely to the latest notes
+  try {
+    const dur = secondsToHHMMSS(elapsedSec);
+    const stamp = `Duration: ${dur}`;
+    if (session) {
+      const already = (currentNotes || "").includes("Duration:");
+      const merged = currentNotes
+        ? (already ? currentNotes : `${currentNotes}\n${stamp}`)
+        : stamp;
+
+      await supabase
+        .from("workout_sessions")
+        .update({ notes: merged })
+        .eq("id", session.id);
+
+      setSession(prev => (prev ? { ...prev, notes: merged } : prev));
+    }
+  } catch { /* non-fatal */ }
+
+  markLocalFinished();
+  await ensureWinForSession();
+  setConfirmCompleteOpen(false);
+  setPreviewCollapsed(false);
+  await loadRecent();
+}
 
   function openConfirmComplete() {
     const seed =
