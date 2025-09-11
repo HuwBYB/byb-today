@@ -405,17 +405,18 @@ export default function CalendarScreen({
       // Update local month cache
       const first = toISO(firstDayOfMonth),
         last = toISO(lastDayOfMonth);
-      setTasksByDay((prev) => {
-        const map = { ...prev };
-        for (const t of data as Task[]) {
-          const day = (t.due_date || "").slice(0, 10);
-          if (!day) continue;
-          if (day >= first && day <= last) {
-            (map[day] ||= []).push(t);
-          }
-        }
-        return map;
-      });
+    setTasksByDay((prev) => {
+  const map = { ...prev };
+  for (const t of data as Task[]) {
+    const day = (t.due_date || "").slice(0, 10);
+    if (!day) continue;
+    if (day >= first && day <= last) {
+      const existing = map[day] || [];
+      map[day] = [...existing, t]; // ✅ new array reference
+    }
+  }
+  return map;
+});
 
       setNewTitle("");
       setNewFreq("");
@@ -475,16 +476,17 @@ export default function CalendarScreen({
 
       const first = toISO(firstDayOfMonth),
         last = toISO(lastDayOfMonth);
-      setTasksByDay((prev) => {
-        const map = { ...prev };
-        for (const t of data as Task[]) {
-          const day = (t.due_date || "").slice(0, 10);
-          if (day && day >= first && day <= last) {
-            (map[day] ||= []).push(t);
-          }
-        }
-        return map;
-      });
+    setTasksByDay((prev) => {
+  const map = { ...prev };
+  for (const t of data as Task[]) {
+    const day = (t.due_date || "").slice(0, 10);
+    if (day && day >= first && day <= last) {
+      const existing = map[day] || [];
+      map[day] = [...existing, t]; // ✅ new array reference
+    }
+  }
+  return map;
+});
 
       setNlp("");
     } catch (e: any) {
