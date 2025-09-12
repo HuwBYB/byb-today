@@ -89,26 +89,63 @@ function expandDates(baseISO: string, count: number, cadence: Cadence) {
   return out;
 }
 
-/* ---------- Minimal Modal ---------- */
+/* ---------- Minimal Modal (mobile-friendly scrollable) ---------- */
 function Modal({
   open, onClose, title, children,
 }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
   if (!open) return null;
   return (
-    <div role="dialog" aria-modal="true" aria-label={title}
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
       onClick={onClose}
-      style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.35)", zIndex:1000, display:"grid", placeItems:"center", padding:16 }}>
-      <div onClick={(e)=>e.stopPropagation()} className="card"
-        style={{ width:"100%", maxWidth:720, borderRadius:12, padding:16, display:"grid", gap:10 }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
-          <h3 style={{ margin:0 }}>{title}</h3>
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,.35)",
+        zIndex: 1000,
+        display: "grid",
+        placeItems: "center",
+        padding: 16
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="card"
+        style={{
+          width: "100%",
+          maxWidth: 720,
+          // Cap height so content is scrollable on small screens
+          maxHeight: "92vh",
+          borderRadius: 12,
+          padding: 16,
+          display: "grid",
+          gridTemplateRows: "auto 1fr", // header + scrollable body
+          gap: 10,
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <h3 style={{ margin: 0 }}>{title}</h3>
           <button onClick={onClose} className="btn-soft" aria-label="Close">Close</button>
         </div>
-        <div>{children}</div>
+
+        {/* Scrollable body */}
+        <div
+          style={{
+            overflow: "auto",
+            WebkitOverflowScrolling: "touch",
+            paddingBottom: "env(safe-area-inset-bottom)",
+          }}
+        >
+          {children}
+        </div>
       </div>
     </div>
   );
 }
+
 
 /* ---------- Parse EVA structured plan (JSON) ---------- */
 function parseEvaPlan(area: AllowedCategory, text: string): EvaPlan | null {
