@@ -1318,7 +1318,7 @@ function openRecentSession(s: Session) {
             <ul className="list" style={{ overflow: "auto", maxHeight: "60vh" }}>
               {recent.length === 0 && <li className="muted">No recent sessions.</li>}
               {recent.map(s => {
-               {recent.map(s => {
+           
   // Prefer real name; else look for "Session: ..." in notes
   const sessionName =
     (s.name && s.name.trim()) ||
