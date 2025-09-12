@@ -81,7 +81,7 @@ function paceStr(distanceKm?: number, durSec?: number) {
   return `${secondsToMMSS(secPerKm)}/km`;
 }
 const FIN_KEY = (sid: number, dateISO: string) => `byb_session_finished_${sid}_${dateISO}`;
-
+const START_KEY = (sid: number) => `byb_session_start_${sid}`;
 /* ---------- Scroll memory (per-session) ---------- */
 function useScrollMemory(key: string, ready: boolean) {
   // Save on scroll and lifecycle edges
@@ -556,72 +556,74 @@ async function cancelCurrentSession() {
 }
 
 
-/* ---------- Session Timer (robust) ---------- */
+
+/* ---------- Session Timer (robust + survives standby) ---------- */
 const [elapsedSec, setElapsedSec] = useState<number>(0);
 const [startMs, setStartMs] = useState<number | null>(null);
 
-// Resolve/ensure start time, then set startMs (runs on session change)
+// Resolve/ensure a start time for the active session (DB or localStorage)
 useEffect(() => {
   let cancelled = false;
 
   (async () => {
-    // No active session: reset timer
     if (!session) {
       setStartMs(null);
       setElapsedSec(0);
       return;
     }
 
-    // If DB already has a start_time, use it
-    const fromDb = session.start_time ? Date.parse(session.start_time) : null;
-    if (fromDb && isFinite(fromDb)) {
-      if (!cancelled) {
-        setStartMs(fromDb);
-        setElapsedSec(Math.floor((Date.now() - fromDb) / 1000));
+    const sid = session.id;
+    const lsKey = START_KEY(sid);
+
+    // 1) Prefer DB start_time if present
+    let ms: number | null =
+      session.start_time && isFinite(Date.parse(session.start_time))
+        ? Date.parse(session.start_time)
+        : null;
+
+    // 2) Else, try localStorage (persists through background/standby)
+    if (ms == null) {
+      const raw = localStorage.getItem(lsKey);
+      if (raw) {
+        const n = Number(raw);
+        if (Number.isFinite(n) && n > 0) ms = n;
       }
-      return;
     }
 
-    // Otherwise set it now (try DB, fall back to local)
-    const nowISO = new Date().toISOString();
-    let ms = Date.now();
-    try {
-      await supabase
-        .from("workout_sessions")
-        .update({ start_time: nowISO } as any)
-        .eq("id", session.id);
-
+    // 3) If still missing, start now. Try to persist to DB and always to localStorage.
+    if (ms == null) {
+      const nowISO = new Date().toISOString();
       ms = Date.parse(nowISO);
-      // reflect in local state so other UI sees it too
-      setSession(prev => (prev ? { ...prev, start_time: nowISO } : prev));
-    } catch {
-      // table/column might not exist; local fallback already in ms
+      try {
+        await supabase
+          .from("workout_sessions")
+          .update({ start_time: nowISO } as any)
+          .eq("id", sid);
+        setSession(prev => (prev ? { ...prev, start_time: nowISO } : prev));
+      } catch { /* ignore — local fallback handles it */ }
+      localStorage.setItem(lsKey, String(ms));
     }
 
-    if (!cancelled) {
+    if (!cancelled && ms != null) {
       setStartMs(ms);
-      setElapsedSec(Math.floor((Date.now() - ms) / 1000));
+      setElapsedSec(Math.max(0, Math.floor((Date.now() - ms) / 1000)));
     }
   })();
 
-  return () => {
-    cancelled = true;
-  };
-}, [session?.id]);
+  return () => { cancelled = true; };
+}, [session?.id, session?.start_time]);
 
-// Tick every second once startMs is known
+// Tick every second while we have a start time; recompute on visibility change
 useEffect(() => {
   if (!session || !startMs) return;
 
-  const tick = () => {
-    setElapsedSec(Math.floor((Date.now() - startMs) / 1000));
+  const recompute = () => {
+    setElapsedSec(Math.max(0, Math.floor((Date.now() - startMs) / 1000)));
   };
 
-  // initial paint
-  tick();
-
-  const id = window.setInterval(tick, 1000);
-  const onVis = () => tick();
+  recompute(); // initial
+  const id = window.setInterval(recompute, 1000);
+  const onVis = () => recompute();
   document.addEventListener("visibilitychange", onVis);
 
   return () => {
@@ -629,6 +631,7 @@ useEffect(() => {
     document.removeEventListener("visibilitychange", onVis);
   };
 }, [session?.id, startMs]);
+
 
 async function completeSessionNow() {
   if (sessionNameDraft.trim()) await saveSessionName(sessionNameDraft);
