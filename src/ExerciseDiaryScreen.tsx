@@ -511,71 +511,46 @@ async function cancelCurrentSession() {
     }
   }
 
-  async function saveSessionName(name: string) {
+ async function saveSessionName(name: string) {
   if (!session) return;
-
   const clean = name.trim();
   if (!clean) return;
 
-  try {
-    // Pull fresh notes so we don't duplicate / lose anything
-    const { data: fresh } = await supabase
-      .from("workout_sessions")
-      .select("notes")
-      .eq("id", session.id)
-      .single();
+  // 1) Get fresh notes
+  const { data: fresh } = await supabase
+    .from("workout_sessions")
+    .select("notes")
+    .eq("id", session.id)
+    .single();
 
-    const existingNotes = (fresh?.notes as string) || "";
+  const existingNotes = (fresh?.notes as string) || "";
 
-    // Ensure exactly one "Session: X" line on the first line of notes
-    const withoutOldPrefix = existingNotes.replace(/^Session:\s.*(\r?\n)?/, "");
-    const nextNotes = `Session: ${clean}\n${withoutOldPrefix}`.trimEnd();
+  // 2) Make sure the very first line is "Session: <name>"
+  const withoutOldSessionLine = existingNotes.replace(/^Session:\s.*(\r?\n)?/, "");
+  const nextNotes = `Session: ${clean}\n${withoutOldSessionLine}`.trimEnd();
 
-    // Try to write both "name" column and "notes" simultaneously.
-    // If the "name" column doesn't exist in this database, the update
-    // will still succeed for "notes" because Supabase ignores unknown keys.
-    const { error } = await supabase
-      .from("workout_sessions")
-      .update({ name: clean, notes: nextNotes } as any)
-      .eq("id", session.id);
+  // 3) Write both "name" and "notes" together (works even if "name" column missing)
+  const { error } = await supabase
+    .from("workout_sessions")
+    .update({ name: clean, notes: nextNotes } as any)
+    .eq("id", session.id);
 
-    if (error) throw error;
-
-    // Reflect locally so UI updates immediately
-    setSession(prev => (prev ? { ...prev, name: clean, notes: nextNotes } : prev));
-
-    // Also update "recent" list in memory so the label shows right away
-    setRecent(prev =>
-      prev.map(r => (r.id === session.id ? { ...r, name: clean, notes: nextNotes } : r))
-    );
-  } catch (e: any) {
-    // Last-ditch fallback: at least inject the prefix into notes
-    const prefix = `Session: ${clean}`;
-    const existing = session.notes || "";
-    const fallbackNotes = existing.startsWith("Session: ")
-      ? existing.replace(/^Session:\s.*(\r?\n)?/, `${prefix}\n`)
-      : (existing ? `${prefix}\n${existing}` : prefix);
-
-    const { error: e2 } = await supabase
-      .from("workout_sessions")
-      .update({ notes: fallbackNotes })
-      .eq("id", session.id);
-
-    if (!e2) {
-      setSession(prev => (prev ? { ...prev, notes: fallbackNotes } : prev));
-      setRecent(prev =>
-        prev.map(r => (r.id === session.id ? { ...r, notes: fallbackNotes } : r))
-      );
-    }
+  if (error) {
+    // fallback: at least write the Session: line
+    await supabase.from("workout_sessions").update({ notes: nextNotes }).eq("id", session.id);
   }
+
+  // 4) Update local state and Recent immediately
+  setSession(prev => (prev ? { ...prev, name: clean, notes: nextNotes } : prev));
+  setRecent(prev => prev.map(r => (r.id === session.id ? { ...r, name: clean, notes: nextNotes } : r)));
 }
 
 
 /* ---------- Session Timer (robust + survives standby) ---------- */
-const [elapsedSec, setElapsedSec] = useState<number>(0);
+const [elapsedSec, setElapsedSec] = useState(0);
 const [startMs, setStartMs] = useState<number | null>(null);
 
-// Resolve/ensure a start time for the active session (DB or localStorage)
+// Resolve (or create) a start time and persist it (DB + localStorage)
 useEffect(() => {
   let cancelled = false;
 
@@ -589,13 +564,14 @@ useEffect(() => {
     const sid = session.id;
     const lsKey = START_KEY(sid);
 
-    // 1) Prefer DB start_time if present
-    let ms: number | null =
-      session.start_time && isFinite(Date.parse(session.start_time))
-        ? Date.parse(session.start_time)
-        : null;
+    // Prefer DB start_time
+    let ms: number | null = null;
+    if (session.start_time) {
+      const parsed = Date.parse(session.start_time);
+      if (isFinite(parsed)) ms = parsed;
+    }
 
-    // 2) Else, try localStorage (persists through background/standby)
+    // Fallback: localStorage
     if (ms == null) {
       const raw = localStorage.getItem(lsKey);
       if (raw) {
@@ -604,47 +580,40 @@ useEffect(() => {
       }
     }
 
-    // 3) If still missing, start now. Try to persist to DB and always to localStorage.
+    // If still missing, start now and persist
     if (ms == null) {
       const nowISO = new Date().toISOString();
       ms = Date.parse(nowISO);
       try {
-        await supabase
-          .from("workout_sessions")
-          .update({ start_time: nowISO } as any)
-          .eq("id", sid);
+        await supabase.from("workout_sessions").update({ start_time: nowISO } as any).eq("id", sid);
         setSession(prev => (prev ? { ...prev, start_time: nowISO } : prev));
-      } catch { /* ignore — local fallback handles it */ }
-      localStorage.setItem(lsKey, String(ms));
+      } catch {}
+      try { localStorage.setItem(lsKey, String(ms)); } catch {}
     }
 
-    if (!cancelled && ms != null) {
+    if (!cancelled) {
       setStartMs(ms);
-      setElapsedSec(Math.max(0, Math.floor((Date.now() - ms) / 1000)));
+      setElapsedSec(Math.floor((Date.now() - ms) / 1000));
     }
   })();
 
   return () => { cancelled = true; };
 }, [session?.id, session?.start_time]);
 
-// Tick every second while we have a start time; recompute on visibility change
+// Tick every second; recompute when the app becomes visible again
 useEffect(() => {
   if (!session || !startMs) return;
-
-  const recompute = () => {
-    setElapsedSec(Math.max(0, Math.floor((Date.now() - startMs) / 1000)));
-  };
-
-  recompute(); // initial
-  const id = window.setInterval(recompute, 1000);
-  const onVis = () => recompute();
+  const tick = () => setElapsedSec(Math.floor((Date.now() - startMs) / 1000));
+  tick();
+  const id = window.setInterval(tick, 1000);
+  const onVis = () => tick();
   document.addEventListener("visibilitychange", onVis);
-
   return () => {
     window.clearInterval(id);
     document.removeEventListener("visibilitychange", onVis);
   };
 }, [session?.id, startMs]);
+
 
 
 async function completeSessionNow() {
