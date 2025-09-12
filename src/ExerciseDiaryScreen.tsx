@@ -1318,13 +1318,18 @@ function openRecentSession(s: Session) {
             <ul className="list" style={{ overflow: "auto", maxHeight: "60vh" }}>
               {recent.length === 0 && <li className="muted">No recent sessions.</li>}
               {recent.map(s => {
-                // derive title from name or notes prefix
-                const derived =
-                  (s.name || "") ||
-                  (s.notes?.startsWith("Session: ") ? s.notes.split("\n")[0].replace(/^Session:\s*/, "") : "");
-                const label = derived ? `${s.session_date} — ${derived}` : s.session_date;
+               {recent.map(s => {
+  // Prefer real name; else look for "Session: ..." in notes
+  const sessionName =
+    (s.name && s.name.trim()) ||
+    (s.notes?.startsWith("Session: ")
+      ? s.notes.split("\n")[0].replace(/^Session:\s*/, "").trim()
+      : "");
 
-                const isActive = session?.id === s.id;
+  // Always show date; append name if present
+  const label = sessionName ? `${s.session_date} — ${sessionName}` : s.session_date;
+
+  const isActive = session?.id === s.id;
 
                 return (
                   <li
