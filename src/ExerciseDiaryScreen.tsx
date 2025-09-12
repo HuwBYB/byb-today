@@ -512,27 +512,49 @@ async function cancelCurrentSession() {
   }
 
   async function saveSessionName(name: string) {
-    if (!session) return;
-    const clean = name.trim();
-    if (!clean) return;
-    // Try real column first
-    let saved = false;
-    try {
-      const { error } = await supabase.from("workout_sessions").update({ name: clean } as any).eq("id", session.id);
-      if (!error) {
-        setSession({ ...session, name: clean });
-        saved = true;
-      }
-    } catch { /* ignore */ }
-    if (!saved) {
-      // Fallback: prefix into notes
-      const prefix = `Session: ${clean}`;
-      const existing = session.notes || "";
-      const nextNotes = existing.startsWith("Session: ") ? existing.replace(/^Session: .*(\n)?/, `${prefix}\n`) : (existing ? `${prefix}\n${existing}` : prefix);
-      const { error } = await supabase.from("workout_sessions").update({ notes: nextNotes }).eq("id", session.id);
-      if (!error) setSession({ ...session, notes: nextNotes });
-    }
+  if (!session) return;
+  const clean = name.trim();
+  if (!clean) return;
+
+  // 1) Try to save to the dedicated column (best case)
+  try {
+    await supabase
+      .from("workout_sessions")
+      .update({ name: clean } as any)
+      .eq("id", session.id);
+    // reflect locally if present in our type
+    setSession(prev => (prev ? { ...prev, name: clean } : prev));
+  } catch {
+    /* ignore — we'll still put it into notes */
   }
+
+  // 2) Always ensure notes begin with "Session: <name>" (idempotent)
+  try {
+    // fetch the freshest notes, then merge
+    const { data: fresh } = await supabase
+      .from("workout_sessions")
+      .select("notes")
+      .eq("id", session.id)
+      .single();
+
+    const existing = (fresh?.notes ?? session.notes ?? "") as string;
+
+    const prefix = `Session: ${clean}`;
+    const nextNotes = existing.startsWith("Session: ")
+      ? existing.replace(/^Session: .*(\n)?/, `${prefix}\n`)
+      : (existing ? `${prefix}\n${existing}` : prefix);
+
+    await supabase
+      .from("workout_sessions")
+      .update({ notes: nextNotes })
+      .eq("id", session.id);
+
+    setSession(prev => (prev ? { ...prev, notes: nextNotes } : prev));
+  } catch {
+    /* still safe to ignore — Recent will at least try name column */
+  }
+}
+
 
 /* ---------- Session Timer (robust) ---------- */
 const [elapsedSec, setElapsedSec] = useState<number>(0);
