@@ -513,48 +513,62 @@ async function cancelCurrentSession() {
 
   async function saveSessionName(name: string) {
   if (!session) return;
+
   const clean = name.trim();
   if (!clean) return;
 
-  // 1) Try to save to the dedicated column (best case)
   try {
-    await supabase
-      .from("workout_sessions")
-      .update({ name: clean } as any)
-      .eq("id", session.id);
-    // reflect locally if present in our type
-    setSession(prev => (prev ? { ...prev, name: clean } : prev));
-  } catch {
-    /* ignore — we'll still put it into notes */
-  }
-
-  // 2) Always ensure notes begin with "Session: <name>" (idempotent)
-  try {
-    // fetch the freshest notes, then merge
+    // Pull fresh notes so we don't duplicate / lose anything
     const { data: fresh } = await supabase
       .from("workout_sessions")
       .select("notes")
       .eq("id", session.id)
       .single();
 
-    const existing = (fresh?.notes ?? session.notes ?? "") as string;
+    const existingNotes = (fresh?.notes as string) || "";
 
-    const prefix = `Session: ${clean}`;
-    const nextNotes = existing.startsWith("Session: ")
-      ? existing.replace(/^Session: .*(\n)?/, `${prefix}\n`)
-      : (existing ? `${prefix}\n${existing}` : prefix);
+    // Ensure exactly one "Session: X" line on the first line of notes
+    const withoutOldPrefix = existingNotes.replace(/^Session:\s.*(\r?\n)?/, "");
+    const nextNotes = `Session: ${clean}\n${withoutOldPrefix}`.trimEnd();
 
-    await supabase
+    // Try to write both "name" column and "notes" simultaneously.
+    // If the "name" column doesn't exist in this database, the update
+    // will still succeed for "notes" because Supabase ignores unknown keys.
+    const { error } = await supabase
       .from("workout_sessions")
-      .update({ notes: nextNotes })
+      .update({ name: clean, notes: nextNotes } as any)
       .eq("id", session.id);
 
-    setSession(prev => (prev ? { ...prev, notes: nextNotes } : prev));
-  } catch {
-    /* still safe to ignore — Recent will at least try name column */
+    if (error) throw error;
+
+    // Reflect locally so UI updates immediately
+    setSession(prev => (prev ? { ...prev, name: clean, notes: nextNotes } : prev));
+
+    // Also update "recent" list in memory so the label shows right away
+    setRecent(prev =>
+      prev.map(r => (r.id === session.id ? { ...r, name: clean, notes: nextNotes } : r))
+    );
+  } catch (e: any) {
+    // Last-ditch fallback: at least inject the prefix into notes
+    const prefix = `Session: ${clean}`;
+    const existing = session.notes || "";
+    const fallbackNotes = existing.startsWith("Session: ")
+      ? existing.replace(/^Session:\s.*(\r?\n)?/, `${prefix}\n`)
+      : (existing ? `${prefix}\n${existing}` : prefix);
+
+    const { error: e2 } = await supabase
+      .from("workout_sessions")
+      .update({ notes: fallbackNotes })
+      .eq("id", session.id);
+
+    if (!e2) {
+      setSession(prev => (prev ? { ...prev, notes: fallbackNotes } : prev));
+      setRecent(prev =>
+        prev.map(r => (r.id === session.id ? { ...r, notes: fallbackNotes } : r))
+      );
+    }
   }
 }
-
 
 
 /* ---------- Session Timer (robust + survives standby) ---------- */
