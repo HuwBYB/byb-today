@@ -367,25 +367,49 @@ const [justReopened, setJustReopened] = useState(false);
   }
 
   /* ----- Session actions ----- */
-  async function createSession() {
-    if (!userId) return;
-    setBusy(true); setErr(null);
+// ----- replace entire createSession -----
+async function createSession() {
+  if (!userId) return;
+  setBusy(true); setErr(null);
+  try {
+    // 1) create the row
+    const { data, error } = await supabase
+      .from("workout_sessions")
+      .insert({ user_id: userId, session_date: dateISO })
+      .select()
+      .single();
+    if (error) throw error;
+
+    const newS = data as Session;
+
+    // 2) stamp start_time immediately (so standby right after start still works)
+    const nowISO = new Date().toISOString();
     try {
-      const { data, error } = await supabase
-        .from("workout_sessions").insert({ user_id: userId, session_date: dateISO })
-        .select().single();
-      if (error) throw error;
-      const newS = data as Session;
-      setSessionsToday(prev => [...prev, newS]);
-      setSession(newS);
-      localStorage.setItem(FIN_KEY(newS.id, dateISO), "0");
-      await loadItems(newS.id);
-      await loadRecent();
-      setScrollToQuickAdd(true);
-      setJustReopened(false); // new session, not a reopened one
-    } catch (e: any) { setErr(e.message || String(e)); }
-    finally { setBusy(false); }
+      await supabase.from("workout_sessions").update({ start_time: nowISO } as any).eq("id", newS.id);
+      newS.start_time = nowISO;
+    } catch { /* column may not exist; ignore */ }
+
+    // 3) set local state and localStorage guard keys
+    setSessionsToday(prev => [...prev, newS]);
+    setSession(newS);
+    localStorage.setItem(FIN_KEY(newS.id, dateISO), "0");
+
+    // also persist a local start ms backup used by the timer (works even if DB col missing)
+    try {
+      localStorage.setItem(`byb:exercise_start_ms:${newS.id}`, String(Date.now()));
+    } catch {}
+
+    await loadItems(newS.id);
+    await loadRecent();
+    setScrollToQuickAdd(true);
+    setJustReopened(false);
+  } catch (e: any) {
+    setErr(e.message || String(e));
+  } finally {
+    setBusy(false);
   }
+}
+
 
   function markLocalFinished() {
     if (!session) return;
