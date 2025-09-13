@@ -80,9 +80,17 @@ function paceStr(distanceKm?: number, durSec?: number) {
   const secPerKm = Math.round(durSec / distanceKm);
   return `${secondsToMMSS(secPerKm)}/km`;
 }
+
+/* --- top-level helper --- */
+function extractSessionNameFromNotes(notes?: string | null): string {
+  if (!notes) return "";
+  const m = notes.match(/^\s*Session:\s*(.+?)\s*$/m);
+  return (m?.[1] || "").trim();
+}
+/* --- end helper --- */
+
 const FIN_KEY = (sid: number, dateISO: string) => `byb_session_finished_${sid}_${dateISO}`;
-const START_KEY = (sid: number) => `byb_session_start_${sid}`;
-/* ---------- Scroll memory (per-session) ---------- */
+const START_KEY = (sid: number) => `byb_session_start_${sid}`;/* ---------- Scroll memory (per-session) ---------- */
 function useScrollMemory(key: string, ready: boolean) {
   // Save on scroll and lifecycle edges
   useEffect(() => {
@@ -94,11 +102,7 @@ function useScrollMemory(key: string, ready: boolean) {
       } catch {}
     };
 
-    function extractSessionNameFromNotes(notes?: string | null): string {
-  if (!notes) return "";
-  const m = notes.match(/^\s*Session:\s*(.+?)\s*$/m);
-  return (m?.[1] || "").trim();
-}
+
     window.addEventListener("scroll", save, { passive: true });
     const onHide = () => save();
     document.addEventListener("visibilitychange", onHide);
