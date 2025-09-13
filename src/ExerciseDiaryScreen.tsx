@@ -94,6 +94,11 @@ function useScrollMemory(key: string, ready: boolean) {
       } catch {}
     };
 
+    function extractSessionNameFromNotes(notes?: string | null): string {
+  if (!notes) return "";
+  const m = notes.match(/^\s*Session:\s*(.+?)\s*$/m);
+  return (m?.[1] || "").trim();
+}
     window.addEventListener("scroll", save, { passive: true });
     const onHide = () => save();
     document.addEventListener("visibilitychange", onHide);
@@ -513,34 +518,46 @@ async function cancelCurrentSession() {
 
  async function saveSessionName(name: string) {
   if (!session) return;
+
   const clean = name.trim();
   if (!clean) return;
 
-  // 1) Get fresh notes
-  const { data: fresh } = await supabase
+  // 1) Get fresh notes so we don’t duplicate/remove someone’s edits.
+  const { data: fresh, error: freshErr } = await supabase
     .from("workout_sessions")
     .select("notes")
     .eq("id", session.id)
     .single();
 
+  if (freshErr) {
+    setErr(freshErr.message);
+    return;
+  }
+
   const existingNotes = (fresh?.notes as string) || "";
 
-  // 2) Make sure the very first line is "Session: <name>"
-  const withoutOldSessionLine = existingNotes.replace(/^Session:\s.*(\r?\n)?/, "");
-  const nextNotes = `Session: ${clean}\n${withoutOldSessionLine}`.trimEnd();
+  // 2) Remove ANY previous "Session:" line (wherever it is, tolerant of spaces)
+  const notesWithoutOldSessionLine = existingNotes.replace(/^\s*Session:\s*.*$(\r?\n)?/m, "");
 
-  // 3) Write both "name" and "notes" together (works even if "name" column missing)
+  // 3) Prepend the new Session line
+  const nextNotes = `Session: ${clean}\n${notesWithoutOldSessionLine}`.trimEnd();
+
+  // 4) Try to write both columns. If "name" doesn’t exist, PostgREST will error;
+  //    then we retry with just notes so the UI still works.
   const { error } = await supabase
     .from("workout_sessions")
     .update({ name: clean, notes: nextNotes } as any)
     .eq("id", session.id);
 
   if (error) {
-    // fallback: at least write the Session: line
-    await supabase.from("workout_sessions").update({ notes: nextNotes }).eq("id", session.id);
+    const { error: fallbackErr } = await supabase
+      .from("workout_sessions")
+      .update({ notes: nextNotes })
+      .eq("id", session.id);
+    if (fallbackErr) setErr(fallbackErr.message);
   }
 
-  // 4) Update local state and Recent immediately
+  // 5) Update local state + the Recent list immediately
   setSession(prev => (prev ? { ...prev, name: clean, notes: nextNotes } : prev));
   setRecent(prev => prev.map(r => (r.id === session.id ? { ...r, name: clean, notes: nextNotes } : r)));
 }
@@ -659,12 +676,10 @@ async function completeSessionNow() {
 }
 
   function openConfirmComplete() {
-    const seed =
-      (session?.name || "") ||
-      (session?.notes?.startsWith("Session: ") ? session?.notes?.split("\n")[0].replace(/^Session:\s*/, "") : "");
-    setSessionNameDraft(seed || "");
-    setConfirmCompleteOpen(true);
-  }
+  const seed = (session?.name || "") || extractSessionNameFromNotes(session?.notes);
+  setSessionNameDraft(seed || "");
+  setConfirmCompleteOpen(true);
+}
 
   function previewCollapse() {
     setPreviewCollapsed(true);
@@ -1352,14 +1367,12 @@ function openRecentSession(s: Session) {
               {recent.map(s => {
            
   // Prefer real name; else look for "Session: ..." in notes
-  const sessionName =
-    (s.name && s.name.trim()) ||
-    (s.notes?.startsWith("Session: ")
-      ? s.notes.split("\n")[0].replace(/^Session:\s*/, "").trim()
-      : "");
+const sessionName =
+  (s.name && s.name.trim()) ||
+  extractSessionNameFromNotes(s.notes);
 
-  // Always show date; append name if present
-  const label = sessionName ? `${s.session_date} — ${sessionName}` : s.session_date;
+const label = sessionName ? `${s.session_date} — ${sessionName}` : s.session_date;
+
 
   const isActive = session?.id === s.id;
 
