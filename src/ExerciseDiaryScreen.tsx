@@ -90,7 +90,9 @@ function extractSessionNameFromNotes(notes?: string | null): string {
 /* --- end helper --- */
 
 const FIN_KEY = (sid: number, dateISO: string) => `byb_session_finished_${sid}_${dateISO}`;
-const START_KEY = (sid: number) => `byb_session_start_${sid}`;/* ---------- Scroll memory (per-session) ---------- */
+const START_KEY = (sid: number) => `byb_session_start_${sid}`;
+
+/* ---------- Scroll memory (per-session) ---------- */
 function useScrollMemory(key: string, ready: boolean) {
   // Save on scroll and lifecycle edges
   useEffect(() => {
@@ -101,7 +103,6 @@ function useScrollMemory(key: string, ready: boolean) {
         sessionStorage.setItem(key, String(document.scrollingElement?.scrollTop ?? window.scrollY ?? 0));
       } catch {}
     };
-
 
     window.addEventListener("scroll", save, { passive: true });
     const onHide = () => save();
@@ -206,7 +207,7 @@ export default function ExerciseDiaryScreen() {
   // undo last template insert
   const [undoBanner, setUndoBanner] = useState<{ itemIds: number[] } | null>(null);
   // allow cancelling right after reopen (even if items exist)
-const [justReopened, setJustReopened] = useState(false);
+  const [justReopened, setJustReopened] = useState(false);
 
   // === NEW: Persist/restore scroll per active session+date
   const scrollKey = session ? `byb:exercise_scroll:${session.id}:${dateISO}` : "";
@@ -376,119 +377,133 @@ const [justReopened, setJustReopened] = useState(false);
   }
 
   /* ----- Session actions ----- */
-// ----- replace entire createSession -----
-async function createSession() {
-  if (!userId) return;
-  setBusy(true); setErr(null);
-  try {
-    // 1) create the row
-    const { data, error } = await supabase
-      .from("workout_sessions")
-      .insert({ user_id: userId, session_date: dateISO })
-      .select()
-      .single();
-    if (error) throw error;
-
-    const newS = data as Session;
-
-    // 2) stamp start_time immediately (so standby right after start still works)
-    const nowISO = new Date().toISOString();
+  // ----- replace entire createSession -----
+  async function createSession() {
+    if (!userId) return;
+    setBusy(true); setErr(null);
     try {
-      await supabase.from("workout_sessions").update({ start_time: nowISO } as any).eq("id", newS.id);
-      newS.start_time = nowISO;
-    } catch { /* column may not exist; ignore */ }
+      // 1) create the row
+      const { data, error } = await supabase
+        .from("workout_sessions")
+        .insert({ user_id: userId, session_date: dateISO })
+        .select()
+        .single();
+      if (error) throw error;
 
-    // 3) set local state and localStorage guard keys
-    setSessionsToday(prev => [...prev, newS]);
-    setSession(newS);
-    localStorage.setItem(FIN_KEY(newS.id, dateISO), "0");
+      const newS = data as Session;
 
-    // also persist a local start ms backup used by the timer (works even if DB col missing)
-    try {
-      localStorage.setItem(`byb:exercise_start_ms:${newS.id}`, String(Date.now()));
-    } catch {}
+      // 2) stamp start_time immediately (so standby right after start still works)
+      const nowISO = new Date().toISOString();
+      try {
+        await supabase.from("workout_sessions").update({ start_time: nowISO } as any).eq("id", newS.id);
+        newS.start_time = nowISO;
+      } catch { /* column may not exist; ignore */ }
 
-    await loadItems(newS.id);
-    await loadRecent();
-    setScrollToQuickAdd(true);
-    setJustReopened(false);
-  } catch (e: any) {
-    setErr(e.message || String(e));
-  } finally {
-    setBusy(false);
+      // 3) set local state and localStorage guard keys
+      setSessionsToday(prev => [...prev, newS]);
+      setSession(newS);
+      localStorage.setItem(FIN_KEY(newS.id, dateISO), "0");
+
+      // also persist a local start ms backup used by the timer (works even if DB col missing)
+      try {
+        localStorage.setItem(`byb:exercise_start_ms:${newS.id}`, String(Date.now()));
+      } catch {}
+
+      await loadItems(newS.id);
+      await loadRecent();
+      setScrollToQuickAdd(true);
+      setJustReopened(false);
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
   }
-}
-
 
   function markLocalFinished() {
     if (!session) return;
     localStorage.setItem(FIN_KEY(session.id, dateISO), "1");
     setFinished(true);
   }
- function reopenSession() {
-  if (!session) return;
-  localStorage.setItem(FIN_KEY(session.id, dateISO), "0");
-  setFinished(false);
-  setPreviewCollapsed(false);
-  setJustReopened(true); // ✅ allow cancelling this reopened session
-}
+
+  function reopenSession() {
+    if (!session) return;
+    localStorage.setItem(FIN_KEY(session.id, dateISO), "0");
+    setFinished(false);
+    setPreviewCollapsed(false);
+    setJustReopened(true); // ✅ allow cancelling this reopened session
+  }
+
+  // ⬇️ new UI helpers still called elsewhere
+  function openConfirmComplete() {
+    const seed =
+      (session?.name?.trim()) ||
+      extractSessionNameFromNotes(session?.notes);
+    setSessionNameDraft(seed || "");
+    setConfirmCompleteOpen(true);
+  }
+
+  function previewCollapse() {
+    setPreviewCollapsed(true);
+    setConfirmCompleteOpen(false);
+  }
 
   function switchSessionById(id: number) {
-  const s = sessionsToday.find(x => x.id === id) || null;
-  setSession(s);
-  setItems([]);
-  setSetsByItem({});
-  setJustReopened(false); // switching clears reopen state
-  if (s) loadItems(s.id);
-}
+    const s = sessionsToday.find(x => x.id === id) || null;
+    setSession(s);
+    setItems([]);
+    setSetsByItem({});
+    setJustReopened(false); // switching clears reopen state
+    if (s) loadItems(s.id);
+  }
 
   // cancel/delete current session if empty
-async function cancelCurrentSession() {
-  if (!session) return;
+  async function cancelCurrentSession() {
+    if (!session) return;
 
-  // If it's a reopened session with items, allow full delete with confirmation.
-  if (items.length > 0 && !justReopened) {
-    setErr("This session has exercises, so it can’t be cancelled. Delete the items first if you really want to remove it.");
-    return;
-  }
-  if (items.length > 0 && justReopened) {
-    const ok = window.confirm("Cancel this reopened session and delete all its exercises and sets?");
-    if (!ok) return;
-  }
-
-  setBusy(true); setErr(null);
-  try {
-    const sid = session.id;
-
-    // cascade delete items+sets if needed
-    if (items.length > 0) {
-      const itemIds = items.map(i => i.id);
-      await supabase.from("workout_sets").delete().in("item_id", itemIds);
-      await supabase.from("workout_items").delete().in("id", itemIds);
+    // If it's a reopened session with items, allow full delete with confirmation.
+    if (items.length > 0 && !justReopened) {
+      setErr("This session has exercises, so it can’t be cancelled. Delete the items first if you really want to remove it.");
+      return;
+    }
+    if (items.length > 0 && justReopened) {
+      const ok = window.confirm("Cancel this reopened session and delete all its exercises and sets?");
+      if (!ok) return;
     }
 
-    const { error } = await supabase.from("workout_sessions").delete().eq("id", sid);
-    if (error) throw error;
+    setBusy(true); setErr(null);
+    try {
+      const sid = session.id;
 
-    localStorage.removeItem(FIN_KEY(sid, dateISO));
-    setJustReopened(false);
+      // cascade delete items+sets if needed
+      if (items.length > 0) {
+        const itemIds = items.map(i => i.id);
+        await supabase.from("workout_sets").delete().in("item_id", itemIds);
+        await supabase.from("workout_items").delete().in("id", itemIds);
+      }
 
-    setSessionsToday(prev => {
-      const next = prev.filter(s => s.id !== sid);
-      const nextActive = next.length ? next[next.length - 1] : null;
-      setSession(nextActive);
-      if (nextActive) loadItems(nextActive.id);
-      else { setItems([]); setSetsByItem({}); }
-      return next;
-    });
+      const { error } = await supabase.from("workout_sessions").delete().eq("id", sid);
+      if (error) throw error;
 
-    await loadRecent();
-  } catch (e: any) {
-    setErr(e.message || String(e));
-  } finally {
-    setBusy(false);
+      localStorage.removeItem(FIN_KEY(sid, dateISO));
+      setJustReopened(false);
+
+      setSessionsToday(prev => {
+        const next = prev.filter(s => s.id !== sid);
+        const nextActive = next.length ? next[next.length - 1] : null;
+        setSession(nextActive);
+        if (nextActive) loadItems(nextActive.id);
+        else { setItems([]); setSetsByItem({}); }
+        return next;
+      });
+
+      await loadRecent();
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
   }
-}
 
   // Ensure exactly ONE "success" per weights session (logs to tasks)
   async function ensureWinForSession() {
@@ -520,169 +535,132 @@ async function cancelCurrentSession() {
     }
   }
 
- async function saveSessionName(name: string) {
-  if (!session) return;
+  /* ---------- Session Timer (robust + survives standby) ---------- */
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [startMs, setStartMs] = useState<number | null>(null);
 
-  const clean = name.trim();
-  if (!clean) return;
+  // Resolve (or create) a start time and persist it (DB + localStorage)
+  useEffect(() => {
+    let cancelled = false;
 
-  // 1) Get fresh notes so we don’t duplicate/remove someone’s edits.
-  const { data: fresh, error: freshErr } = await supabase
-    .from("workout_sessions")
-    .select("notes")
-    .eq("id", session.id)
-    .single();
-
-  if (freshErr) {
-    setErr(freshErr.message);
-    return;
-  }
-
-  const existingNotes = (fresh?.notes as string) || "";
-
-  // 2) Remove ANY previous "Session:" line (wherever it is, tolerant of spaces)
-  const notesWithoutOldSessionLine = existingNotes.replace(/^\s*Session:\s*.*$(\r?\n)?/m, "");
-
-  // 3) Prepend the new Session line
-  const nextNotes = `Session: ${clean}\n${notesWithoutOldSessionLine}`.trimEnd();
-
-  // 4) Try to write both columns. If "name" doesn’t exist, PostgREST will error;
-  //    then we retry with just notes so the UI still works.
-  const { error } = await supabase
-    .from("workout_sessions")
-    .update({ name: clean, notes: nextNotes } as any)
-    .eq("id", session.id);
-
-  if (error) {
-    const { error: fallbackErr } = await supabase
-      .from("workout_sessions")
-      .update({ notes: nextNotes })
-      .eq("id", session.id);
-    if (fallbackErr) setErr(fallbackErr.message);
-  }
-
-  // 5) Update local state + the Recent list immediately
-  setSession(prev => (prev ? { ...prev, name: clean, notes: nextNotes } : prev));
-  setRecent(prev => prev.map(r => (r.id === session.id ? { ...r, name: clean, notes: nextNotes } : r)));
-}
-
-
-/* ---------- Session Timer (robust + survives standby) ---------- */
-const [elapsedSec, setElapsedSec] = useState(0);
-const [startMs, setStartMs] = useState<number | null>(null);
-
-// Resolve (or create) a start time and persist it (DB + localStorage)
-useEffect(() => {
-  let cancelled = false;
-
-  (async () => {
-    if (!session) {
-      setStartMs(null);
-      setElapsedSec(0);
-      return;
-    }
-
-    const sid = session.id;
-    const lsKey = START_KEY(sid);
-
-    // Prefer DB start_time
-    let ms: number | null = null;
-    if (session.start_time) {
-      const parsed = Date.parse(session.start_time);
-      if (isFinite(parsed)) ms = parsed;
-    }
-
-    // Fallback: localStorage
-    if (ms == null) {
-      const raw = localStorage.getItem(lsKey);
-      if (raw) {
-        const n = Number(raw);
-        if (Number.isFinite(n) && n > 0) ms = n;
+    (async () => {
+      if (!session) {
+        setStartMs(null);
+        setElapsedSec(0);
+        return;
       }
+
+      const sid = session.id;
+      const lsKey = START_KEY(sid);
+
+      // Prefer DB start_time
+      let ms: number | null = null;
+      if (session.start_time) {
+        const parsed = Date.parse(session.start_time);
+        if (isFinite(parsed)) ms = parsed;
+      }
+
+      // Fallback: localStorage
+      if (ms == null) {
+        const raw = localStorage.getItem(lsKey);
+        if (raw) {
+          const n = Number(raw);
+          if (Number.isFinite(n) && n > 0) ms = n;
+        }
+      }
+
+      // If still missing, start now and persist
+      if (ms == null) {
+        const nowISO = new Date().toISOString();
+        ms = Date.parse(nowISO);
+        try {
+          await supabase.from("workout_sessions").update({ start_time: nowISO } as any).eq("id", sid);
+          setSession(prev => (prev ? { ...prev, start_time: nowISO } : prev));
+        } catch {}
+        try { localStorage.setItem(lsKey, String(ms)); } catch {}
+      }
+
+      if (!cancelled) {
+        setStartMs(ms);
+        setElapsedSec(Math.floor((Date.now() - ms) / 1000));
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [session?.id, session?.start_time]);
+
+  // Tick every second; recompute when the app becomes visible again
+  useEffect(() => {
+    if (!session || !startMs) return;
+    const tick = () => setElapsedSec(Math.floor((Date.now() - startMs) / 1000));
+    tick();
+    const id = window.setInterval(tick, 1000);
+    const onVis = () => tick();
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [session?.id, startMs]);
+
+  async function completeSessionNow() {
+    if (!session) return;
+
+    const cleanName = sessionNameDraft.trim();
+    const dur = secondsToHHMMSS(elapsedSec);
+
+    // 1) read the freshest notes
+    let currentNotes = "";
+    try {
+      const { data: fresh } = await supabase
+        .from("workout_sessions")
+        .select("notes")
+        .eq("id", session.id)
+        .single();
+      currentNotes = (fresh?.notes as string) || "";
+    } catch { /* non-fatal; we’ll still write */ }
+
+    // 2) compose final notes with both Session + Duration
+    const finalNotes = normalizeNotesWithNameAndDuration({
+      existingNotes: currentNotes,
+      name: cleanName || session?.name || "", // prefer typed name; fall back to column if any
+      durationHHMMSS: dur,
+    });
+
+    // 3) do ONE write (try with "name"; fall back to notes-only if column missing)
+    try {
+      const payload: any = { notes: finalNotes };
+      if (cleanName) payload.name = cleanName; // okay if column exists
+      await supabase.from("workout_sessions").update(payload).eq("id", session.id);
+    } catch {
+      // fallback for schemas without "name" column
+      await supabase.from("workout_sessions").update({ notes: finalNotes }).eq("id", session.id);
     }
 
-    // If still missing, start now and persist
-    if (ms == null) {
-      const nowISO = new Date().toISOString();
-      ms = Date.parse(nowISO);
-      try {
-        await supabase.from("workout_sessions").update({ start_time: nowISO } as any).eq("id", sid);
-        setSession(prev => (prev ? { ...prev, start_time: nowISO } : prev));
-      } catch {}
-      try { localStorage.setItem(lsKey, String(ms)); } catch {}
-    }
+    // 4) local state
+    setSession(prev => (prev ? { ...prev, name: cleanName || prev.name, notes: finalNotes } : prev));
+    setRecent(prev => prev.map(r => (r.id === session.id ? { ...r, name: cleanName || r.name, notes: finalNotes } : r)));
 
-    if (!cancelled) {
-      setStartMs(ms);
-      setElapsedSec(Math.floor((Date.now() - ms) / 1000));
-    }
-  })();
-
-  return () => { cancelled = true; };
-}, [session?.id, session?.start_time]);
-
-// Tick every second; recompute when the app becomes visible again
-useEffect(() => {
-  if (!session || !startMs) return;
-  const tick = () => setElapsedSec(Math.floor((Date.now() - startMs) / 1000));
-  tick();
-  const id = window.setInterval(tick, 1000);
-  const onVis = () => tick();
-  document.addEventListener("visibilitychange", onVis);
-  return () => {
-    window.clearInterval(id);
-    document.removeEventListener("visibilitychange", onVis);
-  };
-}, [session?.id, startMs]);
-
-
-
-async function completeSessionNow() {
-  if (!session) return;
-
-  const cleanName = sessionNameDraft.trim();
-  const dur = secondsToHHMMSS(elapsedSec);
-
-  // 1) read the freshest notes
-  let currentNotes = "";
-  try {
-    const { data: fresh } = await supabase
-      .from("workout_sessions")
-      .select("notes")
-      .eq("id", session.id)
-      .single();
-    currentNotes = (fresh?.notes as string) || "";
-  } catch { /* non-fatal; we’ll still write */ }
-
-  // 2) compose final notes with both Session + Duration
-  const finalNotes = normalizeNotesWithNameAndDuration({
-    existingNotes: currentNotes,
-    name: cleanName || session?.name || "", // prefer typed name; fall back to column if any
-    durationHHMMSS: dur,
-  });
-
-  // 3) do ONE write (try with "name"; fall back to notes-only if column missing)
-  try {
-    const payload: any = { notes: finalNotes };
-    if (cleanName) payload.name = cleanName; // okay if column exists
-    await supabase.from("workout_sessions").update(payload).eq("id", session.id);
-  } catch {
-    // fallback for schemas without "name" column
-    await supabase.from("workout_sessions").update({ notes: finalNotes }).eq("id", session.id);
+    // 5) finish UI + win (use helper)
+    markLocalFinished();
+    await ensureWinForSession();
+    setConfirmCompleteOpen(false);
+    setPreviewCollapsed(false);
+    await loadRecent();
   }
 
-  // 4) local state
-  setSession(prev => (prev ? { ...prev, name: cleanName || prev.name, notes: finalNotes } : prev));
-  setRecent(prev => prev.map(r => (r.id === session.id ? { ...r, name: cleanName || r.name, notes: finalNotes } : r)));
+  // === Re-add: save notes live from the textarea ===
+  // (keep this close to the other session actions)
+  async function saveSessionNotes(notes: string) {
+    if (!session) return;
+    const { error } = await supabase
+      .from("workout_sessions")
+      .update({ notes })
+      .eq("id", session.id);
+    if (error) setErr(error.message);
+    else setSession(prev => (prev ? { ...prev, notes } : prev));
+  }
 
-  // 5) finish UI + win
-  localStorage.setItem(FIN_KEY(session.id, dateISO), "1");
-  setFinished(true);
-  await ensureWinForSession();
-  setConfirmCompleteOpen(false);
-  setPreviewCollapsed(false);
-  await loadRecent();
-}
   /* ----- Item actions ----- */
   async function addWeightsExercise(title = "") {
     if (!session || !userId) return;
@@ -708,29 +686,29 @@ async function completeSessionNow() {
   }
 
   function normalizeNotesWithNameAndDuration(opts: {
-  existingNotes?: string | null;
-  name?: string;
-  durationHHMMSS: string;
-}) {
-  const { existingNotes = "", name, durationHHMMSS } = opts;
+    existingNotes?: string | null;
+    name?: string;
+    durationHHMMSS: string;
+  }) {
+    const { existingNotes, name, durationHHMMSS } = opts;
+    const base = existingNotes ?? ""; // guard against null
 
-  // remove any existing "Session:" line (wherever it is)
-  const withoutOldSession = existingNotes.replace(/^\s*Session:\s*.*$(\r?\n)?/m, "").trim();
+    // remove any existing "Session:" line (wherever it is)
+    const withoutOldSession = base.replace(/^\s*Session:\s*.*$(\r?\n)?/m, "").trim();
 
-  // ensure Session line if we have a name
-  const withSession = name?.trim()
-    ? `Session: ${name.trim()}\n${withoutOldSession}`.trim()
-    : (withoutOldSession || "");
+    // ensure Session line if we have a name
+    const withSession = name?.trim()
+      ? `Session: ${name.trim()}\n${withoutOldSession}`.trim()
+      : (withoutOldSession || "");
 
-  // ensure Duration line once
-  const hasDuration = /(^|\n)\s*Duration:\s*/m.test(withSession);
-  const finalNotes = hasDuration
-    ? withSession
-    : (withSession ? `${withSession}\nDuration: ${durationHHMMSS}` : `Duration: ${durationHHMMSS}`);
+    // ensure Duration line once
+    const hasDuration = /(^|\n)\s*Duration:\s*/m.test(withSession);
+    const finalNotes = hasDuration
+      ? withSession
+      : (withSession ? `${withSession}\nDuration: ${durationHHMMSS}` : `Duration: ${durationHHMMSS}`);
 
-  return finalNotes;
-}
-
+    return finalNotes;
+  }
 
   // Debounced local rename (no network on each keystroke)
   function renameItemLocal(item: Item, newTitle: string) {
@@ -918,7 +896,8 @@ async function completeSessionNow() {
   const [tplList, setTplList] = useState<TemplateRow[]>([]);
   const [useTplWeights, setUseTplWeights] = useState(true);
   const [useTplReps, setUseTplReps] = useState(false);
-
+  // (the rest of the component continues…)
+}
   async function fetchTemplates() {
     if (!userId) return;
     setLoadTplLoading(true);
@@ -1138,11 +1117,11 @@ async function completeSessionNow() {
   }, [items, setsByItem]);
 
   // click handler for RECENT: open that exact session (not just the date)
-function openRecentSession(s: Session) {
-  desiredSessionIdRef.current = s.id;
-  setDateISO(s.session_date);
-  setJustReopened(false); // viewing a historical session is not a "reopen"
-}
+  function openRecentSession(s: Session) {
+    desiredSessionIdRef.current = s.id;
+    setDateISO(s.session_date);
+    setJustReopened(false); // viewing a historical session is not a "reopen"
+  }
 
   return (
     <div className="page-exercise" style={{ display: "grid", gap: 12 }}>
@@ -1214,15 +1193,15 @@ function openRecentSession(s: Session) {
                     )}
 
                     {/* Show Cancel when the session is empty and not finished */}
-             {!finished && !previewCollapsed && (items.length === 0 || justReopened) && (
-  <button
-    className="btn-soft"
-    onClick={cancelCurrentSession}
-    title={justReopened ? "Delete this reopened session (including its items)" : "Delete this empty session"}
-  >
-    Cancel session
-  </button>
-)}
+                    {!finished && !previewCollapsed && (items.length === 0 || justReopened) && (
+                      <button
+                        className="btn-soft"
+                        onClick={cancelCurrentSession}
+                        title={justReopened ? "Delete this reopened session (including its items)" : "Delete this empty session"}
+                      >
+                        Cancel session
+                      </button>
+                    )}
 
                     {(finished || previewCollapsed) && <button onClick={reopenSession}>Reopen</button>}
                     <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius: 8 }}>
@@ -1268,7 +1247,7 @@ function openRecentSession(s: Session) {
                     onAddCardio={(kind, title, km, mmss) => addCardio(kind, title, km, mmss)}
                     onOpenLoadTemplate={openLoadTemplate}
                     onOpenSaveTemplate={openTemplateModal}
-                                      />
+                  />
                 </div>
 
                 {/* Items */}
@@ -1381,16 +1360,15 @@ function openRecentSession(s: Session) {
             <ul className="list" style={{ overflow: "auto", maxHeight: "60vh" }}>
               {recent.length === 0 && <li className="muted">No recent sessions.</li>}
               {recent.map(s => {
-           
-  // Prefer real name; else look for "Session: ..." in notes
-const sessionName =
-  (s.name && s.name.trim()) ||
-  extractSessionNameFromNotes(s.notes);
 
-const label = sessionName ? `${s.session_date} — ${sessionName}` : s.session_date;
+                // Prefer real name; else look for "Session: ..." in notes
+                const sessionName =
+                  (s.name && s.name.trim()) ||
+                  extractSessionNameFromNotes(s.notes);
 
+                const label = sessionName ? `${s.session_date} — ${sessionName}` : s.session_date;
 
-  const isActive = session?.id === s.id;
+                const isActive = session?.id === s.id;
 
                 return (
                   <li
@@ -1726,7 +1704,7 @@ function QuickKindPicker({
           {/* Logo header */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: "1px solid #f1f5f9" }}>
             <img
-              src="/LogoButterfly.png"  // <-- uses your public path
+              src="/LogoButterfly.png"
               alt="BYB"
               style={{ width: 20, height: 20, objectFit: "contain" }}
             />
@@ -1762,10 +1740,9 @@ function QuickKindPicker({
   );
 }
 
-
 /* ---------- Quick Add (updated) ---------- */
 function QuickAddCard({
- onAddWeights, onAddCardio, onOpenLoadTemplate, onOpenSaveTemplate
+  onAddWeights, onAddCardio, onOpenLoadTemplate, onOpenSaveTemplate
 }: {
   onAddWeights: (name: string) => void;
   onAddCardio: (kind: Item["kind"], title: string, distanceKm: number | null, mmss: string) => void;
@@ -1778,15 +1755,20 @@ function QuickAddCard({
   const [dur, setDur] = useState<string>("");
 
   function addCardio() {
-    onAddCardio(kind, title || (kind === "class" ? "Class" : kind[0].toUpperCase() + kind.slice(1)), dist ? Number(dist) : null, dur || "00:00");
+    onAddCardio(
+      kind,
+      title || (kind === "class" ? "Class" : kind[0].toUpperCase() + kind.slice(1)),
+      dist ? Number(dist) : null,
+      dur || "00:00"
+    );
     setTitle(""); setDist(""); setDur("");
   }
 
   return (
-    <div style={{ border: "1px solid #eee", borderRadius: 10, padding: 10 }}>
+    <div style={{ border: "1px solid "#eee", borderRadius: 10, padding: 10 }}>
       <div className="section-title">Quick add</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-       <QuickKindPicker value={kind} onChange={(k) => setKind(k)} />
+        <QuickKindPicker value={kind} onChange={(k) => setKind(k)} />
 
         {kind === "weights" ? (
           <>
@@ -1806,13 +1788,27 @@ function QuickAddCard({
             </button>
             <button className="btn-soft" onClick={onOpenLoadTemplate}>Add template</button>
             <button className="btn-soft" onClick={onOpenSaveTemplate}>Save as template</button>
-           
           </>
         ) : (
           <>
-            <input placeholder={kind === "class" ? "Class title" : "Title (optional)"} value={title} onChange={e => setTitle(e.target.value)} />
-            <input type="number" inputMode="decimal" step="0.1" placeholder="Distance (km)" value={dist} onChange={e => setDist(e.target.value)} />
-            <input placeholder="Duration mm:ss" value={dur} onChange={e => setDur(e.target.value)} />
+            <input
+              placeholder={kind === "class" ? "Class title" : "Title (optional)"}
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+            />
+            <input
+              type="number"
+              inputMode="decimal"
+              step="0.1"
+              placeholder="Distance (km)"
+              value={dist}
+              onChange={e => setDist(e.target.value)}
+            />
+            <input
+              placeholder="Duration mm:ss"
+              value={dur}
+              onChange={e => setDur(e.target.value)}
+            />
             <button className="btn-primary" onClick={addCardio}>Add {kind[0].toUpperCase() + kind.slice(1)}</button>
           </>
         )}
