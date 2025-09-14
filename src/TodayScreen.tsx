@@ -4,7 +4,7 @@ import { supabase } from "./lib/supabaseClient";
 import ProfileAppearanceCard from "./ProfileTitleAndPinCard";
 // Pull just what we use from the central categories module
 import { colorOf, normalizeCat } from "./theme/categories";
-// Keep global CSS as a side-effect import
+// Keep global CSS + theme vars as a side-effect import (must define .card, .badge, etc. here)
 import "./theme.css";
 
 /* =============================================
@@ -385,57 +385,6 @@ const BOOST_LINES = [
    Component
    ============================================= */
 export default function TodayScreen({ externalDateISO }: Props) {
-  /* ===== Global helpers (no theme overrides) ===== */
-  useEffect(() => {
-    const style = document.createElement("style");
-    style.setAttribute("data-byb-global", "1");
-    style.innerHTML = `
-      *,*::before,*::after{ box-sizing:border-box; }
-      html,body,#root{ margin:0; width:100%; max-width:100%; }
-      html, body { overflow-x: hidden; }
-      :root { overflow-x: clip; }
-      #root, body { max-width: 100vw; }
-      img,svg,video,canvas{ max-width:100%; height:auto; display:block; }
-      button img, button svg { max-width:100%; height:auto; display:block; }
-      h1,h2,h3,h4,p,span,small,button{ overflow-wrap:anywhere; }
-
-      .card{ width:100%; max-width:100%; background:var(--card); border:1px solid var(--border);
-             border-radius:16px; padding:12px; box-shadow:var(--shadow); }
-      .badge{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px;
-              background:var(--primary-soft); color:var(--text); font-size:12px; border:1px solid var(--border); }
-      .muted{ color:var(--muted); }
-      .btn-primary{ background:var(--primary); color:#fff; border:0; padding:8px 12px; border-radius:10px;
-                    box-shadow:0 6px 14px rgba(0,0,0,.12); transform:translateZ(0); }
-      .btn-primary:active{ transform:scale(.98); }
-      .btn-soft{ background:var(--card); border:1px solid var(--border); padding:8px 12px; border-radius:12px; }
-      .btn-ghost{ background:transparent; border:0; color:var(--text); }
-      input,select,button{ max-width:100%; }
-      input,select{ width:100%; border:1px solid var(--border); border-radius:10px; padding:10px 12px; background:var(--card); color:var(--text); }
-      input[type="date"]{ width:100%; max-width:180px; }
-      @media (max-width: 360px){ input[type="date"]{ max-width:140px; } }
-      ul.list{ list-style:none; padding:0; margin:0; display:grid; gap:8px; }
-      li.item{ background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px; box-shadow:var(--shadow); }
-      .h-scroll{ display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:4px; }
-      .h-scroll::-webkit-scrollbar{ display:none; }
-
-      .overlay{ position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 80; display: grid; place-items: center; padding: 16px; }
-      .sheet{ width: 100%; max-width: 640px; background: var(--card); border: 1px solid var(--border);
-              border-radius: 16px; box-shadow: var(--shadow); padding: 16px; max-height: 90vh; overflow:auto; -webkit-overflow-scrolling: touch; }
-
-      .chip{ display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; background:var(--bg); border:1px solid var(--border); font-size:12px; }
-      .chip button{ border:0; background:transparent; cursor:pointer; color:var(--muted); }
-      .chip button:focus{ outline: 2px solid var(--primary-soft); outline-offset: 2px; border-radius: 8px; }
-
-      @media (prefers-reduced-motion: reduce){
-        *{ animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; }
-      }
-    `;
-    document.head.appendChild(style);
-    return () => {
-      try { document.head.removeChild(style); } catch {}
-    };
-  }, []);
-
   /* ===== State ===== */
   const [userId, setUserId] = useState<string | null>(null);
   const [dateISO, setDateISO] = useState<string>(externalDateISO || todayISO());
@@ -828,7 +777,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         width: "100%",
         maxWidth: "100vw",
         padding: "12px 12px calc(56px + env(safe-area-inset-bottom,0))",
-        background: "var(--bg)", // let theme.css show its bg (can be gradient)
+        background: "var(--bg)", // themed in theme.css
       }}
     >
       {/* Top app bar */}
@@ -856,7 +805,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
             <span
               className="badge"
               title="Win if 3+ tasks done"
-              style={{ background: summary.isWin ? "var(--success-soft)" : "var(--danger-soft)", border: "1px solid var(--border)" }}
+              style={{ background: summary.isWin ? "var(--success-soft)" : "var(--danger-soft)" }}
             >
               {summary.isWin ? "Win" : "Keep going"}
             </span>
@@ -1138,7 +1087,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
                       style={{
                         borderRadius: 999,
                         background: on ? "var(--primary-soft)" : "var(--card)",
-                        border: on ? "1px solid var(--border)" : "1px solid var(--border)",
+                        border: "1px solid var(--border)",
                       }}
                     >
                       {n}
