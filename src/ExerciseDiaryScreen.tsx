@@ -604,50 +604,65 @@ export default function ExerciseDiaryScreen() {
   }, [session?.id, startMs]);
 
   async function completeSessionNow() {
-    if (!session) return;
+  if (!session) return;
 
-    const cleanName = sessionNameDraft.trim();
-    const dur = secondsToHHMMSS(elapsedSec);
+  const cleanName = sessionNameDraft.trim();
+  const dur = secondsToHHMMSS(elapsedSec);
 
-    // 1) read the freshest notes
-    let currentNotes = "";
-    try {
-      const { data: fresh } = await supabase
-        .from("workout_sessions")
-        .select("notes")
-        .eq("id", session.id)
-        .single();
-      currentNotes = (fresh?.notes as string) || "";
-    } catch { /* non-fatal; we’ll still write */ }
+  // 1) read freshest notes (non-fatal if it fails)
+  let currentNotes = "";
+  const { data: fresh } = await supabase
+    .from("workout_sessions")
+    .select("notes")
+    .eq("id", session.id)
+    .single();
+  currentNotes = (fresh?.notes as string) || "";
 
-    // 2) compose final notes with both Session + Duration
-    const finalNotes = normalizeNotesWithNameAndDuration({
-      existingNotes: currentNotes,
-      name: cleanName || session?.name || "", // prefer typed name; fall back to column if any
-      durationHHMMSS: dur,
-    });
+  // 2) compose final notes with Session + Duration (so we always keep a name in notes)
+  const finalNotes = normalizeNotesWithNameAndDuration({
+    existingNotes: currentNotes,
+    name: cleanName || session?.name || "",
+    durationHHMMSS: dur,
+  });
 
-    // 3) do ONE write (try with "name"; fall back to notes-only if column missing)
-    try {
-      const payload: any = { notes: finalNotes };
-      if (cleanName) payload.name = cleanName; // okay if column exists
-      await supabase.from("workout_sessions").update(payload).eq("id", session.id);
-    } catch {
-      // fallback for schemas without "name" column
-      await supabase.from("workout_sessions").update({ notes: finalNotes }).eq("id", session.id);
+  // 3) try to write (check .error instead of relying on throw)
+  let wrote = false;
+
+  // Try with "name" if provided (schema may not have this column)
+  if (cleanName) {
+    const { error } = await supabase
+      .from("workout_sessions")
+      .update({ name: cleanName, notes: finalNotes } as any)
+      .eq("id", session.id);
+
+    if (!error) {
+      wrote = true;
     }
-
-    // 4) local state
-    setSession(prev => (prev ? { ...prev, name: cleanName || prev.name, notes: finalNotes } : prev));
-    setRecent(prev => prev.map(r => (r.id === session.id ? { ...r, name: cleanName || r.name, notes: finalNotes } : r)));
-
-    // 5) finish UI + win (use helper)
-    markLocalFinished();
-    await ensureWinForSession();
-    setConfirmCompleteOpen(false);
-    setPreviewCollapsed(false);
-    await loadRecent();
   }
+
+  // Fallback: write notes-only (works even if "name" column doesn't exist)
+  if (!wrote) {
+    const { error } = await supabase
+      .from("workout_sessions")
+      .update({ notes: finalNotes })
+      .eq("id", session.id);
+    if (error) {
+      setErr(error.message);
+      return;
+    }
+  }
+
+  // 4) local state
+  setSession(prev => (prev ? { ...prev, name: cleanName || prev.name, notes: finalNotes } : prev));
+  setRecent(prev => prev.map(r => (r.id === session.id ? { ...r, name: cleanName || r.name, notes: finalNotes } : r)));
+
+  // 5) finish UI + streak
+  markLocalFinished();
+  await ensureWinForSession();
+  setConfirmCompleteOpen(false);
+  setPreviewCollapsed(false);
+  await loadRecent();
+}
 
   // === Re-add: save notes live from the textarea ===
   // (keep this close to the other session actions)
