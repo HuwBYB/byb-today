@@ -897,7 +897,7 @@ export default function ExerciseDiaryScreen() {
   const [useTplWeights, setUseTplWeights] = useState(true);
   const [useTplReps, setUseTplReps] = useState(false);
   // (the rest of the component continues…)
-}
+
    async function fetchTemplates() {
     if (!userId) return;
     setLoadTplLoading(true);
