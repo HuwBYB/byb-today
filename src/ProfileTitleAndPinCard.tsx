@@ -3,7 +3,7 @@
 // alter table profiles add column if not exists accent text check (accent in ('lavender','mint','sky','peach','lemon')) default 'lavender';
 // alter table profiles add column if not exists deepaccent text check (deepaccent in ('indigo','emerald','rose','cobalt','purple')) default 'indigo';
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from './lib/supabaseClient'
 
 // Keep keys aligned with the CSS system
