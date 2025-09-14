@@ -638,64 +638,51 @@ useEffect(() => {
 
 
 async function completeSessionNow() {
-  if (sessionNameDraft.trim()) await saveSessionName(sessionNameDraft);
+  if (!session) return;
 
-  // ⬇️ Fetch fresh notes/name so we don't overwrite the "Session: ..." prefix
-  let currentNotes = session?.notes || "";
+  const cleanName = sessionNameDraft.trim();
+  const dur = secondsToHHMMSS(elapsedSec);
+
+  // 1) read the freshest notes
+  let currentNotes = "";
   try {
-    if (session) {
-      const { data: fresh } = await supabase
-        .from("workout_sessions")
-        .select("notes,name")
-        .eq("id", session.id)
-        .single();
-      if (fresh?.notes != null) currentNotes = fresh.notes as string;
-    }
-  } catch {/* ignore */}
+    const { data: fresh } = await supabase
+      .from("workout_sessions")
+      .select("notes")
+      .eq("id", session.id)
+      .single();
+    currentNotes = (fresh?.notes as string) || "";
+  } catch { /* non-fatal; we’ll still write */ }
 
-  // Append duration safely to the latest notes
+  // 2) compose final notes with both Session + Duration
+  const finalNotes = normalizeNotesWithNameAndDuration({
+    existingNotes: currentNotes,
+    name: cleanName || session?.name || "", // prefer typed name; fall back to column if any
+    durationHHMMSS: dur,
+  });
+
+  // 3) do ONE write (try with "name"; fall back to notes-only if column missing)
   try {
-    const dur = secondsToHHMMSS(elapsedSec);
-    const stamp = `Duration: ${dur}`;
-    if (session) {
-      const already = (currentNotes || "").includes("Duration:");
-      const merged = currentNotes
-        ? (already ? currentNotes : `${currentNotes}\n${stamp}`)
-        : stamp;
+    const payload: any = { notes: finalNotes };
+    if (cleanName) payload.name = cleanName; // okay if column exists
+    await supabase.from("workout_sessions").update(payload).eq("id", session.id);
+  } catch {
+    // fallback for schemas without "name" column
+    await supabase.from("workout_sessions").update({ notes: finalNotes }).eq("id", session.id);
+  }
 
-      await supabase
-        .from("workout_sessions")
-        .update({ notes: merged })
-        .eq("id", session.id);
+  // 4) local state
+  setSession(prev => (prev ? { ...prev, name: cleanName || prev.name, notes: finalNotes } : prev));
+  setRecent(prev => prev.map(r => (r.id === session.id ? { ...r, name: cleanName || r.name, notes: finalNotes } : r)));
 
-      setSession(prev => (prev ? { ...prev, notes: merged } : prev));
-    }
-  } catch { /* non-fatal */ }
-
-  markLocalFinished();
+  // 5) finish UI + win
+  localStorage.setItem(FIN_KEY(session.id, dateISO), "1");
+  setFinished(true);
   await ensureWinForSession();
   setConfirmCompleteOpen(false);
   setPreviewCollapsed(false);
   await loadRecent();
 }
-
-  function openConfirmComplete() {
-  const seed = (session?.name || "") || extractSessionNameFromNotes(session?.notes);
-  setSessionNameDraft(seed || "");
-  setConfirmCompleteOpen(true);
-}
-
-  function previewCollapse() {
-    setPreviewCollapsed(true);
-    setConfirmCompleteOpen(false);
-  }
-
-  async function saveSessionNotes(notes: string) {
-    if (!session) return;
-    const { error } = await supabase.from("workout_sessions").update({ notes }).eq("id", session.id);
-    if (error) setErr(error.message); else setSession({ ...session, notes });
-  }
-
   /* ----- Item actions ----- */
   async function addWeightsExercise(title = "") {
     if (!session || !userId) return;
@@ -719,6 +706,31 @@ async function completeSessionNow() {
     if (error) { setErr(error.message); return; }
     await loadItems(session.id);
   }
+
+  function normalizeNotesWithNameAndDuration(opts: {
+  existingNotes?: string | null;
+  name?: string;
+  durationHHMMSS: string;
+}) {
+  const { existingNotes = "", name, durationHHMMSS } = opts;
+
+  // remove any existing "Session:" line (wherever it is)
+  const withoutOldSession = existingNotes.replace(/^\s*Session:\s*.*$(\r?\n)?/m, "").trim();
+
+  // ensure Session line if we have a name
+  const withSession = name?.trim()
+    ? `Session: ${name.trim()}\n${withoutOldSession}`.trim()
+    : (withoutOldSession || "");
+
+  // ensure Duration line once
+  const hasDuration = /(^|\n)\s*Duration:\s*/m.test(withSession);
+  const finalNotes = hasDuration
+    ? withSession
+    : (withSession ? `${withSession}\nDuration: ${durationHHMMSS}` : `Duration: ${durationHHMMSS}`);
+
+  return finalNotes;
+}
+
 
   // Debounced local rename (no network on each keystroke)
   function renameItemLocal(item: Item, newTitle: string) {
