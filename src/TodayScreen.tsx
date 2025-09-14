@@ -1,10 +1,10 @@
 // src/TodayScreen.tsx
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
-import ProfileAppearanceCard from "./ProfileTitleAndPinCard";
-// Pull just what we use from the central categories module
+
+// ✅ Pull just what we use from the central categories module
 import { colorOf, normalizeCat } from "./theme/categories";
-// Keep global CSS + theme vars as a side-effect import (must define .card, .badge, etc. here)
+// ✅ Keep global CSS as a side-effect import
 import "./theme.css";
 
 /* =============================================
@@ -276,20 +276,22 @@ function useToast() {
   return { node, show };
 }
 
-/* ===== Nickname options ===== */
+/* ===== Nickname options (match onboarding) ===== */
 const DEFAULT_NICKNAMES = [
   "King","Champ","Legend","Boss","Chief","Star","Ace","Hero","Captain","Tiger",
   "Queen","Princess","Gurl","Boss Lady","Diva","Hot Stuff","Girlfriend",
 ];
 
-/* ===== Boost lines ===== */
+/* ===== Boost lines (unisex, always positive) ===== */
 const BOOST_LINES = [
+  // Provided
   "You have the power to make a difference.",
   "The world is a better place with you in it.",
   "Be the role model you would have wanted.",
   "You are the only you in this world — embrace your uniqueness.",
   "Try to inspire others by being the best you that you can be.",
   "Be a positive light in this world.",
+  // More
   "Your effort matters, even when it’s quiet.",
   "You’re allowed to start small and think big.",
   "Show up today — your future will notice.",
@@ -385,6 +387,61 @@ const BOOST_LINES = [
    Component
    ============================================= */
 export default function TodayScreen({ externalDateISO }: Props) {
+  /* ===== Global theme + NO-BLEED CSS ===== */
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.setAttribute("data-byb-global", "1");
+    style.innerHTML = `
+      :root{
+        --bg: #fafafa;
+        --bg-gradient: radial-gradient(1200px 600px at 20% -10%, #f7f6ff 10%, transparent 60%),
+                       radial-gradient(900px 500px at 120% 10%, #f0fff7 10%, transparent 60%),
+                       #fafafa;
+        --card:#fff; --border:#e5e7eb; --text:#0f172a; --muted:#6b7280;
+        --primary:#6c8cff; --primary-soft:#eef2ff; --success-soft:#dcfce7; --danger-soft:#fee2e2;
+        --shadow:0 10px 30px rgba(0,0,0,.06);
+      }
+      *,*::before,*::after{ box-sizing:border-box; }
+      html,body,#root{ margin:0; width:100%; max-width:100%; background:var(--bg-gradient); color:var(--text); }
+      html, body { overflow-x: hidden; }
+      :root { overflow-x: clip; }
+      #root, body { max-width: 100vw; }
+      img,svg,video,canvas{ max-width:100%; height:auto; display:block; }
+      button img, button svg { max-width:100%; height:auto; display:block; }
+      h1,h2,h3,h4,p,span,small,button{ overflow-wrap:anywhere; }
+      .card{ width:100%; max-width:100%; background:var(--card); border:1px solid var(--border);
+             border-radius:16px; padding:12px; box-shadow:var(--shadow); }
+      .badge{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px;
+              background:var(--primary-soft); color:#273a91; font-size:12px; }
+      .muted{ color:var(--muted); }
+      .btn-primary{ background:var(--primary); color:#fff; border:0; padding:8px 12px; border-radius:10px;
+                    box-shadow:0 6px 14px rgba(108,140,255,.25); transform:translateZ(0); }
+      .btn-primary:active{ transform:scale(.98); }
+      .btn-soft{ background:#fff; border:1px solid var(--border); padding:8px 12px; border-radius:12px; }
+      .btn-ghost{ background:transparent; border:0; color:#fff; }
+      input,select,button{ max-width:100%; }
+      input,select{ width:100%; border:1px solid var(--border); border-radius:10px; padding:10px 12px; background:#fff; }
+      input[type="date"]{ width:100%; max-width:180px; }
+      @media (max-width: 360px){ input[type="date"]{ max-width:140px; } }
+      ul.list{ list-style:none; padding:0; margin:0; display:grid; gap:8px; }
+      li.item{ background:#fff; border:1px solid var(--border); border-radius:12px; padding:10px; box-shadow:var(--shadow); }
+      .h-scroll{ display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:4px; }
+      .h-scroll::-webkit-scrollbar{ display:none; }
+      .overlay{ position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 80; display: grid; place-items: center; padding: 16px; }
+      .sheet{ width: 100%; max-width: 640px; background: #fff; border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); padding: 16px; }
+      .chip{ display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; background:#f1f5f9; border:1px solid var(--border); font-size:12px; }
+      .chip button{ border:0; background:transparent; cursor:pointer; color:#64748b; }
+      .chip button:focus{ outline: 2px solid #c7d2fe; outline-offset: 2px; border-radius: 8px; }
+      @media (prefers-reduced-motion: reduce){
+        *{ animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; }
+      }
+    `;
+    document.head.appendChild(style);
+    return () => {
+      try { document.head.removeChild(style); } catch {}
+    };
+  }, []);
+
   /* ===== State ===== */
   const [userId, setUserId] = useState<string | null>(null);
   const [dateISO, setDateISO] = useState<string>(externalDateISO || todayISO());
@@ -776,8 +833,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         overflowX: "hidden",
         width: "100%",
         maxWidth: "100vw",
-        padding: "12px 12px calc(56px + env(safe-area-inset-bottom,0))",
-        background: "var(--bg)", // themed in theme.css
+        padding: "12px 12px calc(56px + env(safe-area-inset-bottom,0))", // reduced for bottom bar
       }}
     >
       {/* Top app bar */}
@@ -789,7 +845,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
           zIndex: 60,
           display: "grid",
           gap: 8,
-          background: "var(--card)",
+          background: "#fff",
           borderRadius: 16,
           padding: 12,
         }}
@@ -805,7 +861,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
             <span
               className="badge"
               title="Win if 3+ tasks done"
-              style={{ background: summary.isWin ? "var(--success-soft)" : "var(--danger-soft)" }}
+              style={{ background: summary.isWin ? "var(--success-soft)" : "var(--danger-soft)", border: "1px solid var(--border)" }}
             >
               {summary.isWin ? "Win" : "Keep going"}
             </span>
@@ -962,8 +1018,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
           bottom: 0,
           zIndex: 70,
           paddingBottom: "env(safe-area-inset-bottom,0)",
-          background: "var(--bg)",
-          borderTop: "1px solid var(--border)",
+          background: "#F9FAFB",
+          borderTop: "1px solid #e5e7eb",
         }}
       >
         <div
@@ -973,7 +1029,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
             width: "100%",
             maxWidth: "800px",
             margin: "0 auto",
-            height: 44,
+            height: 44, // ~half of previous space
           }}
         >
           <button
@@ -983,14 +1039,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
             style={{
               appearance: "none",
               border: 0,
-              background: "var(--primary-soft)",
-              color: "var(--text)",
+              background: "#99F6E4", // pastel teal
+              color: "#000",          // black text
               fontWeight: 700,
               fontSize: 14,
               lineHeight: "44px",
               height: "100%",
               width: "100%",
-              borderRight: "1px solid var(--border)",
+              borderRight: "1px solid #ffffff88",
             }}
           >
             ⚡ Need a Boost
@@ -1003,8 +1059,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
             style={{
               appearance: "none",
               border: 0,
-              background: "var(--primary-soft)",
-              color: "var(--text)",
+              background: "#E9D5FF", // pastel purple
+              color: "#000",          // black text
               fontWeight: 700,
               fontSize: 14,
               lineHeight: "44px",
@@ -1021,11 +1077,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
       {boostOpen && (
         <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="boost-title">
           <div className="sheet" style={{ maxWidth: 520 }}>
+            {/* Header row with close */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
               <div id="boost-title" style={{ fontWeight: 800, fontSize: 18 }}>Here’s a little boost</div>
               <button className="btn-ghost" onClick={() => setBoostOpen(false)} aria-label="Close boost">Close</button>
             </div>
 
+            {/* Message + BYB logo on the right */}
             <div
               className="card"
               style={{
@@ -1051,6 +1109,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
               />
             </div>
 
+            {/* Actions */}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
               <button className="btn-soft" onClick={nextBoost} title="Show another">Another</button>
               <button className="btn-primary" onClick={() => setBoostOpen(false)}>Got it</button>
@@ -1086,19 +1145,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
                       className="btn-soft"
                       style={{
                         borderRadius: 999,
-                        background: on ? "var(--primary-soft)" : "var(--card)",
-                        border: "1px solid var(--border)",
+                        background: on ? "#e0f2fe" : "",
+                        border: on ? "1px solid #38bdf8" : "1px solid var(--border)",
                       }}
                     >
                       {n}
                     </button>
                   );
                 })}
-              </div>
-
-              {/* Theme / Appearance settings */}
-              <div style={{ marginTop: 16 }}>
-                <ProfileAppearanceCard />
               </div>
 
               {/* Selected chips incl. customs (removable) */}
@@ -1177,3 +1231,4 @@ export default function TodayScreen({ externalDateISO }: Props) {
     </div>
   );
 }
+
