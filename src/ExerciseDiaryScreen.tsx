@@ -898,7 +898,7 @@ export default function ExerciseDiaryScreen() {
   const [useTplReps, setUseTplReps] = useState(false);
   // (the rest of the component continues…)
 }
-  async function fetchTemplates() {
+   async function fetchTemplates() {
     if (!userId) return;
     setLoadTplLoading(true);
     try {
@@ -1765,7 +1765,7 @@ function QuickAddCard({
   }
 
   return (
-    <div style={{ border: "1px solid "#eee", borderRadius: 10, padding: 10 }}>
+    <div style={{ border: "1px solid #eee", borderRadius: 10, padding: 10 }}>
       <div className="section-title">Quick add</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <QuickKindPicker value={kind} onChange={(k) => setKind(k)} />
