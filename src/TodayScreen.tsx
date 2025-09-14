@@ -1,7 +1,7 @@
 // src/TodayScreen.tsx
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
-import ProfileAppearanceCard from "./ProfileAppearanceCard";
+import ProfileAppearanceCard from "./ProfileTitleAndPinCard";
 // ✅ Pull just what we use from the central categories module
 import { colorOf, normalizeCat } from "./theme/categories";
 // ✅ Keep global CSS as a side-effect import
@@ -1234,5 +1234,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
     </div>
   );
 }
+
 
 
