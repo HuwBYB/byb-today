@@ -1,7 +1,7 @@
 // src/TodayScreen.tsx
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
-
+import ProfileAppearanceCard from "./ProfileAppearanceCard";
 // ✅ Pull just what we use from the central categories module
 import { colorOf, normalizeCat } from "./theme/categories";
 // ✅ Keep global CSS as a side-effect import
@@ -1154,7 +1154,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   );
                 })}
               </div>
-
+{/* Theme / Appearance settings */}
+<div style={{ marginTop: 16 }}>
+  <ProfileAppearanceCard />
+</div>
               {/* Selected chips incl. customs (removable) */}
               <div>
                 <div className="section-title" style={{ marginBottom: 6 }}>Selected nicknames</div>
@@ -1231,4 +1234,5 @@ export default function TodayScreen({ externalDateISO }: Props) {
     </div>
   );
 }
+
 
