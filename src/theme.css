@@ -1,351 +1,269 @@
-/* ---- BYB theme v2 (pastel, no deps) -------------------------------------- */
-:root{
-  /* neutrals */
-  --bg: #f7f7fb;
-  --card: #ffffff;
-  --text: #1f2937;
-  --muted: #6b7280;
-  --border: #e5e7eb;
+import React, { useEffect, useMemo, useState, createContext, useContext } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 
-  /* accent (default = lavender) */
-  --primary: #6d28d9;            /* accessible button/link shade */
-  --primary-600: #5b21b6;        /* hover/active for primary */
-  --primary-hsl: 263 72% 50%;    /* for gradients/washes */
-  --pastel-hsl: 258 85% 80%;     /* soft surface tint */
-  --on-pastel: #2b1d47;          /* text on pastel */
-  --ring: hsl(var(--pastel-hsl) / .55);
+/**
+ * BYB Theme System v3 — React edition
+ * - Supports theme families: "pastel" | "mono-light" | "mono-dark" | "deep"
+ * - Pastel uses data-accent: "lavender" | "mint" | "sky" | "peach" | "lemon"
+ * - Deep uses data-deepaccent: "indigo" | "emerald" | "rose" | "cobalt" | "purple"
+ * - Monochrome ignores accents
+ * - Persists to localStorage (keys below)
+ * - Applies data attributes to document.documentElement
+ */
 
-  /* shape & depth */
-  --radius: 12px;
-  --shadow: 0 8px 20px rgba(0,0,0,.05);
+type ThemeFamily = "pastel" | "mono-light" | "mono-dark" | "deep";
+type PastelAccent = "lavender" | "mint" | "sky" | "peach" | "lemon";
+type DeepAccent = "indigo" | "emerald" | "rose" | "cobalt" | "purple";
+
+const KEY_THEME = "byb_theme";
+const KEY_ACCENT = "byb_accent";
+const KEY_DEEP = "byb_deepaccent";
+
+export type ThemeState = {
+  theme: ThemeFamily;
+  accent: PastelAccent; // used if theme === "pastel"
+  deepaccent: DeepAccent; // used if theme === "deep"
+};
+
+const defaultState: ThemeState = { theme: "pastel", accent: "lavender", deepaccent: "indigo" };
+
+function readState(): ThemeState {
+  try {
+    const theme = (localStorage.getItem(KEY_THEME) as ThemeFamily) || defaultState.theme;
+    const accent = (localStorage.getItem(KEY_ACCENT) as PastelAccent) || defaultState.accent;
+    const deepaccent = (localStorage.getItem(KEY_DEEP) as DeepAccent) || defaultState.deepaccent;
+    return { theme, accent, deepaccent };
+  } catch {
+    return defaultState;
+  }
 }
 
-/* Optional quick accent swaps (set documentElement.dataset.accent="...") */
-:root[data-accent="mint"] {
-  --primary:#059669; --primary-600:#047857; --primary-hsl:162 94% 31%;
-  --pastel-hsl:152 60% 78%; --on-pastel:#123126; --ring:hsl(152 60% 70% / .55);
-}
-:root[data-accent="sky"] {
-  --primary:#0284c7; --primary-600:#0369a1; --primary-hsl:199 98% 39%;
-  --pastel-hsl:210 95% 78%; --on-pastel:#0f2a3a; --ring:hsl(210 95% 70% / .55);
-}
-:root[data-accent="peach"] {
-  --primary:#ea580c; --primary-600:#c2410c; --primary-hsl:20 84% 49%;
-  --pastel-hsl:16 90% 85%; --on-pastel:#3a2115; --ring:hsl(16 90% 75% / .55);
-}
-:root[data-accent="lemon"] {
-  --primary:#ca8a04; --primary-600:#a16207; --primary-hsl:45 96% 40%;
-  --pastel-hsl:50 98% 80%; --on-pastel:#1c1a05; --ring:hsl(50 98% 70% / .55);
+function writeState(state: ThemeState) {
+  try {
+    localStorage.setItem(KEY_THEME, state.theme);
+    localStorage.setItem(KEY_ACCENT, state.accent);
+    localStorage.setItem(KEY_DEEP, state.deepaccent);
+  } catch {}
 }
 
-/* Reset / base */
-* { box-sizing: border-box; }
-html, body, #root { height: 100%; }
-body{
-  margin:0;
-  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  color: var(--text);
-  /* pastel background wash (medium+) */
-  background:
-    radial-gradient(1000px 420px at 10% -10%, hsl(var(--pastel-hsl) / .55), transparent 60%),
-    radial-gradient(680px 320px at 90% -10%,  hsl(var(--primary-hsl) / .30), transparent 60%),
-    var(--bg);
+function applyToDOM(state: ThemeState) {
+  const root = document.documentElement as HTMLElement & {
+    dataset: DOMStringMap & { theme?: ThemeFamily; accent?: PastelAccent; deepaccent?: DeepAccent };
+  };
+
+  root.dataset.theme = state.theme;
+
+  if (state.theme === "pastel") {
+    if (state.accent === "lavender") delete root.dataset.accent; // lavender is default (no attribute)
+    else root.dataset.accent = state.accent;
+    delete root.dataset.deepaccent;
+  } else if (state.theme === "deep") {
+    delete root.dataset.accent;
+    root.dataset.deepaccent = state.deepaccent;
+  } else {
+    // mono-light / mono-dark
+    delete root.dataset.accent;
+    delete root.dataset.deepaccent;
+  }
 }
 
-/* Typography */
-h1,h2,h3{ margin: 0 0 8px; line-height: 1.2; }
-h1{ font-size: 24px; font-weight: 600; }
-h2{ font-size: 18px; font-weight: 600; }
-p{ margin: 0 0 10px; color: var(--text); }
+// ---------- Context for app-wide access ----------
+const ThemeContext = createContext<{ state: ThemeState; setState: React.Dispatch<React.SetStateAction<ThemeState>> } | null>(null);
 
-/* Layout helpers */
-.container{ max-width: 1100px; margin: 0 auto; padding: 12px; }
-.card{
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 12px;
-}
-/* optional inner pastel shimmer */
-.card--wash{ position:relative; overflow:hidden; }
-.card--wash::after{
-  content:""; position:absolute; inset:0; pointer-events:none;
-  background:
-    radial-gradient(520px 240px at -10% -20%, hsl(var(--pastel-hsl) / .32), transparent 60%),
-    radial-gradient(460px 200px at 110% -10%, hsl(var(--primary-hsl) / .22), transparent 60%);
-}
-.section-title{
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: 6px;
-}
-/* gradient heading accent */
-.heading-gradient{
-  font-weight:600;
-  background: linear-gradient(90deg, hsl(var(--primary-hsl)), hsl(var(--pastel-hsl)));
-  -webkit-background-clip:text; background-clip:text; color:transparent;
-  filter: saturate(1.08);
+export function useBYBTheme() {
+  const ctx = useContext(ThemeContext);
+  if (!ctx) throw new Error("useBYBTheme must be used within <BYBThemeProvider>");
+  return ctx;
 }
 
-/* Buttons */
-button{
-  appearance: none;
-  border: 1px solid var(--border);
-  background: #fff;
-  color: var(--text);
-  border-radius: 10px;
-  padding: 8px 12px;
-  cursor: pointer;
-  transition: transform .02s ease, box-shadow .2s ease, border-color .2s ease, background .2s ease, filter .2s ease;
-}
-button:hover{ box-shadow: 0 6px 16px rgba(0,0,0,.06); }
-button:active{ transform: translateY(1px); }
-button:focus{ outline: 3px solid var(--ring); outline-offset: 2px; }
+export function BYBThemeProvider({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<ThemeState>(defaultState);
 
-.btn-primary{
-  background: var(--primary);
-  color: #fff;
-  border-color: var(--primary);
-}
-.btn-primary:hover{ background: var(--primary-600); border-color: var(--primary-600); }
+  // Load from storage once (SSR-safe guard)
+  useEffect(() => {
+    setState(readState());
+  }, []);
 
-/* gentle pastel secondary button */
-.btn-soft{
-  background: hsl(var(--pastel-hsl));
-  color: var(--on-pastel);
-  border-color: hsl(var(--pastel-hsl) / .55);
-  filter: saturate(1.1);
-}
-.btn-ghost{
-  background: transparent;
-  border-color: transparent;
+  // Apply + persist whenever state changes
+  useEffect(() => {
+    applyToDOM(state);
+    writeState(state);
+  }, [state]);
+
+  // Prevent FOUC by applying immediately if localStorage already has values
+  useEffect(() => {
+    try {
+      const cached = readState();
+      applyToDOM(cached);
+    } catch {}
+  }, []);
+
+  const value = useMemo(() => ({ state, setState }), [state]);
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
-/* Top bar */
-.topbar{
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  backdrop-filter: saturate(1.2) blur(6px);
-  background: rgba(255,255,255,.7);
-  border-bottom: 1px solid var(--border);
-}
-.brand{
-  display:flex; align-items:center; gap:8px;
-  font-weight:600; letter-spacing:.2px;
-}
-.brand .logo{
-  width: 28px; height: 28px; border-radius: 8px;
-  background: linear-gradient(135deg, var(--primary), hsl(var(--pastel-hsl)));
-  border: 1px solid rgba(0,0,0,.06);
-}
+// ---------- UI: Profile → Appearance picker ----------
 
-/* Tabs */
-.tabs{ display:flex; gap:8px; flex-wrap: wrap; }
-.tab{
-  border-radius: 999px;
-  padding: 8px 14px;
-  border: 1px solid var(--border);
-  background: #fff;
-}
-.tab[aria-current="page"]{
-  background: hsl(var(--pastel-hsl) / .60);
-  border-color: hsl(var(--pastel-hsl) / .75);
-  color: var(--primary);
+const pastelAccents: { value: PastelAccent; label: string }[] = [
+  { value: "lavender", label: "Lavender" },
+  { value: "mint", label: "Mint" },
+  { value: "sky", label: "Sky" },
+  { value: "peach", label: "Peach" },
+  { value: "lemon", label: "Lemon" },
+];
+
+const deepAccents: { value: DeepAccent; label: string }[] = [
+  { value: "indigo", label: "Indigo" },
+  { value: "emerald", label: "Emerald" },
+  { value: "rose", label: "Rose" },
+  { value: "cobalt", label: "Cobalt" },
+  { value: "purple", label: "Purple" },
+];
+
+const themeFamilies: { value: ThemeFamily; label: string; desc?: string }[] = [
+  { value: "pastel", label: "Pastel", desc: "Light, soft surfaces with gentle washes" },
+  { value: "mono-light", label: "Monochrome (Light)", desc: "Clean grayscale, no accents" },
+  { value: "mono-dark", label: "Monochrome (Dark)", desc: "Dim grayscale, high legibility" },
+  { value: "deep", label: "Deep", desc: "Vivid, high-contrast with rich accents" },
+];
+
+function Swatch({ className }: { className?: string }) {
+  return <div className={cn("size-6 rounded-lg border", className)} />;
 }
 
-/* Inputs */
-input[type="text"], input[type="date"], input[type="number"], select, textarea{
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #fff;
-  color: var(--text);
+export default function ThemePicker() {
+  const { state, setState } = useBYBTheme();
+
+  return (
+    <Card className="shadow-sm">
+      <CardHeader>
+        <CardTitle className="text-xl">Appearance</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Theme Family */}
+        <div className="space-y-2">
+          <Label className="text-muted-foreground">Theme family</Label>
+          <RadioGroup
+            value={state.theme}
+            onValueChange={(v) =>
+              setState((s) => ({ ...s, theme: v as ThemeFamily }))
+            }
+            className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
+          >
+            {themeFamilies.map((t) => (
+              <div key={t.value} className="flex items-center gap-3 rounded-2xl border p-3">
+                <RadioGroupItem id={`theme-${t.value}`} value={t.value} />
+                <Label htmlFor={`theme-${t.value}`} className="flex-1 cursor-pointer">
+                  <div className="font-medium">{t.label}</div>
+                  {t.desc && <div className="text-xs text-muted-foreground">{t.desc}</div>}
+                </Label>
+              </div>
+            ))}
+          </RadioGroup>
+        </div>
+
+        <Separator />
+
+        {/* Pastel accents */}
+        {state.theme === "pastel" && (
+          <div className="space-y-2">
+            <Label className="text-muted-foreground">Pastel accent</Label>
+            <RadioGroup
+              value={state.accent}
+              onValueChange={(v) => setState((s) => ({ ...s, accent: v as PastelAccent }))}
+              className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5"
+            >
+              {pastelAccents.map((a) => (
+                <div key={a.value} className="flex items-center gap-3 rounded-2xl border p-3">
+                  <RadioGroupItem id={`accent-${a.value}`} value={a.value} />
+                  <Label htmlFor={`accent-${a.value}`} className="flex-1 cursor-pointer flex items-center gap-2">
+                    <span>{a.label}</span>
+                    <Swatch className={
+                      a.value === "lavender"
+                        ? "bg-gradient-to-br from-[#6d28d9] to-[hsl(258_85%_80%)]"
+                        : a.value === "mint"
+                        ? "bg-gradient-to-br from-[#059669] to-[hsl(152_60%_78%)]"
+                        : a.value === "sky"
+                        ? "bg-gradient-to-br from-[#0284c7] to-[hsl(210_95%_78%)]"
+                        : a.value === "peach"
+                        ? "bg-gradient-to-br from-[#ea580c] to-[hsl(16_90%_85%)]"
+                        : "bg-gradient-to-br from-[#ca8a04] to-[hsl(50_98%_80%)]"
+                    } />
+                  </Label>
+                </div>
+              ))}
+            </RadioGroup>
+          </div>
+        )}
+
+        {/* Deep accents */}
+        {state.theme === "deep" && (
+          <div className="space-y-2">
+            <Label className="text-muted-foreground">Deep accent</Label>
+            <RadioGroup
+              value={state.deepaccent}
+              onValueChange={(v) => setState((s) => ({ ...s, deepaccent: v as DeepAccent }))}
+              className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5"
+            >
+              {deepAccents.map((a) => (
+                <div key={a.value} className="flex items-center gap-3 rounded-2xl border p-3">
+                  <RadioGroupItem id={`deep-${a.value}`} value={a.value} />
+                  <Label htmlFor={`deep-${a.value}`} className="flex-1 cursor-pointer flex items-center gap-2">
+                    <span className="capitalize">{a.label}</span>
+                    <Swatch className={
+                      a.value === "indigo"
+                        ? "bg-gradient-to-br from-[#5b21b6] to-[#0b1220]"
+                        : a.value === "emerald"
+                        ? "bg-gradient-to-br from-[#047857] to-[#0b1220]"
+                        : a.value === "rose"
+                        ? "bg-gradient-to-br from-[#be123c] to-[#0b1220]"
+                        : a.value === "cobalt"
+                        ? "bg-gradient-to-br from-[#1d4ed8] to-[#0b1220]"
+                        : "bg-gradient-to-br from-[#7c3aed] to-[#0b1220]"
+                    } />
+                  </Label>
+                </div>
+              ))}
+            </RadioGroup>
+          </div>
+        )}
+
+        <Separator />
+
+        {/* Preview */}
+        <div className="space-y-3">
+          <div className="text-sm text-muted-foreground">Preview</div>
+          <div className="rounded-2xl border p-3 space-y-3">
+            <div className="flex flex-wrap gap-2">
+              <Button>Primary</Button>
+              <Button variant="secondary">Secondary</Button>
+              <Button variant="outline">Outline</Button>
+              <Button variant="ghost">Ghost</Button>
+            </div>
+            <div className="h-2 w-full rounded-full bg-muted">
+              <div className="h-2 w-3/5 rounded-full bg-primary" />
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <div className="rounded-full px-2.5 py-1 font-semibold text-[12px] bg-primary/15 text-primary">Badge</div>
+              <span className="text-muted-foreground">Muted text</span>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
-input::placeholder, textarea::placeholder{ color: #9ca3af; }
-input:focus, select:focus, textarea:focus{
-  outline: 3px solid var(--ring);
-  outline-offset: 2px;
-}
 
-/* Lists */
-.list{ list-style:none; margin:0; padding:0; }
-.item{
-  display:flex; justify-content:space-between; align-items:flex-start;
-  gap:12px; padding:10px; border:1px solid var(--border);
-  border-radius: 10px; margin-bottom:8px; background:#fff;
-}
-
-/* Progress & badges */
-.progress{ width:100%; height:8px; background:#eef2f7; border-radius:999px; overflow:hidden; }
-.progress__bar{
-  height:100%; width:0%;
-  background: linear-gradient(90deg, hsl(var(--pastel-hsl)), var(--primary));
-  border-radius:inherit; transition: width .3s ease;
-}
-.badge{
-  display:inline-block;
-  padding:6px 10px;
-  border-radius:999px;
-  background:hsl(var(--pastel-hsl));
-  color:var(--on-pastel);
-  font-weight:600; font-size:12px;
-}
-
-/* Tiny color dot */
-.dot{ width:10px; height:10px; border-radius:999px; border:1px solid #d1d5db; display:inline-block; }
-
-/* Small text */
-.muted{ color: var(--muted); font-size: 12px; }
-
-/* ---- Mobile overflow & safety nets -------------------------------------- */
-
-/* Safety net: never scroll sideways */
-html, body { max-width: 100%; overflow-x: hidden; }
-
-/* Let flex/grid children shrink so they don't push the page wider */
-.card, .item, .tabs { min-width: 0; }
-.card > *, .item > *, .tabs > * { min-width: 0; }
-
-/* Wrap long words, emojis, or pasted links */
-p, li, .item, .gratitude-text, .heading, .section-title {
-  overflow-wrap: anywhere;   /* modern */
-  word-break: break-word;    /* fallback */
-}
-
-/* Inputs & textareas never exceed the viewport */
-input[type="text"], input[type="date"], input[type="number"], select, textarea { max-width: 100%; }
-
-/* Media should scale down on mobile */
-img, video, canvas, svg { max-width: 100%; height: auto; display: block; }
-
-/* Tighten paddings on very small screens */
-@media (max-width: 480px) {
-  .container { padding: 12px; }
-  .tab { padding: 8px 12px; }
-  .item { padding: 10px; }
-}
-
-/* ---- Bottom app nav (mobile) -------------------------------------------- */
-.bottomnav{
-  position: fixed; left: 0; right: 0; bottom: 0;
-  background: rgba(255,255,255,.85);
-  backdrop-filter: saturate(1.2) blur(8px);
-  border-top: 1px solid var(--border);
-  z-index: 40;
-  padding: 8px 0;
-}
-@media (min-width: 900px){ .bottomnav { display:none; } } /* mobile only */
-body { padding-bottom: 70px; } /* make room for the bar */
-
-/* ---- Page: Gratitude ----------------------------------------------------- */
-.page-gratitude { max-width:100%; overflow-x:hidden; }
-.page-gratitude * { box-sizing: border-box; }
-
-/* Two-column on desktop, stack on phones */
-.gratitude-layout{
-  display:grid;
-  grid-template-columns: minmax(0,1fr) 320px;
-  gap:12px;
-}
-.gratitude-layout > * { min-width:0; }
-@media (max-width: 720px){ .gratitude-layout{ grid-template-columns: 1fr; } }
-
-/* Top controls row */
-.gratitude-toolbar{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
-.gratitude-toolbar > *{ min-width:0; }
-.gratitude-toolbar input[type="date"]{ flex:1 1 180px; min-width:0; }
-
-/* Right-side count text */
-.gratitude-count{
-  margin-left:auto; min-width:0;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  max-width:50%;
-}
-@media (max-width:480px){ .gratitude-count{ max-width:100%; } }
-
-/* Bottom action row (Export CSV) */
-.gratitude-actions{ display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
-.gratitude-actions > *{ min-width:0; max-width:100%; }
-
-/* ---- Page: Confidence Moves --------------------------------------------- */
-.page-confidence { max-width:100%; overflow-x:hidden; }
-.page-confidence * { box-sizing: border-box; }
-
-.page-confidence .confidence-layout{
-  display:grid;
-  grid-template-columns: minmax(0,1fr) 320px; /* content + optional sidebar */
-  gap:12px;
-}
-.page-confidence .confidence-layout > * { min-width:0; }
-@media (max-width:720px){ .page-confidence .confidence-layout{ grid-template-columns: 1fr; } }
-
-/* Top toolbar rows wrap & shrink properly */
-.page-confidence .confidence-toolbar{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
-.page-confidence .confidence-toolbar > *{ min-width:0; max-width:100%; }
-.page-confidence .confidence-toolbar input[type="date"]{ flex:1 1 180px; min-width:0; }
-
-/* Bottom actions */
-.page-confidence .confidence-actions{
-  display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px;
-}
-.page-confidence .confidence-actions > *{ min-width:0; max-width:100%; }
-
-/* Chip/badge rows often cause overflow — let them wrap */
-.page-confidence .cm-chips{ display:flex; flex-wrap:wrap; gap:8px; }
-.page-confidence .cm-chips > *{ min-width:0; }
-
-/* General safety: inputs/media never exceed viewport width */
-.page-confidence input, .page-confidence select, .page-confidence textarea, .page-confidence button{ max-width:100%; }
-.page-confidence img, .page-confidence video, .page-confidence canvas, .page-confidence svg{ max-width:100%; height:auto; display:block; }
-
-/* ---- Page: Wins ---------------------------------------------------------- */
-.page-wins { max-width:100%; overflow-x:hidden; }
-.page-wins * { box-sizing: border-box; }
-
-/* KPI grid */
-.wins-kpis{
-  display:grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap:12px;
-}
-/* Make sure long titles never push sideways */
-.wins-kpis .card > div + div { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-
-/* ---- Page: Exercise Diary ------------------------------------------------ */
-.page-exercise { max-width:100%; overflow-x:hidden; }
-.page-exercise * { box-sizing: border-box; }
-
-.page-exercise .exercise-layout{
-  display:grid;
-  grid-template-columns: minmax(0,1fr) 320px; /* editor + recent */
-  gap:12px;
-}
-.page-exercise .exercise-layout > * { min-width:0; }
-@media (max-width:720px){ .page-exercise .exercise-layout{ grid-template-columns: 1fr; } }
-
-.page-exercise .exercise-toolbar{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
-.page-exercise .exercise-toolbar > *{ min-width:0; }
-.page-exercise .exercise-toolbar input[type="date"]{ flex:1 1 180px; min-width:0; }
-
-.page-exercise .exercise-actions{
-  display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px;
-}
-.page-exercise .exercise-actions > *{ min-width:0; max-width:100%; }
-
-/* ---- Page: Notes --------------------------------------------------------- */
-.page-notes { max-width:100%; overflow-x:hidden; }
-.page-notes * { box-sizing: border-box; }
-
-.page-notes .notes-layout{
-  display:grid;
-  grid-template-columns: 300px minmax(0,1fr); /* sidebar + editor */
-  gap:12px;
-}
-.page-notes .notes-layout > * { min-width:0; }
-
-@media (max-width: 800px){
-  .page-notes .notes-layout{ grid-template-columns: 1fr; }
-}
+/**
+ * Integration notes (drop-in):
+ * 1) Wrap your app (or at least Layout.tsx) with <BYBThemeProvider>.
+ * 2) Mount <ThemePicker /> on Profile → Appearance tab.
+ * 3) Keep your existing CSS variables theme file in place — this picker only flips data attributes.
+ */
