@@ -1757,7 +1757,10 @@ function QuickKindPicker({
 
 /* ---------- Quick Add (updated) ---------- */
 function QuickAddCard({
-  onAddWeights, onAddCardio, onOpenLoadTemplate, onOpenSaveTemplate
+  onAddWeights,
+  onAddCardio,
+  onOpenLoadTemplate,
+  onOpenSaveTemplate
 }: {
   onAddWeights: (name: string) => void;
   onAddCardio: (kind: Item["kind"], title: string, distanceKm: number | null, mmss: string) => void;
@@ -1765,9 +1768,9 @@ function QuickAddCard({
   onOpenSaveTemplate: () => void;
 }) {
   const [kind, setKind] = useState<Item["kind"]>("weights");
-  const [title, setTitle] = useState("");
-  const [dist, setDist] = useState<string>("");
-  const [dur, setDur] = useState<string>("");
+  const [title, setTitle] = useState("");       // used for cardio/class only
+  const [dist, setDist] = useState<string>(""); // cardio only
+  const [dur, setDur] = useState<string>("");   // cardio only
 
   function addCardio() {
     onAddCardio(
@@ -1776,7 +1779,9 @@ function QuickAddCard({
       dist ? Number(dist) : null,
       dur || "00:00"
     );
-    setTitle(""); setDist(""); setDur("");
+    setTitle("");
+    setDist("");
+    setDur("");
   }
 
   return (
@@ -1786,18 +1791,12 @@ function QuickAddCard({
         <QuickKindPicker value={kind} onChange={(k) => setKind(k)} />
 
         {kind === "weights" ? (
+          // Weights: remove the 'Exercise name (optional)' input.
+          // Always add a blank exercise; the user renames inline on the item row.
           <>
-            <input
-              placeholder="Exercise name (optional)"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
             <button
               className="btn-soft"
-              onClick={() => {
-                onAddWeights(title.trim());
-                setTitle("");
-              }}
+              onClick={() => onAddWeights("")}
             >
               Add exercise
             </button>
@@ -1805,6 +1804,7 @@ function QuickAddCard({
             <button className="btn-soft" onClick={onOpenSaveTemplate}>Save as template</button>
           </>
         ) : (
+          // Cardio / Class: keep title + distance + duration inputs
           <>
             <input
               placeholder={kind === "class" ? "Class title" : "Title (optional)"}
@@ -1824,7 +1824,9 @@ function QuickAddCard({
               value={dur}
               onChange={e => setDur(e.target.value)}
             />
-            <button className="btn-primary" onClick={addCardio}>Add {kind[0].toUpperCase() + kind.slice(1)}</button>
+            <button className="btn-primary" onClick={addCardio}>
+              Add {kind[0].toUpperCase() + kind.slice(1)}
+            </button>
           </>
         )}
       </div>
