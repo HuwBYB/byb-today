@@ -14,8 +14,9 @@ type MenuItem = {
     | "notes"
     | "focus"
     | "meditation"
-    | "motivation" // ⬅️ NEW
-    | "affirmations";
+    | "motivation"
+    | "affirmations"
+    | "tutorials"; // 👈 NEW
   label: string;
   icon: string; // emoji OR image path
   desc?: string;
@@ -35,8 +36,9 @@ const ITEMS: MenuItem[] = [
   { key: "notes",        label: "Notes / Journal", icon: "📝" },
   { key: "focus",        label: "Focus",           icon: "🎧" },
   { key: "meditation",   label: "Meditation",      icon: "📺" },
-  { key: "motivation",   label: "Motivation",      icon: "🚀" }, // ⬅️ NEW
+  { key: "motivation",   label: "Motivation",      icon: "🚀" },
   { key: "affirmations", label: "Affirmations",    icon: "✨" },
+  { key: "tutorials",    label: "Tutorials",       icon: "🎓" }, // 👈 NEW
 ];
 
 export default function MenuScreen({
