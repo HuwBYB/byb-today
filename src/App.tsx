@@ -17,9 +17,10 @@ import NotesScreen from "./NotesScreen";
 import FocusAlfredScreen from "./FocusAlfredScreen";
 import OnboardingScreen from "./OnboardingScreen";
 import MeditationScreen from "./meditation";
-import MotivationScreen from "./motivation";   // ⬅️ NEW
+import MotivationScreen from "./motivation";   // ⬅️ existing
 import AffirmationBuilder from "./AffirmationBuilder";
 import MenuScreen from "./MenuScreen";
+import BYBTutorials from "./tutorials";        // ⬅️ NEW import
 
 /* Types */
 type ProfileRow = {
@@ -35,7 +36,8 @@ const LS_DONE = "byb:onboarding_done";
 type Tab =
   | "today" | "menu" | "calendar" | "goals" | "vision" | "gratitude"
   | "exercise" | "wins" | "alfred" | "confidence" | "notes"
-  | "focus" | "meditation" | "motivation" | "affirmations"; // ⬅️ added "motivation"
+  | "focus" | "meditation" | "motivation" | "affirmations"
+  | "tutorials"; // ⬅️ NEW key
 
 /* Helpers */
 function todayISO() {
@@ -147,10 +149,13 @@ export default function App() {
         return <FocusAlfredScreen />;
       case "meditation":
         return <MeditationScreen />;
-      case "motivation":                      {/* ⬅️ NEW route */}
+      case "motivation": {                     /* ⬅️ existing route */
         return <MotivationScreen />;
+      }
       case "affirmations":
         return <AffirmationBuilder />;
+      case "tutorials":                        /* ⬅️ NEW route */
+        return <BYBTutorials />;
       default:
         return <TodayScreen externalDateISO={externalDateISO} />;
     }
