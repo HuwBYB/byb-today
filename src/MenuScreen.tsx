@@ -152,7 +152,7 @@ export default function MenuScreen({
                 style={{
                   fontWeight: 700,
                   marginTop: 6,
-                  fontSize: 13,
+                  fontSize: 9,
                   lineHeight: 1.1,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
