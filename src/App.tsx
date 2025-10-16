@@ -14,13 +14,14 @@ import WinsScreen from "./WinsScreen";
 import AlfredScreen from "./AlfredScreen";
 import ConfidenceScreen from "./ConfidenceScreen";
 import NotesScreen from "./NotesScreen";
+import BigIdeasScreen from "./BigIdeasScreen";   // 👈 NEW
 import FocusAlfredScreen from "./FocusAlfredScreen";
 import OnboardingScreen from "./OnboardingScreen";
 import MeditationScreen from "./meditation";
-import MotivationScreen from "./motivation";   // ⬅️ existing
+import MotivationScreen from "./motivation";     // ⬅️ existing
 import AffirmationBuilder from "./AffirmationBuilder";
 import MenuScreen from "./MenuScreen";
-import BYBTutorials from "./tutorials";        // ⬅️ NEW import
+import BYBTutorials from "./tutorials";          // ⬅️ NEW import
 
 /* Types */
 type ProfileRow = {
@@ -35,7 +36,7 @@ const LS_DONE = "byb:onboarding_done";
 /* Tabs (route keys) */
 type Tab =
   | "today" | "menu" | "calendar" | "goals" | "vision" | "gratitude"
-  | "exercise" | "wins" | "alfred" | "confidence" | "notes"
+  | "exercise" | "wins" | "alfred" | "confidence" | "notes" | "ideas" // 👈 added "ideas"
   | "focus" | "meditation" | "motivation" | "affirmations"
   | "tutorials"; // ⬅️ NEW key
 
@@ -145,16 +146,18 @@ export default function App() {
         return <ConfidenceScreen />;
       case "notes":
         return <NotesScreen />;
+      case "ideas":                               // 👈 NEW route
+        return <BigIdeasScreen />;
       case "focus":
         return <FocusAlfredScreen />;
       case "meditation":
         return <MeditationScreen />;
-      case "motivation": {                     /* ⬅️ existing route */
+      case "motivation": {                        /* ⬅️ existing route */
         return <MotivationScreen />;
       }
       case "affirmations":
         return <AffirmationBuilder />;
-      case "tutorials":                        /* ⬅️ NEW route */
+      case "tutorials":                           /* ⬅️ NEW route */
         return <BYBTutorials />;
       default:
         return <TodayScreen externalDateISO={externalDateISO} />;
