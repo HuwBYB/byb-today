@@ -12,6 +12,7 @@ type MenuItem = {
     | "eva"        // optional: keep in the type for future-proofing
     | "confidence"
     | "notes"
+    | "ideas"      // 👈 NEW: Big Ideas page
     | "focus"
     | "meditation"
     | "motivation"
@@ -34,6 +35,7 @@ const ITEMS: MenuItem[] = [
   { key: "alfred",       label: "Eva",             icon: "💡" },
   { key: "confidence",   label: "Confidence",      icon: "🔥" },
   { key: "notes",        label: "Notes / Journal", icon: "📝" },
+  { key: "ideas",        label: "Big Ideas",       icon: "🧠" }, // 👈 NEW
   { key: "focus",        label: "Focus",           icon: "🎧" },
   { key: "meditation",   label: "Meditation",      icon: "📺" },
   { key: "motivation",   label: "Motivation",      icon: "🚀" },
@@ -55,11 +57,10 @@ export default function MenuScreen({
       style={{
         display: "grid",
         gap: 12,
-        // Safe padding so bottom items are fully tappable above mobile toolbars/overlays
         paddingBottom: "calc(24px + env(safe-area-inset-bottom, 0px))",
       }}
     >
-      {/* Today — long primary-style button with Home icon */}
+      {/* Today — primary button */}
       <button
         onClick={() => onOpenTab("today")}
         className="card"
@@ -70,8 +71,7 @@ export default function MenuScreen({
           padding: 16,
           borderRadius: 16,
           borderLeft: "6px solid #c7d2fe",
-          background:
-            "linear-gradient(180deg, #eef2ff 0%, #ffffff 90%)",
+          background: "linear-gradient(180deg, #eef2ff 0%, #ffffff 90%)",
         }}
         aria-label="Go to Today page"
         title="Go to Today"
@@ -98,13 +98,13 @@ export default function MenuScreen({
         </div>
       </button>
 
-      {/* Rest of the menu */}
-      <div className="card" style={{ padding: 12, position: "relative", zIndex: 1 }}>
+      {/* Grid menu — now 4 per row, more compact tiles */}
+      <div className="card" style={{ padding: 10, position: "relative", zIndex: 1 }}>
         <div
           style={{
             display: "grid",
-            gap: 12,
-            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+            gap: 10,
+            gridTemplateColumns: "repeat(4, minmax(0, 1fr))", // 👈 four per row
           }}
         >
           {ITEMS.filter((it) => it.key !== "today").map((it) => (
@@ -113,49 +113,62 @@ export default function MenuScreen({
               onClick={() => onOpenTab(resolveKey(it.key))}
               className="btn-soft"
               style={{
-                borderRadius: 16,
-                padding: 14,
+                borderRadius: 12,
+                padding: 10,
                 display: "grid",
-                gap: 6,
+                gap: 4,
                 alignContent: "center",
                 justifyItems: "center",
                 textAlign: "center",
-                minHeight: 120, // comfortable tap area
+                minHeight: 96, // smaller but still a good tap target
               }}
               title={it.label}
               aria-label={it.label}
             >
-              {/* Icon container for both emoji and image */}
+              {/* Icon */}
               <div
                 style={{
-                  width: 40,
-                  height: 40,
+                  width: 36,
+                  height: 36,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                 }}
                 aria-hidden
               >
-                {it.icon.endsWith(".png") || it.icon.endsWith(".jpg") ? (
+                {it.icon.endsWith?.(".png") || it.icon.endsWith?.(".jpg") ? (
                   <img
                     src={it.icon}
                     alt=""
-                    style={{ maxWidth: 32, maxHeight: 32, objectFit: "contain" }}
+                    style={{ maxWidth: 28, maxHeight: 28, objectFit: "contain" }}
                   />
                 ) : (
-                  <span style={{ fontSize: 28, lineHeight: 1 }}>{it.icon}</span>
+                  <span style={{ fontSize: 24, lineHeight: 1 }}>{it.icon}</span>
                 )}
               </div>
 
-              {/* Label */}
-              <div style={{ fontWeight: 700, marginTop: 12 }}>{it.label}</div>
+              {/* Label (slightly smaller to avoid wrapping) */}
+              <div
+                style={{
+                  fontWeight: 700,
+                  marginTop: 6,
+                  fontSize: 13,
+                  lineHeight: 1.1,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  width: "100%",
+                }}
+              >
+                {it.label}
+              </div>
             </button>
           ))}
         </div>
       </div>
 
-      {/* Bottom spacer to guarantee tap room beyond any fixed elements */}
-      <div style={{ height: 40 }} />
+      {/* Bottom spacer */}
+      <div style={{ height: 24 }} />
     </div>
   );
 }
