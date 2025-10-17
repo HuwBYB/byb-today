@@ -45,7 +45,7 @@ const ITEMS: MenuItem[] = [
   { key: "affirmations", label: "Affirmations",    icon: "✨" },
   { key: "tutorials",    label: "Tutorials",       icon: "🎓" },
   { key: "terms",        label: "Terms",           icon: "📜" },
-  { key: "charity",      label: "Charity Pledge",  icon: "❤️" }, // NEW
+  { key: "charity",      label: "Charity",         icon: "❤️" }, // NEW
 ];
 
 export default function MenuScreen({
