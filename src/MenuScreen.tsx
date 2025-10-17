@@ -158,7 +158,7 @@ export default function MenuScreen({
                 style={{
                   fontWeight: 700,
                   marginTop: 6,
-                  fontSize: 10, // ~20% smaller than the old size
+                  fontSize: 7, // ~20% smaller than the old size
                   lineHeight: 1.1,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
