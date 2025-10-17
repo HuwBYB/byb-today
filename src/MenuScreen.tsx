@@ -19,7 +19,8 @@ type MenuItem = {
     | "motivation"
     | "affirmations"
     | "tutorials"
-    | "terms";     // NEW: Terms page
+    | "terms"      // Terms page
+    | "charity";   // NEW: Charity Pledge page
   label: string;
   icon: string; // emoji OR image path
   desc?: string;
@@ -43,7 +44,8 @@ const ITEMS: MenuItem[] = [
   { key: "motivation",   label: "Motivation",      icon: "🚀" },
   { key: "affirmations", label: "Affirmations",    icon: "✨" },
   { key: "tutorials",    label: "Tutorials",       icon: "🎓" },
-  { key: "terms",        label: "Terms",           icon: "📜" }, // NEW
+  { key: "terms",        label: "Terms",           icon: "📜" },
+  { key: "charity",      label: "Charity Pledge",  icon: "❤️" }, // NEW
 ];
 
 export default function MenuScreen({
@@ -156,7 +158,7 @@ export default function MenuScreen({
                 style={{
                   fontWeight: 700,
                   marginTop: 6,
-                  fontSize: 10, // was ~12 — now ~20% smaller
+                  fontSize: 10, // ~20% smaller than the old size
                   lineHeight: 1.1,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
