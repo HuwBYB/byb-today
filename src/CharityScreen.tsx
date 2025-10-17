@@ -116,9 +116,7 @@ export default function CharityScreen() {
           </li>
         </ul>
 
-        <div className="muted" style={{ fontSize: 12 }}>
-          Logos are not displayed here. We’ll add them if/when permission is granted by each charity.
-        </div>
+        
       </section>
 
       {/* Suggest a charity */}
