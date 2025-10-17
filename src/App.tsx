@@ -23,6 +23,7 @@ import AffirmationBuilder from "./AffirmationBuilder";
 import MenuScreen from "./MenuScreen";
 import BYBTutorials from "./tutorials";          // ⬅️ NEW import
 import TermsScreen from "./TermsScreen";         // 👈 NEW import
+import CharityScreen from "./CharityScreen";     // 👈 NEW import
 
 /* Types */
 type ProfileRow = {
@@ -40,7 +41,8 @@ type Tab =
   | "exercise" | "wins" | "alfred" | "confidence" | "notes" | "ideas" // 👈 added "ideas"
   | "focus" | "meditation" | "motivation" | "affirmations"
   | "tutorials"
-  | "terms"; // 👈 NEW key
+  | "terms"
+  | "charity"; // 👈 NEW key
 
 /* Helpers */
 function todayISO() {
@@ -163,6 +165,8 @@ export default function App() {
         return <BYBTutorials />;
       case "terms":                               // 👈 NEW route
         return <TermsScreen />;
+      case "charity":                             // 👈 NEW route
+        return <CharityScreen />;
       default:
         return <TodayScreen externalDateISO={externalDateISO} />;
     }
