@@ -1,5 +1,4 @@
 // src/TermsScreen.tsx
-import React from "react";
 
 function formatToday() {
   // UK format, e.g. 17 Oct 2025
