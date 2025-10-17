@@ -1,4 +1,5 @@
 // src/MenuScreen.tsx
+
 type MenuItem = {
   key:
     | "today"
@@ -12,12 +13,13 @@ type MenuItem = {
     | "eva"        // optional: keep in the type for future-proofing
     | "confidence"
     | "notes"
-    | "ideas"      // 👈 NEW: Big Ideas page
+    | "ideas"      // Big Ideas page
     | "focus"
     | "meditation"
     | "motivation"
     | "affirmations"
-    | "tutorials"; // 👈 NEW
+    | "tutorials"
+    | "terms";     // NEW: Terms page
   label: string;
   icon: string; // emoji OR image path
   desc?: string;
@@ -35,12 +37,13 @@ const ITEMS: MenuItem[] = [
   { key: "alfred",       label: "Eva",             icon: "💡" },
   { key: "confidence",   label: "Confidence",      icon: "🔥" },
   { key: "notes",        label: "Notes / Journal", icon: "📝" },
-  { key: "ideas",        label: "Big Ideas",       icon: "🧠" }, // 👈 NEW
+  { key: "ideas",        label: "Big Ideas",       icon: "🧠" },
   { key: "focus",        label: "Focus",           icon: "🎧" },
   { key: "meditation",   label: "Meditation",      icon: "📺" },
   { key: "motivation",   label: "Motivation",      icon: "🚀" },
   { key: "affirmations", label: "Affirmations",    icon: "✨" },
-  { key: "tutorials",    label: "Tutorials",       icon: "🎓" }, // 👈 NEW
+  { key: "tutorials",    label: "Tutorials",       icon: "🎓" },
+  { key: "terms",        label: "Terms",           icon: "📜" }, // NEW
 ];
 
 export default function MenuScreen({
@@ -57,10 +60,11 @@ export default function MenuScreen({
       style={{
         display: "grid",
         gap: 12,
+        // Safe padding so bottom items are fully tappable above mobile toolbars/overlays
         paddingBottom: "calc(24px + env(safe-area-inset-bottom, 0px))",
       }}
     >
-      {/* Today — primary button */}
+      {/* Today — long primary-style button with Home icon */}
       <button
         onClick={() => onOpenTab("today")}
         className="card"
@@ -98,13 +102,13 @@ export default function MenuScreen({
         </div>
       </button>
 
-      {/* Grid menu — now 4 per row, more compact tiles */}
+      {/* Grid menu — 4 per row, compact tiles */}
       <div className="card" style={{ padding: 10, position: "relative", zIndex: 1 }}>
         <div
           style={{
             display: "grid",
             gap: 10,
-            gridTemplateColumns: "repeat(4, minmax(0, 1fr))", // 👈 four per row
+            gridTemplateColumns: "repeat(4, minmax(0, 1fr))", // four per row
           }}
         >
           {ITEMS.filter((it) => it.key !== "today").map((it) => (
@@ -125,7 +129,7 @@ export default function MenuScreen({
               title={it.label}
               aria-label={it.label}
             >
-              {/* Icon */}
+              {/* Icon container for emoji or images */}
               <div
                 style={{
                   width: 36,
@@ -147,12 +151,12 @@ export default function MenuScreen({
                 )}
               </div>
 
-              {/* Label (slightly smaller to avoid wrapping) */}
+              {/* Label — reduced ~20% for tighter fit */}
               <div
                 style={{
                   fontWeight: 700,
                   marginTop: 6,
-                  fontSize: 7,
+                  fontSize: 10, // was ~12 — now ~20% smaller
                   lineHeight: 1.1,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
@@ -167,7 +171,7 @@ export default function MenuScreen({
         </div>
       </div>
 
-      {/* Bottom spacer */}
+      {/* Bottom spacer to guarantee tap room beyond any fixed elements */}
       <div style={{ height: 24 }} />
     </div>
   );
