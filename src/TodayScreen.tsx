@@ -1,5 +1,5 @@
 // src/TodayScreen.tsx
-import React, { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 import { colorOf, normalizeCat } from "./theme/categories";
 import "./theme.css";
@@ -1366,3 +1366,4 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 }
+
