@@ -1,20 +1,13 @@
 // src/TodayScreen.tsx
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import React, { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
-
-// ✅ Pull just what we use from the central categories module
 import { colorOf, normalizeCat } from "./theme/categories";
-// ✅ Keep global CSS as a side-effect import
 import "./theme.css";
 
-/* =============================================
-   BYB — Today Screen (Profile editor + Boost + Gentle Reset)
-   ============================================= */
-
-/* ===== Logo & Toast theme ===== */
-const TOAST_LOGO_SRC = "/LogoButterfly.png"; // served from public/
-const TOAST_BG = "#D7F0FA";                   // match App banner
-const TOAST_BORDER = "#bfe5f3";               // subtle border to suit the bg
+/* ===== Toast theme ===== */
+const TOAST_LOGO_SRC = "/LogoButterfly.png";
+const TOAST_BG = "#D7F0FA";
+const TOAST_BORDER = "#bfe5f3";
 
 /* ===== Types ===== */
 type Task = {
@@ -22,12 +15,11 @@ type Task = {
   user_id: string;
   title: string;
   due_date: string | null;
-  status: "pending" | "done" | "skipped" | string; // DB constraint: pending | done | skipped
+  status: "pending" | "done" | "skipped" | string;
   priority: number | null;
   source: string | null;
   goal_id: number | null;
   completed_at: string | null;
-  // category fields
   category?: string | null;
   category_color?: string | null;
 };
@@ -43,9 +35,9 @@ function todayISO() {
   return `${yyyy}-${mm}-${dd}`;
 }
 function toISO(d: Date) {
-  const y = d.getFullYear(),
-    m = String(d.getMonth() + 1).padStart(2, "0"),
-    dd = String(d.getDate()).padStart(2, "0");
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
 function fromISO(s: string) {
@@ -99,26 +91,22 @@ function makeSeriesKey(repeat: Repeat) {
 
 /* ===== Greeting helpers ===== */
 const LS_NAME = "byb:display_name";
-const LS_POOL = "byb:display_pool"; // string[]
-const LS_ROTATE = "byb:rotate_nicknames"; // "1" | "0" (default on)
+const LS_POOL = "byb:display_pool";
+const LS_ROTATE = "byb:rotate_nicknames";
 const LS_LAST_VISIT = "byb:last_visit_ms";
 
 function pickGreetingLabel(): string {
   try {
     const name = (localStorage.getItem(LS_NAME) || "").trim();
-    const rotate = localStorage.getItem(LS_ROTATE) !== "0"; // default ON
+    const rotate = localStorage.getItem(LS_ROTATE) !== "0";
     const pool = rotate ? (JSON.parse(localStorage.getItem(LS_POOL) || "[]") as string[]) : [];
-    const list = [
-      ...(name ? [name] : []),
-      ...(Array.isArray(pool) ? pool.filter(Boolean) : []),
-    ];
+    const list = [...(name ? [name] : []), ...(Array.isArray(pool) ? pool.filter(Boolean) : [])];
     if (list.length === 0) return "";
     return list[Math.floor(Math.random() * list.length)];
   } catch {
     return "";
   }
 }
-
 const POSITIVE_GREETS = [
   "Great to see you",
   "Let’s make today a great day",
@@ -131,7 +119,6 @@ const PROGRESS_GREETS = [
   "Momentum looks great",
   "Lovely progress",
 ];
-
 function timeGreeting(date = new Date()): string {
   const h = date.getHours();
   if (h < 5) return "Up late";
@@ -145,17 +132,11 @@ function buildGreetingLine(missed: boolean, nameLabel: string, done: number, pen
   const didHalf = total > 0 && done >= Math.ceil(total / 2);
   const pool = didHalf ? PROGRESS_GREETS : POSITIVE_GREETS;
   const prefix = pool[Math.floor(Math.random() * pool.length)];
-  return nameLabel ? `${prefix}, ${nameLabel}` : prefix;
+  return nameLabel ? `${prefix}, ${nameLabel}` : `${prefix}`;
 }
 
 /* ===== Summary ===== */
-type Summary = {
-  doneToday: number;
-  pendingToday: number;
-  isWin: boolean;
-  streak: number;
-  bestStreak: number;
-};
+type Summary = { doneToday: number; pendingToday: number; isWin: boolean; streak: number; bestStreak: number };
 
 function formatNiceDate(iso: string): string {
   try {
@@ -201,7 +182,7 @@ function fireConfetti() {
   setTimeout(() => container.remove(), 2200);
 }
 
-/* ===== Encouragements + Toast ===== */
+/* ===== Toast ===== */
 const ENCOURAGE_LINES = [
   "Lovely momentum. Keep it rolling.",
   "One pebble at a time becomes a mountain.",
@@ -212,15 +193,12 @@ const ENCOURAGE_LINES = [
 function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)] as T;
 }
-
 function useToast() {
   const [msg, setMsg] = useState<string | null>(null);
-
   function show(m: string) {
     setMsg(m);
     setTimeout(() => setMsg(null), 2500);
   }
-
   const node = (
     <div
       aria-live="polite"
@@ -272,17 +250,14 @@ function useToast() {
       )}
     </div>
   );
-
   return { node, show };
 }
 
-/* ===== Nickname options (match onboarding) ===== */
+/* ===== Defaults (nicknames, boost) ===== */
 const DEFAULT_NICKNAMES = [
   "King","Champ","Legend","Boss","Chief","Star","Ace","Hero","Captain","Tiger",
   "Queen","Princess","Gurl","Boss Lady","Diva","Hot Stuff","Girlfriend",
 ];
-
-/* ===== Boost lines (unisex, always positive) ===== */
 const BOOST_LINES = [
   "You have the power to make a difference.",
   "The world is a better place with you in it.",
@@ -385,7 +360,7 @@ const BOOST_LINES = [
    Component
    ============================================= */
 export default function TodayScreen({ externalDateISO }: Props) {
-  /* ===== Global theme + NO-BLEED CSS ===== */
+  /* ===== Global theme injection ===== */
   useEffect(() => {
     const style = document.createElement("style");
     style.setAttribute("data-byb-global", "1");
@@ -450,7 +425,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Add task (top composer)
+  // Add task
   const [newTitle, setNewTitle] = useState("");
   const [newRepeat, setNewRepeat] = useState<Repeat>("");
   const [adding, setAdding] = useState(false);
@@ -473,7 +448,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [boostOpen, setBoostOpen] = useState(false);
   const [boostLine, setBoostLine] = useState<string>("");
 
-  // Supportive backlog reset
+  // Gentle Reset
   const [gentleOpen, setGentleOpen] = useState(false);
 
   // Confirm skip ALL overdue
@@ -492,13 +467,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   }, []);
 
   // Summary
-  const [summary, setSummary] = useState<Summary>({
-    doneToday: 0,
-    pendingToday: 0,
-    isWin: false,
-    streak: 0,
-    bestStreak: 0,
-  });
+  const [summary, setSummary] = useState<Summary>({ doneToday: 0, pendingToday: 0, isWin: false, streak: 0, bestStreak: 0 });
 
   // streak micro animation
   const prevStreak = useRef(0);
@@ -545,7 +514,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     t.status !== "skipped" &&
     fromISO(t.due_date.slice(0, 10)).getTime() < fromISO(dateISO).getTime();
 
-  /* ===== Data loading (DEFENSIVE) ===== */
+  /* ===== Data loading ===== */
   async function load() {
     if (!userId) return;
     setLoading(true);
@@ -558,20 +527,19 @@ export default function TodayScreen({ externalDateISO }: Props) {
       if (error) throw error;
 
       const raw = (data as Task[]) || [];
-
       const normalized: Task[] = raw.map((t) => ({
         ...t,
         due_date: t.due_date ? t.due_date.slice(0, 10) : null,
         completed_at: t.completed_at,
       }));
 
-      // Exclude "skipped" from main working list
+      // Exclude done + skipped from the working set; include today's and overdue
       const list = normalized.filter(
         (t) =>
-          t.status !== "done" &&
-          t.status !== "skipped" &&
           t.due_date !== null &&
-          (t.due_date === dateISO || t.due_date < dateISO)
+          (t.due_date === dateISO || t.due_date < dateISO) &&
+          t.status !== "done" &&
+          t.status !== "skipped"
       );
 
       list.sort((a, b) => {
@@ -586,6 +554,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
       setTasks(list);
 
+      // goals
       const ids = Array.from(new Set(list.map((t) => t.goal_id).filter((v): v is number => typeof v === "number")));
       if (ids.length) {
         const { data: gs, error: ge } = await supabase.from("goals").select("id,title").in("id", ids);
@@ -655,7 +624,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
     setGreetLine(buildGreetingLine(missed, greetName, summary.doneToday, summary.pendingToday));
   }, [missed, greetName, summary.doneToday, summary.pendingToday]);
 
-  function displayTitle(t: Task) {
+  function displayTitle(t: Task | null) {
+    if (!t) return "";
     const base = (t.title || "").trim();
     const g = t.goal_id != null ? goalMap[t.goal_id] : "";
     return g ? `${base} (${g})` : base;
@@ -713,7 +683,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     } catch (e: any) { setErr(e.message || String(e)); } finally { setAdding(false); }
   }
 
-  // Core helper used by both flows (banner + explicit button)
+  // Skip all overdue
   async function skipAllOverdue() {
     if (!userId) return;
     const backlogIds = tasks.filter(t => isOverdueFn(t)).map(t => t.id);
@@ -734,7 +704,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 
-  // Gentle Reset triggers skipAllOverdue
+  // Gentle Reset uses skipAllOverdue
   async function gentleResetBacklog() {
     await skipAllOverdue();
   }
@@ -758,10 +728,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 
-  // Skip ONE task (with confirm)
-  function askSkipTask(t: Task) {
-    setTaskToSkip(t);
-  }
+  // Skip ONE task
+  function askSkipTask(t: Task) { setTaskToSkip(t); }
   async function confirmSkipTask() {
     if (!taskToSkip) return;
     try {
@@ -779,13 +747,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
   }
 
   /* ===== Boost helpers ===== */
-  function openBoost() {
-    setBoostLine(pick(BOOST_LINES));
-    setBoostOpen(true);
-  }
-  function nextBoost() {
-    setBoostLine(pick(BOOST_LINES));
-  }
+  function openBoost() { setBoostLine(pick(BOOST_LINES)); setBoostOpen(true); }
+  function nextBoost() { setBoostLine(pick(BOOST_LINES)); }
 
   /* ===== Computed ===== */
   const niceDate = useMemo(() => formatNiceDate(dateISO), [dateISO]);
@@ -793,11 +756,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   const overdue = tasks.filter(isOverdueFn);
-  const todayPending = tasks.filter(
-    (t) => t.due_date === dateISO && t.status !== "done" && t.status !== "skipped"
-  );
+  const todayPending = tasks.filter((t) => t.due_date === dateISO && t.status !== "done" && t.status !== "skipped");
 
-  /* ===== Section helper ===== */
+  /* ===== Section ===== */
   function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode }) {
     return (
       <div className="card" style={{ marginBottom: 12, overflowX: "clip", borderRadius: 16 }}>
@@ -933,7 +894,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
               >
                 Move all overdue here ({overdue.length})
               </button>
-              {/* Always-visible Skip Overdue (confirm) */}
               <button
                 onClick={() => setConfirmSkipAllOpen(true)}
                 className="btn-soft"
@@ -950,7 +910,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
           </div>
         </div>
 
-        {/* Gentle Reset banner (shows if you were away and have backlog) */}
+        {/* Gentle Reset banner */}
         {(missed && overdue.length > 0) && (
           <div
             className="card"
@@ -989,7 +949,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
-                      {/* Category dot */}
                       <span
                         aria-hidden="true"
                         style={{
@@ -999,7 +958,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
                         }}
                       />
                       <span style={{ minWidth: 0 }}>{displayTitle(t)}</span>
-                      {/* Per-task Skip (confirm) */}
                       <button className="btn-soft" style={{ marginLeft: "auto" }} onClick={() => askSkipTask(t)} title="Skip this task">
                         Skip
                       </button>
@@ -1024,7 +982,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
                   <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
-                      {/* Category dot */}
                       <span
                         aria-hidden="true"
                         style={{
@@ -1038,7 +995,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
                       <button className="btn-ghost" onClick={() => moveToSelectedDate(t.id)} title="Move to selected date">
                         Move to {dateISO}
                       </button>
-                      {/* Per-task Skip (confirm) */}
                       <button className="btn-soft" onClick={() => askSkipTask(t)} title="Skip this overdue task">
                         Skip
                       </button>
@@ -1054,7 +1010,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         )}
       </Section>
 
-      {/* ===== Fixed Bottom Bar: Boost (left) + Profile (right) ===== */}
+      {/* Bottom toolbar */}
       <div
         role="toolbar"
         aria-label="Quick actions"
@@ -1086,8 +1042,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
             style={{
               appearance: "none",
               border: 0,
-              background: "#99F6E4", // pastel teal
-              color: "#000",          // black text
+              background: "#99F6E4",
+              color: "#000",
               fontWeight: 700,
               fontSize: 14,
               lineHeight: "44px",
@@ -1106,8 +1062,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
             style={{
               appearance: "none",
               border: 0,
-              background: "#E9D5FF", // pastel purple
-              color: "#000",          // black text
+              background: "#E9D5FF",
+              color: "#000",
               fontWeight: 700,
               fontSize: 14,
               lineHeight: "44px",
@@ -1124,13 +1080,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
       {boostOpen && (
         <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="boost-title">
           <div className="sheet" style={{ maxWidth: 520 }}>
-            {/* Header row with close */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
               <div id="boost-title" style={{ fontWeight: 800, fontSize: 18 }}>Here’s a little boost</div>
               <button className="btn-ghost" onClick={() => setBoostOpen(false)} aria-label="Close boost">Close</button>
             </div>
-
-            {/* Message + BYB logo on the right */}
             <div
               className="card"
               style={{
@@ -1155,8 +1108,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
               />
             </div>
-
-            {/* Actions */}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
               <button className="btn-soft" onClick={nextBoost} title="Show another">Another</button>
               <button className="btn-primary" onClick={() => setBoostOpen(false)}>Got it</button>
@@ -1202,7 +1153,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 })}
               </div>
 
-              {/* Selected chips incl. customs (removable) */}
               <div>
                 <div className="section-title" style={{ marginBottom: 6 }}>Selected nicknames</div>
                 {poolInput.length === 0 ? (
@@ -1243,7 +1193,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* Gentle Reset Modal (compassionate clean slate) */}
+      {/* Gentle Reset Modal */}
       {gentleOpen && (
         <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="gentle-title">
           <div className="sheet" style={{ maxWidth: 520 }}>
@@ -1303,7 +1253,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* Pretty Confirm Reset (nicknames) */}
+      {/* Nickname reset modal */}
       {confirmResetOpen && (
         <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-reset-title">
           <div className="sheet" style={{ maxWidth: 420 }}>
@@ -1333,12 +1283,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* Toast node */}
+      {/* Toast */}
       {toast.node}
     </div>
   );
 
-  /* ===== Profile helpers (placed at the end to keep main flow readable) ===== */
+  /* ===== Profile helpers (inside component for state access) ===== */
   async function loadProfileIntoForm() {
     try {
       if (userId) {
@@ -1382,4 +1332,37 @@ export default function TodayScreen({ externalDateISO }: Props) {
   }
   async function saveProfile() {
     const cleanName = (nameInput || "").trim() || "Friend";
-    const chosenPool = poolInput ||
+    const chosenPool = poolInput || [];
+    setSavingProfile(true);
+    let wroteToDB = false;
+    try {
+      if (userId) {
+        try {
+          const payload: any = { display_name: cleanName, display_pool: chosenPool, onboarding_done: true };
+          const { error } = await supabase.from("profiles").upsert({ id: userId, ...payload }).select().limit(1);
+          if (error) throw error;
+          wroteToDB = true;
+        } catch {
+          const { error: e2 } = await supabase
+            .from("profiles")
+            .upsert({ id: userId, display_name: cleanName, onboarding_done: true })
+            .select()
+            .limit(1);
+          if (!e2) wroteToDB = true;
+        }
+      }
+      try {
+        localStorage.setItem(LS_NAME, cleanName);
+        localStorage.setItem(LS_POOL, JSON.stringify(chosenPool));
+      } catch {}
+      setGreetName(pickGreetingLabel());
+      toast.show(wroteToDB ? "Profile updated" : "Saved locally (no display_pool column)");
+      setProfileOpen(false);
+    } catch (e: any) {
+      setErr(e.message || String(e));
+      toast.show("Couldn’t save profile");
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+}
