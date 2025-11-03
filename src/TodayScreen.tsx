@@ -476,8 +476,11 @@ export default function TodayScreen({ externalDateISO }: Props) {
   // Supportive backlog reset
   const [gentleOpen, setGentleOpen] = useState(false);
 
-  // NEW: explicit cancel overdue confirm
-  const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
+  // Confirm skip ALL overdue
+  const [confirmSkipAllOpen, setConfirmSkipAllOpen] = useState(false);
+
+  // Confirm skip ONE task
+  const [taskToSkip, setTaskToSkip] = useState<Task | null>(null);
 
   // Responsive
   const [isCompact, setIsCompact] = useState<boolean>(false);
@@ -535,9 +538,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
   // clock
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id); }, []);
 
-  // Overdue helper
+  // Overdue helper — exclude "skipped"
   const isOverdueFn = (t: Task) =>
-    !!t.due_date && t.status !== "done" && fromISO(t.due_date.slice(0, 10)).getTime() < fromISO(dateISO).getTime();
+    !!t.due_date &&
+    t.status !== "done" &&
+    t.status !== "skipped" &&
+    fromISO(t.due_date.slice(0, 10)).getTime() < fromISO(dateISO).getTime();
 
   /* ===== Data loading (DEFENSIVE) ===== */
   async function load() {
@@ -559,8 +565,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
         completed_at: t.completed_at,
       }));
 
+      // Exclude "skipped" from main working list
       const list = normalized.filter(
-        (t) => t.due_date !== null && (t.due_date === dateISO || (t.due_date < dateISO && t.status !== "done"))
+        (t) =>
+          t.status !== "done" &&
+          t.status !== "skipped" &&
+          t.due_date !== null &&
+          (t.due_date === dateISO || t.due_date < dateISO)
       );
 
       list.sort((a, b) => {
@@ -587,7 +598,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
       }
 
       const doneToday = normalized.filter((t) => t.status === "done" && dateOnly(t.completed_at) === dateISO).length;
-      const pendingToday = normalized.filter((t) => t.due_date === dateISO && t.status !== "done").length;
+      const pendingToday = normalized.filter((t) => t.due_date === dateISO && t.status !== "done" && t.status !== "skipped").length;
       const isWin = doneToday >= 3;
       setSummary((s) => ({ ...s, doneToday, pendingToday, isWin }));
     } catch (e: any) {
@@ -706,9 +717,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
   async function skipAllOverdue() {
     if (!userId) return;
     const backlogIds = tasks.filter(t => isOverdueFn(t)).map(t => t.id);
-    if (backlogIds.length === 0) { setGentleOpen(false); setConfirmCancelOpen(false); return; }
+    if (backlogIds.length === 0) { setGentleOpen(false); setConfirmSkipAllOpen(false); return; }
     try {
-      // ✅ Use "skipped" to satisfy tasks_status_check, and clear due_date so they disappear.
       const { error } = await supabase
         .from("tasks")
         .update({ status: "skipped", due_date: null, completed_at: null })
@@ -717,14 +727,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
       await loadAll();
       setGentleOpen(false);
-      setConfirmCancelOpen(false);
-      toast.show("Overdue cancelled — fresh page set.");
+      setConfirmSkipAllOpen(false);
+      toast.show("Overdue skipped — fresh page set.");
     } catch (e: any) {
       setErr(e.message || String(e));
     }
   }
 
-  // ===== Gentle Reset helpers (modal triggers this)
+  // Gentle Reset triggers skipAllOverdue
   async function gentleResetBacklog() {
     await skipAllOverdue();
   }
@@ -748,6 +758,26 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 
+  // Skip ONE task (with confirm)
+  function askSkipTask(t: Task) {
+    setTaskToSkip(t);
+  }
+  async function confirmSkipTask() {
+    if (!taskToSkip) return;
+    try {
+      const { error } = await supabase
+        .from("tasks")
+        .update({ status: "skipped", due_date: null, completed_at: null })
+        .eq("id", taskToSkip.id);
+      if (error) throw error;
+      setTaskToSkip(null);
+      await loadAll();
+      toast.show("Task skipped.");
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    }
+  }
+
   /* ===== Boost helpers ===== */
   function openBoost() {
     setBoostLine(pick(BOOST_LINES));
@@ -763,7 +793,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   const overdue = tasks.filter(isOverdueFn);
-  const todayPending = tasks.filter((t) => t.due_date === dateISO && t.status !== "done");
+  const todayPending = tasks.filter(
+    (t) => t.due_date === dateISO && t.status !== "done" && t.status !== "skipped"
+  );
 
   /* ===== Section helper ===== */
   function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode }) {
@@ -901,14 +933,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
               >
                 Move all overdue here ({overdue.length})
               </button>
-              {/* Always-visible cancel (skip) button with confirm */}
+              {/* Always-visible Skip Overdue (confirm) */}
               <button
-                onClick={() => setConfirmCancelOpen(true)}
+                onClick={() => setConfirmSkipAllOpen(true)}
                 className="btn-soft"
-                title="Cancel (skip) all overdue tasks and clear their due dates"
+                title="Skip all overdue tasks and clear their due dates"
                 style={{ flex: isCompact ? "1 1 100%" : undefined, minWidth: 0 }}
               >
-                Cancel overdue ({overdue.length})
+                Skip overdue ({overdue.length})
               </button>
             </>
           )}
@@ -953,7 +985,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
           <ul className="list">
             {todayPending.map((t) => (
               <li key={t.id} className="item">
-                <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
                   <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
@@ -967,9 +999,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
                         }}
                       />
                       <span style={{ minWidth: 0 }}>{displayTitle(t)}</span>
+                      {/* Per-task Skip (confirm) */}
+                      <button className="btn-soft" style={{ marginLeft: "auto" }} onClick={() => askSkipTask(t)} title="Skip this task">
+                        Skip
+                      </button>
                     </div>
                   </div>
-                </label>
+                </div>
               </li>
             ))}
           </ul>
@@ -984,7 +1020,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
           <ul className="list">
             {overdue.map((t) => (
               <li key={t.id} className="item">
-                <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
                   <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
@@ -999,15 +1035,19 @@ export default function TodayScreen({ externalDateISO }: Props) {
                       />
                       <span style={{ minWidth: 0 }}>{displayTitle(t)}</span>
                       <span className="badge">Overdue</span>
-                      <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => moveToSelectedDate(t.id)}>
+                      <button className="btn-ghost" onClick={() => moveToSelectedDate(t.id)} title="Move to selected date">
                         Move to {dateISO}
+                      </button>
+                      {/* Per-task Skip (confirm) */}
+                      <button className="btn-soft" onClick={() => askSkipTask(t)} title="Skip this overdue task">
+                        Skip
                       </button>
                     </div>
                     <div className="muted" style={{ marginTop: 4, minWidth: 0 }}>
                       Due {t.due_date}
                     </div>
                   </div>
-                </label>
+                </div>
               </li>
             ))}
           </ul>
@@ -1222,20 +1262,42 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* Explicit Cancel Overdue Confirm (always available) */}
-      {confirmCancelOpen && (
-        <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="cancel-overdue-title">
+      {/* Confirm Skip ALL Overdue */}
+      {confirmSkipAllOpen && (
+        <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="skip-overdue-title">
           <div className="sheet" style={{ maxWidth: 520 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-              <div id="cancel-overdue-title" style={{ fontWeight: 800, fontSize: 18 }}>Cancel all overdue?</div>
-              <button className="btn-ghost" onClick={() => setConfirmCancelOpen(false)} aria-label="Close">Close</button>
+              <div id="skip-overdue-title" style={{ fontWeight: 800, fontSize: 18 }}>Skip all overdue?</div>
+              <button className="btn-ghost" onClick={() => setConfirmSkipAllOpen(false)} aria-label="Close">Close</button>
             </div>
             <p className="muted" style={{ marginTop: 0 }}>
               This will <b>skip</b> your overdue tasks (no penalty) and clear their due dates so you can start fresh.
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn-soft" onClick={() => setConfirmCancelOpen(false)}>No, keep them</button>
-              <button className="btn-primary" onClick={skipAllOverdue}>Yes — cancel overdue</button>
+              <button className="btn-soft" onClick={() => setConfirmSkipAllOpen(false)}>No, keep them</button>
+              <button className="btn-primary" onClick={skipAllOverdue}>Yes — skip overdue</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Skip ONE Task */}
+      {taskToSkip && (
+        <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="skip-one-title">
+          <div className="sheet" style={{ maxWidth: 520 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+              <div id="skip-one-title" style={{ fontWeight: 800, fontSize: 18 }}>Skip this task?</div>
+              <button className="btn-ghost" onClick={() => setTaskToSkip(null)} aria-label="Close">Close</button>
+            </div>
+            <p style={{ marginTop: 0 }}>
+              <b>{displayTitle(taskToSkip)}</b>
+            </p>
+            <p className="muted" style={{ marginTop: 0 }}>
+              This will mark it as <b>skipped</b> and clear its due date. You can always re-add it later.
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn-soft" onClick={() => setTaskToSkip(null)}>No, keep it</button>
+              <button className="btn-primary" onClick={confirmSkipTask}>Yes — skip it</button>
             </div>
           </div>
         </div>
@@ -1320,37 +1382,4 @@ export default function TodayScreen({ externalDateISO }: Props) {
   }
   async function saveProfile() {
     const cleanName = (nameInput || "").trim() || "Friend";
-    const chosenPool = poolInput || [];
-    setSavingProfile(true);
-    let wroteToDB = false;
-    try {
-      if (userId) {
-        try {
-          const payload: any = { display_name: cleanName, display_pool: chosenPool, onboarding_done: true };
-          const { error } = await supabase.from("profiles").upsert({ id: userId, ...payload }).select().limit(1);
-          if (error) throw error;
-          wroteToDB = true;
-        } catch {
-          const { error: e2 } = await supabase
-            .from("profiles")
-            .upsert({ id: userId, display_name: cleanName, onboarding_done: true })
-            .select()
-            .limit(1);
-          if (!e2) wroteToDB = true;
-        }
-      }
-      try {
-        localStorage.setItem(LS_NAME, cleanName);
-        localStorage.setItem(LS_POOL, JSON.stringify(chosenPool));
-      } catch {}
-      setGreetName(pickGreetingLabel());
-      toast.show(wroteToDB ? "Profile updated" : "Saved locally (no display_pool column)");
-      setProfileOpen(false);
-    } catch (e: any) {
-      setErr(e.message || String(e));
-      toast.show("Couldn’t save profile");
-    } finally {
-      setSavingProfile(false);
-    }
-  }
-}
+    const chosenPool = poolInput ||
