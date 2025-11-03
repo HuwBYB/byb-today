@@ -22,7 +22,7 @@ type Task = {
   user_id: string;
   title: string;
   due_date: string | null;
-  status: "pending" | "done" | "skipped" | string; // ← DB allows pending | done | skipped
+  status: "pending" | "done" | "skipped" | string; // DB constraint: pending | done | skipped
   priority: number | null;
   source: string | null;
   goal_id: number | null;
@@ -724,7 +724,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 
-  // ===== Gentle Reset helpers (legacy banner triggers same action) =====
+  // ===== Gentle Reset helpers (modal triggers this)
   async function gentleResetBacklog() {
     await skipAllOverdue();
   }
@@ -901,7 +901,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
               >
                 Move all overdue here ({overdue.length})
               </button>
-              {/* NEW: Always-visible cancel (skip) button with confirm */}
+              {/* Always-visible cancel (skip) button with confirm */}
               <button
                 onClick={() => setConfirmCancelOpen(true)}
                 className="btn-soft"
@@ -1203,7 +1203,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* Gentle Reset Modal (away) */}
+      {/* Gentle Reset Modal (compassionate clean slate) */}
       {gentleOpen && (
         <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="gentle-title">
           <div className="sheet" style={{ maxWidth: 520 }}>
@@ -1216,7 +1216,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
               <button className="btn-soft" onClick={() => setGentleOpen(false)}>Cancel</button>
-              <button className="btn-primary" onClick={skipAllOverdue}>🌤️ Skip overdue & reset</button>
+              <button className="btn-primary" onClick={gentleResetBacklog}>🌤️ Skip overdue & reset</button>
             </div>
           </div>
         </div>
