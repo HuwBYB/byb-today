@@ -1,5 +1,5 @@
-// src/AffirmationBuilder.tsx
-import { useEffect, useState } from "react";
+// src/AffirmationBuilder.tsx — NON-AI version with local suggestion bank + per-area saved slots
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
 /* ---------- Shared category palette ---------- */
@@ -8,18 +8,6 @@ import {
   colorOf,
   type AllowedCategory as Category,
 } from "./theme/categories";
-
-/* ---------- Public path helper ---------- */
-function publicPath(p: string) {
-  // @ts-ignore
-  const base =
-    (typeof import.meta !== "undefined" && (import.meta as any).env?.BASE_URL) ||
-    (typeof process !== "undefined" && (process as any).env?.PUBLIC_URL) ||
-    "";
-  const withSlash = p.startsWith("/") ? p : `/${p}`;
-  return `${base.replace(/\/$/, "")}${withSlash}`;
-}
-const EVA_HELP_IMG = publicPath("/eva/Affirmations_Eva.png");
 
 /* ---------- Types ---------- */
 type AffirmationRow = {
@@ -42,7 +30,7 @@ function hexToRgba(hex: string, alpha = 0.45) {
 
 /* ---------- Storage keys ---------- */
 const LS_VAULT = "byb:affirmations:v1";
-const LS_CONF_TODAY_PREFIX = "byb:confidence:today:";
+const LS_CONF_TODAY_PREFIX = "byb:confidence:today:"; // kept for backwards-compat storage (used as "Today")
 const LS_DEFAULT_PREFIX = "byb:affirmation:default:";
 
 /* ---------- Utils ---------- */
@@ -52,7 +40,7 @@ const todayISO = () => {
     d.getDate()
   ).padStart(2, "0")}`;
 };
-const confidenceKeyForToday = () => `${LS_CONF_TODAY_PREFIX}${todayISO()}`;
+const todayKey = () => `${LS_CONF_TODAY_PREFIX}${todayISO()}`; // effectively our "Today" bucket
 const defaultKey = (cat: string) => `${LS_DEFAULT_PREFIX}${cat}`;
 
 /* ---------- Local persistence ---------- */
@@ -63,9 +51,10 @@ async function saveToVaultLocal(row: AffirmationRow) {
     localStorage.setItem(LS_VAULT, JSON.stringify(arr));
   } catch {}
 }
-async function sendToConfidenceTodayLocal(row: AffirmationRow) {
+async function sendToTodayLocal(row: AffirmationRow) {
+  // NOTE: keeps old key for compatibility; semantically treated as "Today"
   try {
-    const key = confidenceKeyForToday();
+    const key = todayKey();
     const arr: AffirmationRow[] = JSON.parse(localStorage.getItem(key) || "[]");
     const exists = arr.some(
       (a) => a.category === row.category && a.text.trim() === row.text.trim()
@@ -88,6 +77,42 @@ function getDefaultLocal(category: Category): string {
     return "";
   }
 }
+function getAllDefaults(): Record<Category, string> {
+  const map = {} as Record<Category, string>;
+  CATS.forEach((c) => {
+    map[c.key as Category] = getDefaultLocal(c.key as Category);
+  });
+  return map;
+}
+
+/* ---------- Static suggestion bank (3 per focus area) ---------- */
+const SUGGESTION_BANK: Record<Category, string[]> = {
+  business: [
+    "I lead with clarity and calm.",
+    "I ship progress every day.",
+    "I make smart, simple decisions.",
+  ],
+  financial: [
+    "I steward money wisely and well.",
+    "I create value and earn fairly.",
+    "I respect my budget and build wealth.",
+  ],
+  health: [
+    "I fuel my body and move daily.",
+    "I train with patience and consistency.",
+    "I choose rest to grow stronger.",
+  ],
+  personal: [
+    "I show up as my best self today.",
+    "I keep promises to myself.",
+    "I act with integrity and curiosity.",
+  ],
+  relationships: [
+    "I listen fully and speak kindly.",
+    "I set clear, loving boundaries.",
+    "I invest time in the people I love.",
+  ],
+};
 
 /* ---------- Modal ---------- */
 function Modal({
@@ -127,7 +152,7 @@ function Modal({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          maxWidth: 760,
+          maxWidth: 960,
           width: "100%",
           background: "#fff",
           borderRadius: 12,
@@ -154,48 +179,34 @@ function Modal({
   );
 }
 
-/* ---------- Help content (EVA) ---------- */
+/* ---------- Help content (neutral) ---------- */
 function BuilderHelpContent() {
   return (
     <div style={{ display: "grid", gap: 12, lineHeight: 1.5 }}>
       <p>
         <em>
-          Craft affirmations that feel like you — short, present-tense, and believable — then
-          send them to the Confidence page to practice.
+          Save one affirmation for each area of life, then use them daily. Keep them short, present-tense, believable.
         </em>
       </p>
 
       <h4 style={{ margin: 0 }}>How to use</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>
-          <b>Pick an area</b>: Business, Relationships, Financial, Personal, or Health.
-        </li>
-        <li>
-          <b>Write your own</b> or click <i>Ask EVA</i> for 2–3 suggestions.
-        </li>
-        <li>
-          <b>Tweak tone</b> with one-taps: Shorter, Stronger, Gentler.
-        </li>
-        <li>
-          <b>Save</b> to your vault, <b>Set as default</b> for the category, and/or <b>Use today</b>.
-        </li>
+        <li><b>Tap a card</b> to edit that area’s saved line.</li>
+        <li><b>Write your own</b> or click <i>Get suggestions</i> for three ideas.</li>
+        <li><b>Tweak tone</b> with one-taps: Shorter, Stronger, Gentler.</li>
+        <li><b>Save</b> to set the default for that area, and/or <b>Add to Today</b>.</li>
+        <li>Use <b>Add all to Today</b> to queue your full set with one tap.</li>
       </ul>
 
       <h4 style={{ margin: 0 }}>Good affirmation rules</h4>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
-        <li>
-          Keep it <b>present tense</b> (“I lead with clarity”).
-        </li>
-        <li>
-          Make it <b>short</b> (ideally under 12 words).
-        </li>
-        <li>
-          Focus on what’s <b>in your control</b> (“I show up daily”).
-        </li>
+        <li>Keep it <b>present tense</b> ("I lead with clarity").</li>
+        <li>Make it <b>short</b> (ideally under 12 words).</li>
+        <li>Focus on what’s <b>in your control</b> ("I show up daily").</li>
       </ul>
 
       <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-        Tip: Read it aloud once — if it feels clunky or fake, tweak until it’s natural.
+        Tip: Read it aloud — if it feels clunky or fake, tweak until it’s natural.
       </p>
     </div>
   );
@@ -206,76 +217,60 @@ function BuilderHelpContent() {
    ========================================================= */
 export default function AffirmationBuilderScreen() {
   const [userId, setUserId] = useState<string | null>(null);
-  const [active, setActive] = useState<Category>("business");
 
-  const [text, setText] = useState("");        // editor text
-  const [theme, setTheme] = useState("");      // optional prompt theme
+  // Editor state
+  const [active, setActive] = useState<Category>("business");
+  const [text, setText] = useState("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
 
-  // NEW: save options
+  // Saved set state (one per area)
+  const [defaultsMap, setDefaultsMap] = useState<Record<Category, string>>(() => getAllDefaults());
+
+  // Save options
   const [optUseToday, setOptUseToday] = useState(true);
   const [optSetDefault, setOptSetDefault] = useState(true);
 
-  const [busySuggest, setBusySuggest] = useState(false);
   const [busySave, setBusySave] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const [showHelp, setShowHelp] = useState(false);
-  const [imgOk, setImgOk] = useState(true);
+
+  // Suggestion source category (defaults to current tab)
+  const [suggestCat, setSuggestCat] = useState<Category>("business");
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
   }, []);
 
-  // NEW: when category changes, load its default into the editor if the editor is empty or showing the previous category's default.
+  // When category changes, load its default into the editor if empty
   useEffect(() => {
     const def = getDefaultLocal(active);
     if (!text.trim()) setText(def);
-    // do not auto-select a suggestion here
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
-  /* ---------- EVA helpers (calls your /api/eva endpoint) ---------- */
-  async function askEva() {
+  // Derived color
+  const activeColor = useMemo(() => colorOf(active), [active]);
+
+  function pickSuggestion(s: string, i: number) {
+    setText(s);
+    setSelectedIdx(i);
+    if ((navigator as any).vibrate) (navigator as any).vibrate(3);
+  }
+
+  function suggestFromBank() {
     setErr(null);
-    setBusySuggest(true);
+    const opts = SUGGESTION_BANK[suggestCat] || [];
+    setSuggestions(opts);
     setSelectedIdx(null);
-    try {
-      const prompt = `Help me write 3 short, present-tense affirmations for the "${active}" area.
-Theme (optional): ${theme || "(none)"}
-Rules: under 12 words, positive, believable, in my control. Output as bullet points.`;
-      const res = await fetch("/api/eva", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "friend",
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-      if (!res.ok) throw new Error(`EVA error: ${res.status}`);
-      const data = await res.json();
-      const reply: string = data.reply || data.text || "";
-      const lines = reply.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-      const bulls = lines
-        .filter((l) => /^[-*•]\s+/.test(l) || /^\d+\.\s+/.test(l))
-        .map((l) => l.replace(/^([-*•]\s+|\d+\.\s+)/, "").trim());
-      const opts = (bulls.length ? bulls : lines)
-        .slice(0, 3)
-        .map((s) => s.replace(/^"|"$/g, ""));
-      setSuggestions(opts);
-      if (opts[0]) {
-        setText(opts[0]);
-        setSelectedIdx(0);
-      }
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
-      setBusySuggest(false);
+    if (opts[0]) {
+      setText(opts[0]);
+      setSelectedIdx(0);
     }
   }
 
-  // Simple local heuristics as a fallback if the network call fails
+  // Local tone tweaks only (no network)
   function localRefine(kind: "shorter" | "stronger" | "gentler", s: string) {
     let t = s.trim();
 
@@ -301,61 +296,12 @@ Rules: under 12 words, positive, believable, in my control. Output as bullet poi
     return words.join(" ").trim();
   }
 
-  async function refineTone(kind: "shorter" | "stronger" | "gentler") {
+  function refineTone(kind: "shorter" | "stronger" | "gentler") {
     if (!text.trim()) return;
     setErr(null);
-    setBusySuggest(true);
-    try {
-      const prompt = `Rewrite this affirmation with a ${kind} tone.
-Keep it present-tense, positive, under 12 words, believable:
-"${text}"`;
-      const res = await fetch("/api/eva", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "friend",
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-
-      if (!res.ok) {
-        const offline = localRefine(kind, text);
-        setText(offline);
-        setSelectedIdx(null);
-        setErr("EVA is offline — used a local tweak.");
-        return;
-      }
-
-      const data = await res.json();
-      const out =
-        (data.reply || data.text || "")
-          .trim()
-          .split(/\r?\n/)
-          .map((l: string) => l.replace(/^[-*•]\s+/, "").replace(/^"|"$/g, "").trim())
-          .find((l: string) => !!l) || "";
-
-      if (out) {
-        setText(out);
-        setSelectedIdx(null);
-      } else {
-        const offline = localRefine(kind, text);
-        setText(offline);
-        setSelectedIdx(null);
-      }
-    } catch (e: any) {
-      const offline = localRefine(kind, text);
-      setText(offline);
-      setSelectedIdx(null);
-      setErr(e.message || String(e));
-    } finally {
-      setBusySuggest(false);
-    }
-  }
-
-  function pickSuggestion(s: string, i: number) {
-    setText(s);
-    setSelectedIdx(i);
-    if ((navigator as any).vibrate) (navigator as any).vibrate(3);
+    const offline = localRefine(kind, text);
+    setText(offline);
+    setSelectedIdx(null);
   }
 
   /* ---------- Save actions ---------- */
@@ -372,13 +318,13 @@ Keep it present-tense, positive, under 12 words, believable:
     // Best-effort: store raw in a vault list for history
     await saveToVaultLocal(row);
 
-    // NEW: persistent per-category default
+    // Persistent per-category default
     if (saveDefault) {
       setDefaultLocal(active, clean);
+      setDefaultsMap((m) => ({ ...m, [active]: clean }));
       // Optional Supabase upsert (best-effort). If your schema differs, adjust here.
       try {
         if (userId) {
-          // Try a table named "affirmation_defaults" with (user_id, category, text)
           await supabase.from("affirmation_defaults").upsert(
             { user_id: userId, category: active, text: clean },
             { onConflict: "user_id,category" } as any
@@ -389,9 +335,9 @@ Keep it present-tense, positive, under 12 words, believable:
       }
     }
 
-    // Send to Confidence for today
+    // Add to Today (backed by previous key for compatibility)
     if (useToday) {
-      await sendToConfidenceTodayLocal(row);
+      await sendToTodayLocal(row);
     }
 
     // Optional: keep a full list of authored affirmations in Supabase
@@ -411,32 +357,44 @@ Keep it present-tense, positive, under 12 words, believable:
     if ((navigator as any).vibrate) (navigator as any).vibrate(6);
   }
 
-  // Convenience single button (uses the two toggles)
   async function saveClick() {
     await save({ saveDefault: optSetDefault, useToday: optUseToday });
   }
 
-  // Quick helper: load current default for this category into the editor
-  function loadDefaultIntoEditor() {
-    const def = getDefaultLocal(active);
+  function loadDefaultIntoEditor(cat: Category = active) {
+    const def = getDefaultLocal(cat);
     setText(def);
     setSelectedIdx(null);
   }
 
-  const activeColor = colorOf(active);
-  const currentDefault = getDefaultLocal(active);
+  function editCard(cat: Category) {
+    setActive(cat);
+    loadDefaultIntoEditor(cat);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function addAllToToday() {
+    const map = getAllDefaults();
+    for (const cat of Object.keys(map) as Category[]) {
+      const t = map[cat];
+      if (t && t.trim()) {
+        await sendToTodayLocal({ category: cat, text: t, user_id: userId });
+      }
+    }
+    if ((navigator as any).vibrate) (navigator as any).vibrate(10);
+  }
 
   return (
     <div className="page-affirmation-builder" style={{ maxWidth: "100%", overflowX: "hidden" }}>
       <div className="container" style={{ display: "grid", gap: 12 }}>
-        {/* Header (EVA) */}
+        {/* Header */}
         <div className="card" style={{ position: "relative" }}>
-          <h1 style={{ margin: 0 }}>Affirmation Builder</h1>
-          <div className="muted">Create personal, powerful lines — then set category defaults and/or use them today in Confidence.</div>
+          <h1 style={{ margin: 0 }}>Affirmations — Your Daily Set</h1>
+          <div className="muted">Save one affirmation for each area of life. Edit any card below, or craft a new one in the editor, then save as that area’s default.</div>
           <button
             onClick={() => setShowHelp(true)}
             aria-label="Open builder help"
-            title="Need a hand? Ask EVA"
+            title="Need a hand?"
             style={{
               position: "absolute",
               top: 8,
@@ -449,31 +407,58 @@ Keep it present-tense, positive, under 12 words, believable:
               zIndex: 10,
             }}
           >
-            {imgOk ? (
-              <img
-                src={EVA_HELP_IMG}
-                alt="EVA — open help"
-                style={{ width: 44, height: 44, objectFit: "contain" }}
-                onError={() => setImgOk(false)}
-              />
-            ) : (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 34,
-                  height: 34,
-                  borderRadius: 999,
-                  border: "1px solid #d1d5db",
-                  background: "#f9fafb",
-                  fontWeight: 700,
-                }}
-              >
-                ?
-              </span>
-            )}
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 34,
+                height: 34,
+                borderRadius: 999,
+                border: "1px solid #d1d5db",
+                background: "#f9fafb",
+                fontWeight: 700,
+              }}
+            >
+              ?
+            </span>
           </button>
+        </div>
+
+        {/* My Daily Set (one slot per category) */}
+        <div className="card" style={{ display: "grid", gap: 12 }}>
+          <div className="section-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <span>My Daily Set</span>
+            <button onClick={addAllToToday} className="btn-primary" style={{ borderRadius: 10 }}>Add all to Today</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+            {CATS.map((c) => {
+              const val = defaultsMap[c.key as Category] || "";
+              const col = colorOf(c.key as Category);
+              const hasVal = !!val.trim();
+              return (
+                <div key={c.key} style={{ border: `1px solid ${hasVal ? col : "#e5e7eb"}`, borderRadius: 12, padding: 12, background: hasVal ? hexToRgba(col, 0.18) : "#fff" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8 }}>
+                    <strong>{c.label}</strong>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => editCard(c.key as Category)} title="Edit this affirmation">Edit</button>
+                      {hasVal && (
+                        <button
+                          onClick={() => sendToTodayLocal({ category: c.key as Category, text: val, user_id: userId })}
+                          title="Add this to Today"
+                        >
+                          Use Today
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 8, fontWeight: 700, lineHeight: 1.3 }}>
+                    {hasVal ? val : <span className="muted">No saved affirmation yet</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {/* Category tabs */}
@@ -516,17 +501,22 @@ Keep it present-tense, positive, under 12 words, believable:
             aria-label="Affirmation text"
           />
 
-          <div className="section-title">Or ask EVA</div>
+          <div className="section-title">Or get suggestions</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <input
-              value={theme}
-              onChange={(e) => setTheme(e.target.value)}
-              placeholder="Theme (optional) — e.g., money, calm, leadership"
-              aria-label="Theme for EVA"
-              style={{ flex: 1, minWidth: 220 }}
-            />
-            <button onClick={askEva} disabled={busySuggest} className="btn-primary" style={{ borderRadius: 8 }}>
-              {busySuggest ? "Thinking…" : "Ask EVA"}
+            <select
+              value={suggestCat}
+              onChange={(e) => setSuggestCat(e.target.value as Category)}
+              aria-label="Suggestion focus area"
+              style={{ minWidth: 220 }}
+            >
+              {CATS.map((c) => (
+                <option key={c.key} value={c.key as Category}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+            <button onClick={suggestFromBank} className="btn-primary" style={{ borderRadius: 8 }}>
+              Get suggestions
             </button>
           </div>
 
@@ -565,13 +555,13 @@ Keep it present-tense, positive, under 12 words, believable:
 
           {/* Tone nudges */}
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <button onClick={() => refineTone("shorter")} disabled={!text || busySuggest}>
+            <button onClick={() => refineTone("shorter")} disabled={!text}>
               Shorter
             </button>
-            <button onClick={() => refineTone("stronger")} disabled={!text || busySuggest}>
+            <button onClick={() => refineTone("stronger")} disabled={!text}>
               Stronger
             </button>
-            <button onClick={() => refineTone("gentler")} disabled={!text || busySuggest}>
+            <button onClick={() => refineTone("gentler")} disabled={!text}>
               Gentler
             </button>
           </div>
@@ -596,21 +586,23 @@ Keep it present-tense, positive, under 12 words, believable:
             Tip: Read it aloud once — if it feels clunky, tweak the words until it feels natural.
           </div>
 
-          {/* NEW: Save options */}
+          {/* Save options */}
           <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
             <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
               <input type="checkbox" checked={optSetDefault} onChange={(e) => setOptSetDefault(e.target.checked)} />
-              <span>Set as default for <b>{CATS.find(c=>c.key===active)?.label}</b></span>
+              <span>
+                Set as default for <b>{CATS.find((c) => c.key === active)?.label}</b>
+              </span>
             </label>
             <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
               <input type="checkbox" checked={optUseToday} onChange={(e) => setOptUseToday(e.target.checked)} />
-              <span>Also use in <b>Confidence</b> today</span>
+              <span>Add to <b>Today</b></span>
             </label>
             <span className="muted" style={{ marginLeft: "auto" }}>
-              Current default: {currentDefault ? <em>“{currentDefault}”</em> : <em>None</em>}
+              Current default: {defaultsMap[active] ? <em>“{defaultsMap[active]}”</em> : <em>None</em>}
             </span>
-            {currentDefault && (
-              <button onClick={loadDefaultIntoEditor} title="Load current default into editor">
+            {defaultsMap[active] && (
+              <button onClick={() => loadDefaultIntoEditor(active)} title="Load current default into editor">
                 Load default
               </button>
             )}
@@ -619,15 +611,16 @@ Keep it present-tense, positive, under 12 words, believable:
           {/* Actions */}
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
             {err && <div style={{ color: "red", marginRight: "auto" }}>{err}</div>}
-            <button onClick={() => { setText(""); setSelectedIdx(null); }} disabled={!text}>
+            <button
+              onClick={() => {
+                setText("");
+                setSelectedIdx(null);
+              }}
+              disabled={!text}
+            >
               Clear
             </button>
-            <button
-              onClick={saveClick}
-              className="btn-primary"
-              disabled={!text || busySave}
-              style={{ borderRadius: 10 }}
-            >
+            <button onClick={saveClick} className="btn-primary" disabled={!text || busySave} style={{ borderRadius: 10 }}>
               {busySave ? "Saving…" : "Save"}
             </button>
           </div>
@@ -635,21 +628,8 @@ Keep it present-tense, positive, under 12 words, believable:
       </div>
 
       {/* Help modal */}
-      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Affirmation Builder — Help">
-        <div style={{ display: "flex", gap: 16 }}>
-          {imgOk && (
-            <img
-              src={EVA_HELP_IMG}
-              alt=""
-              aria-hidden="true"
-              style={{ width: 72, height: 72, flex: "0 0 auto", objectFit: "contain" }}
-              onError={() => setImgOk(false)}
-            />
-          )}
-          <div style={{ flex: 1 }}>
-            <BuilderHelpContent />
-          </div>
-        </div>
+      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Affirmations — Help">
+        <BuilderHelpContent />
       </Modal>
     </div>
   );
