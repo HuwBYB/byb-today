@@ -8,7 +8,7 @@ import { colorOf, normalizeCat } from "./theme/categories";
 import "./theme.css";
 
 /* =============================================
-   BYB — Today Screen (Profile editor + Boost modal)
+   BYB — Today Screen (Profile editor + Boost + Gentle Reset)
    ============================================= */
 
 /* ===== Logo & Toast theme ===== */
@@ -22,7 +22,7 @@ type Task = {
   user_id: string;
   title: string;
   due_date: string | null;
-  status: "pending" | "done" | string;
+  status: "pending" | "done" | "missed" | string; // added "missed" as a soft status
   priority: number | null;
   source: string | null;
   goal_id: number | null;
@@ -284,14 +284,12 @@ const DEFAULT_NICKNAMES = [
 
 /* ===== Boost lines (unisex, always positive) ===== */
 const BOOST_LINES = [
-  // Provided
   "You have the power to make a difference.",
   "The world is a better place with you in it.",
   "Be the role model you would have wanted.",
   "You are the only you in this world — embrace your uniqueness.",
   "Try to inspire others by being the best you that you can be.",
   "Be a positive light in this world.",
-  // More
   "Your effort matters, even when it’s quiet.",
   "You’re allowed to start small and think big.",
   "Show up today — your future will notice.",
@@ -474,6 +472,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
   // Boost modal
   const [boostOpen, setBoostOpen] = useState(false);
   const [boostLine, setBoostLine] = useState<string>("");
+
+  // Supportive backlog reset
+  const [gentleOpen, setGentleOpen] = useState(false);
 
   // Responsive
   const [isCompact, setIsCompact] = useState<boolean>(false);
@@ -698,92 +699,43 @@ export default function TodayScreen({ externalDateISO }: Props) {
     } catch (e: any) { setErr(e.message || String(e)); } finally { setAdding(false); }
   }
 
-  /* ===== Profile helpers ===== */
-  async function loadProfileIntoForm() {
+  // ===== Gentle Reset helpers =====
+  async function gentleResetBacklog() {
+    if (!userId) return;
+    const backlogIds = tasks.filter(t => isOverdueFn(t)).map(t => t.id);
+    if (backlogIds.length === 0) { setGentleOpen(false); return; }
     try {
-      if (userId) {
-        const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
-        if (!error && data) {
-          const dn = (data as any).display_name ?? localStorage.getItem(LS_NAME) ?? "";
-          setNameInput(dn);
-          const raw = (data as any).display_pool;
-          if (Array.isArray(raw)) {
-            setPoolInput(raw as string[]);
-          } else if (typeof raw === "string") {
-            try { setPoolInput(JSON.parse(raw)); } catch { setPoolInput([]); }
-          } else {
-            try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
-          }
-          return;
-        }
-      }
-      setNameInput(localStorage.getItem(LS_NAME) || "");
-      try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
-    } catch {
-      setNameInput(localStorage.getItem(LS_NAME) || "");
-      try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
-    }
-  }
-
-  function toggleNick(n: string) {
-    const v = n.trim();
-    if (!v) return;
-    setPoolInput((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]));
-  }
-  function removeNick(n: string) {
-    setPoolInput((prev) => prev.filter((x) => x !== n));
-  }
-  function addCustomFromInput() {
-    const parts = customNicks.split(",").map((s) => s.trim()).filter(Boolean);
-    if (parts.length === 0) return;
-    const merged = Array.from(new Set([...(poolInput || []), ...parts]));
-    setPoolInput(merged);
-    setCustomNicks("");
-  }
-
-  async function saveProfile() {
-    const cleanName = (nameInput || "").trim() || "Friend";
-    const chosenPool = poolInput || [];
-    setSavingProfile(true);
-    let wroteToDB = false;
-    try {
-      if (userId) {
-        try {
-          const payload: any = { display_name: cleanName, display_pool: chosenPool, onboarding_done: true };
-          const { error } = await supabase.from("profiles").upsert({ id: userId, ...payload }).select().limit(1);
-          if (error) throw error;
-          wroteToDB = true;
-        } catch {
-          const { error: e2 } = await supabase
-            .from("profiles")
-            .upsert({ id: userId, display_name: cleanName, onboarding_done: true })
-            .select()
-            .limit(1);
-          if (!e2) wroteToDB = true;
-        }
-      }
-      try {
-        localStorage.setItem(LS_NAME, cleanName);
-        localStorage.setItem(LS_POOL, JSON.stringify(chosenPool));
-      } catch {}
-      setGreetName(pickGreetingLabel());
-      toast.show(wroteToDB ? "Profile updated" : "Saved locally (no display_pool column)");
-      setProfileOpen(false);
+      // Mark overdue as "missed" (soft archive) and clear due_date so they no longer appear
+      const { error } = await supabase
+        .from("tasks")
+        .update({ status: "missed", due_date: null, completed_at: null })
+        .in("id", backlogIds);
+      if (error) throw error;
+      await loadAll();
+      setGentleOpen(false);
+      toast.show("Fresh page set — you’re good to go.");
     } catch (e: any) {
       setErr(e.message || String(e));
-      toast.show("Couldn’t save profile");
-    } finally {
-      setSavingProfile(false);
     }
   }
 
-  /* ===== Boost helpers ===== */
-  function openBoost() {
-    setBoostLine(pick(BOOST_LINES));
-    setBoostOpen(true);
-  }
-  function nextBoost() {
-    setBoostLine(pick(BOOST_LINES));
+  async function completeAllOverdue() {
+    if (!userId) return;
+    const backlogIds = tasks.filter(t => isOverdueFn(t)).map(t => t.id);
+    if (backlogIds.length === 0) { setGentleOpen(false); return; }
+    try {
+      const { error } = await supabase
+        .from("tasks")
+        .update({ status: "done", completed_at: new Date().toISOString() })
+        .in("id", backlogIds);
+      if (error) throw error;
+      await loadAll();
+      setGentleOpen(false);
+      fireConfetti();
+      toast.show(pick(ENCOURAGE_LINES));
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    }
   }
 
   /* ===== Computed ===== */
@@ -833,7 +785,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         overflowX: "hidden",
         width: "100%",
         maxWidth: "100vw",
-        padding: "12px 12px calc(56px + env(safe-area-inset-bottom,0))", // reduced for bottom bar
+        padding: "12px 12px calc(56px + env(safe-area-inset-bottom,0))",
       }}
     >
       {/* Top app bar */}
@@ -935,6 +887,31 @@ export default function TodayScreen({ externalDateISO }: Props) {
             <button className="btn-soft" onClick={() => setDateISO(todayISO())} style={{ flex: isCompact ? "1 1 120px" : undefined }}>Today</button>
           </div>
         </div>
+
+        {/* Gentle Reset banner (shows if you were away and have backlog) */}
+        {(missed && overdue.length > 0) && (
+          <div
+            className="card"
+            style={{
+              background: "#F1F5F9",
+              border: "1px solid #e5e7eb",
+              borderRadius: 12,
+              padding: 10,
+              display: "grid",
+              gap: 8,
+            }}
+          >
+            <div style={{ fontWeight: 700 }}>
+              Looks like life’s been full lately — that’s okay. Let’s give you a fresh start so today feels like a clean page.
+            </div>
+            <div className="muted">You have {overdue.length} past-due task{overdue.length === 1 ? "" : "s"}.</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn-soft" onClick={() => setGentleOpen(true)}>🌤️ Mark as Missed & Reset</button>
+              <button className="btn-soft" onClick={completeAllOverdue}>✅ Mark all as Done</button>
+            </div>
+          </div>
+        )}
+
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
@@ -1029,7 +1006,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
             width: "100%",
             maxWidth: "800px",
             margin: "0 auto",
-            height: 44, // ~half of previous space
+            height: 44,
           }}
         >
           <button
@@ -1196,6 +1173,25 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
+      {/* Gentle Reset Modal */}
+      {gentleOpen && (
+        <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="gentle-title">
+          <div className="sheet" style={{ maxWidth: 520 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+              <div id="gentle-title" style={{ fontWeight: 800, fontSize: 18 }}>Start fresh?</div>
+              <button className="btn-ghost" onClick={() => setGentleOpen(false)} aria-label="Close">Close</button>
+            </div>
+            <p className="muted" style={{ marginTop: 0 }}>
+              We’ll mark your overdue tasks as <b>Missed</b> (no penalty) and clear them from today so you can focus on a clean list.
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn-soft" onClick={() => setGentleOpen(false)}>Cancel</button>
+              <button className="btn-primary" onClick={gentleResetBacklog}>🌤️ Mark as Missed & Reset</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Pretty Confirm Reset */}
       {confirmResetOpen && (
         <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-reset-title">
@@ -1230,5 +1226,82 @@ export default function TodayScreen({ externalDateISO }: Props) {
       {toast.node}
     </div>
   );
-}
 
+  /* ===== Profile helpers (placed at the end to keep main flow readable) ===== */
+  async function loadProfileIntoForm() {
+    try {
+      if (userId) {
+        const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
+        if (!error && data) {
+          const dn = (data as any).display_name ?? localStorage.getItem(LS_NAME) ?? "";
+          setNameInput(dn);
+          const raw = (data as any).display_pool;
+          if (Array.isArray(raw)) {
+            setPoolInput(raw as string[]);
+          } else if (typeof raw === "string") {
+            try { setPoolInput(JSON.parse(raw)); } catch { setPoolInput([]); }
+          } else {
+            try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
+          }
+          return;
+        }
+      }
+      setNameInput(localStorage.getItem(LS_NAME) || "");
+      try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
+    } catch {
+      setNameInput(localStorage.getItem(LS_NAME) || "");
+      try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
+    }
+  }
+
+  function toggleNick(n: string) {
+    const v = n.trim();
+    if (!v) return;
+    setPoolInput((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]));
+  }
+  function removeNick(n: string) {
+    setPoolInput((prev) => prev.filter((x) => x !== n));
+  }
+  function addCustomFromInput() {
+    const parts = customNicks.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length === 0) return;
+    const merged = Array.from(new Set([...(poolInput || []), ...parts]));
+    setPoolInput(merged);
+    setCustomNicks("");
+  }
+  async function saveProfile() {
+    const cleanName = (nameInput || "").trim() || "Friend";
+    const chosenPool = poolInput || [];
+    setSavingProfile(true);
+    let wroteToDB = false;
+    try {
+      if (userId) {
+        try {
+          const payload: any = { display_name: cleanName, display_pool: chosenPool, onboarding_done: true };
+          const { error } = await supabase.from("profiles").upsert({ id: userId, ...payload }).select().limit(1);
+          if (error) throw error;
+          wroteToDB = true;
+        } catch {
+          const { error: e2 } = await supabase
+            .from("profiles")
+            .upsert({ id: userId, display_name: cleanName, onboarding_done: true })
+            .select()
+            .limit(1);
+          if (!e2) wroteToDB = true;
+        }
+      }
+      try {
+        localStorage.setItem(LS_NAME, cleanName);
+        localStorage.setItem(LS_POOL, JSON.stringify(chosenPool));
+      } catch {}
+      setGreetName(pickGreetingLabel());
+      toast.show(wroteToDB ? "Profile updated" : "Saved locally (no display_pool column)");
+      setProfileOpen(false);
+    } catch (e: any) {
+      setErr(e.message || String(e));
+      toast.show("Couldn’t save profile");
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+}
