@@ -738,6 +738,17 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 
+  /* ===== Boost helpers (fix build errors) ===== */
+  function openBoost() {
+    // Pick a fresh line each time Boost opens
+    setBoostLine(pick(BOOST_LINES));
+    setBoostOpen(true);
+  }
+  function nextBoost() {
+    // Cycle to another supportive line
+    setBoostLine(pick(BOOST_LINES));
+  }
+
   /* ===== Computed ===== */
   const niceDate = useMemo(() => formatNiceDate(dateISO), [dateISO]);
   const greeting = useMemo(() => (greetLine || timeGreeting(now)), [greetLine, now]);
