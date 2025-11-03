@@ -9,8 +9,6 @@ type MenuItem = {
     | "gratitude"
     | "exercise"
     | "wins"
-    | "alfred"     // keep router key for Eva
-    | "eva"        // optional: keep in the type for future-proofing
     | "confidence"
     | "notes"
     | "ideas"      // Big Ideas page
@@ -34,8 +32,6 @@ const ITEMS: MenuItem[] = [
   { key: "gratitude",    label: "Gratitude",       icon: "🙏" },
   { key: "exercise",     label: "Exercise",        icon: "🏋️" },
   { key: "wins",         label: "Your Wins",       icon: "🏆" },
-  // Use the router's existing key but the new name
-  { key: "alfred",       label: "Eva",             icon: "💡" },
   { key: "confidence",   label: "Confidence",      icon: "🔥" },
   { key: "notes",        label: "Notes / Journal", icon: "📝" },
   { key: "ideas",        label: "Big Ideas",       icon: "🧠" },
