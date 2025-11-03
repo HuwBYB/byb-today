@@ -22,7 +22,7 @@ type Task = {
   user_id: string;
   title: string;
   due_date: string | null;
-  status: "pending" | "done" | "missed" | string; // added "missed" as a soft status
+  status: "pending" | "done" | "skipped" | string; // ← DB allows pending | done | skipped
   priority: number | null;
   source: string | null;
   goal_id: number | null;
@@ -476,6 +476,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
   // Supportive backlog reset
   const [gentleOpen, setGentleOpen] = useState(false);
 
+  // NEW: explicit cancel overdue confirm
+  const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
+
   // Responsive
   const [isCompact, setIsCompact] = useState<boolean>(false);
   useEffect(() => {
@@ -699,24 +702,31 @@ export default function TodayScreen({ externalDateISO }: Props) {
     } catch (e: any) { setErr(e.message || String(e)); } finally { setAdding(false); }
   }
 
-  // ===== Gentle Reset helpers =====
-  async function gentleResetBacklog() {
+  // Core helper used by both flows (banner + explicit button)
+  async function skipAllOverdue() {
     if (!userId) return;
     const backlogIds = tasks.filter(t => isOverdueFn(t)).map(t => t.id);
-    if (backlogIds.length === 0) { setGentleOpen(false); return; }
+    if (backlogIds.length === 0) { setGentleOpen(false); setConfirmCancelOpen(false); return; }
     try {
-      // Mark overdue as "missed" (soft archive) and clear due_date so they no longer appear
+      // ✅ Use "skipped" to satisfy tasks_status_check, and clear due_date so they disappear.
       const { error } = await supabase
         .from("tasks")
-        .update({ status: "missed", due_date: null, completed_at: null })
+        .update({ status: "skipped", due_date: null, completed_at: null })
         .in("id", backlogIds);
       if (error) throw error;
+
       await loadAll();
       setGentleOpen(false);
-      toast.show("Fresh page set — you’re good to go.");
+      setConfirmCancelOpen(false);
+      toast.show("Overdue cancelled — fresh page set.");
     } catch (e: any) {
       setErr(e.message || String(e));
     }
+  }
+
+  // ===== Gentle Reset helpers (legacy banner triggers same action) =====
+  async function gentleResetBacklog() {
+    await skipAllOverdue();
   }
 
   async function completeAllOverdue() {
@@ -882,14 +892,25 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {/* Date controls */}
         <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%", minWidth: 0 }}>
           {overdue.length > 0 && (
-            <button
-              onClick={moveAllOverdueHere}
-              className="btn-soft"
-              title="Change due date for all overdue pending tasks to this day"
-              style={{ flex: isCompact ? "1 1 100%" : undefined, minWidth: 0 }}
-            >
-              Move all overdue here ({overdue.length})
-            </button>
+            <>
+              <button
+                onClick={moveAllOverdueHere}
+                className="btn-soft"
+                title="Change due date for all overdue pending tasks to this day"
+                style={{ flex: isCompact ? "1 1 100%" : undefined, minWidth: 0 }}
+              >
+                Move all overdue here ({overdue.length})
+              </button>
+              {/* NEW: Always-visible cancel (skip) button with confirm */}
+              <button
+                onClick={() => setConfirmCancelOpen(true)}
+                className="btn-soft"
+                title="Cancel (skip) all overdue tasks and clear their due dates"
+                style={{ flex: isCompact ? "1 1 100%" : undefined, minWidth: 0 }}
+              >
+                Cancel overdue ({overdue.length})
+              </button>
+            </>
           )}
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", flexWrap: "wrap", width: isCompact ? "100%" : "auto", minWidth: 0 }}>
             <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} style={{ flex: isCompact ? "1 1 220px" : undefined, minWidth: 0, maxWidth: "100%" }} />
@@ -897,7 +918,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
           </div>
         </div>
 
-        {/* Gentle Reset banner (still appears if you were away) */}
+        {/* Gentle Reset banner (shows if you were away and have backlog) */}
         {(missed && overdue.length > 0) && (
           <div
             className="card"
@@ -915,7 +936,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
             </div>
             <div className="muted">You have {overdue.length} past-due task{overdue.length === 1 ? "" : "s"}.</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn-soft" onClick={() => setGentleOpen(true)}>🌤️ Mark as Missed & Reset</button>
+              <button className="btn-soft" onClick={() => setGentleOpen(true)}>🌤️ Skip overdue & reset</button>
               <button className="btn-soft" onClick={completeAllOverdue}>✅ Mark all as Done</button>
             </div>
           </div>
@@ -956,23 +977,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
       </Section>
 
       {/* Overdue (pending) */}
-      <Section
-        title="Overdue"
-        right={
-          overdue.length > 0 ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span className="muted">{overdue.length}</span>
-              <button
-                className="btn-soft"
-                onClick={() => setGentleOpen(true)}
-                title="Cancel (mark as Missed) all overdue tasks and clear them from today"
-              >
-                Cancel overdue…
-              </button>
-            </div>
-          ) : null
-        }
-      >
+      <Section title="Overdue" right={overdue.length > 0 ? <span className="muted">{overdue.length}</span> : null}>
         {overdue.length === 0 ? (
           <div className="muted">Nothing overdue. Nice!</div>
         ) : (
@@ -1198,26 +1203,45 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* Cancel Overdue (Gentle Reset) Modal */}
+      {/* Gentle Reset Modal (away) */}
       {gentleOpen && (
         <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="gentle-title">
           <div className="sheet" style={{ maxWidth: 520 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-              <div id="gentle-title" style={{ fontWeight: 800, fontSize: 18 }}>Cancel all overdue?</div>
+              <div id="gentle-title" style={{ fontWeight: 800, fontSize: 18 }}>Start fresh?</div>
               <button className="btn-ghost" onClick={() => setGentleOpen(false)} aria-label="Close">Close</button>
             </div>
             <p className="muted" style={{ marginTop: 0 }}>
-              This will <b>cancel</b> your overdue tasks by marking them as <b>Missed</b> (no penalty) and clearing their due dates so you can start fresh.
+              We’ll <b>skip</b> your overdue tasks (no penalty) and clear their due dates so you can focus on a clean list.
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn-soft" onClick={() => setGentleOpen(false)}>No, keep them</button>
-              <button className="btn-primary" onClick={gentleResetBacklog}>Yes — cancel overdue</button>
+              <button className="btn-soft" onClick={() => setGentleOpen(false)}>Cancel</button>
+              <button className="btn-primary" onClick={skipAllOverdue}>🌤️ Skip overdue & reset</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Pretty Confirm Reset (Nicknames) */}
+      {/* Explicit Cancel Overdue Confirm (always available) */}
+      {confirmCancelOpen && (
+        <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="cancel-overdue-title">
+          <div className="sheet" style={{ maxWidth: 520 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+              <div id="cancel-overdue-title" style={{ fontWeight: 800, fontSize: 18 }}>Cancel all overdue?</div>
+              <button className="btn-ghost" onClick={() => setConfirmCancelOpen(false)} aria-label="Close">Close</button>
+            </div>
+            <p className="muted" style={{ marginTop: 0 }}>
+              This will <b>skip</b> your overdue tasks (no penalty) and clear their due dates so you can start fresh.
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn-soft" onClick={() => setConfirmCancelOpen(false)}>No, keep them</button>
+              <button className="btn-primary" onClick={skipAllOverdue}>Yes — cancel overdue</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pretty Confirm Reset (nicknames) */}
       {confirmResetOpen && (
         <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-reset-title">
           <div className="sheet" style={{ maxWidth: 420 }}>
@@ -1252,7 +1276,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     </div>
   );
 
-  /* ===== Profile helpers ===== */
+  /* ===== Profile helpers (placed at the end to keep main flow readable) ===== */
   async function loadProfileIntoForm() {
     try {
       if (userId) {
