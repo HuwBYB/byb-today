@@ -49,10 +49,6 @@ export default function MenuScreen({
 }: {
   onOpenTab: (key: MenuItem["key"]) => void;
 }) {
-  // Back-compat if "eva" ever appears in ITEMS
-  const resolveKey = (k: MenuItem["key"]): MenuItem["key"] =>
-    k === "eva" ? "alfred" : k;
-
   return (
     <div
       style={{
@@ -112,7 +108,7 @@ export default function MenuScreen({
           {ITEMS.filter((it) => it.key !== "today").map((it) => (
             <button
               key={it.key}
-              onClick={() => onOpenTab(resolveKey(it.key))}
+              onClick={() => onOpenTab(it.key)}
               className="btn-soft"
               style={{
                 borderRadius: 12,
