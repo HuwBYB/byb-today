@@ -11,7 +11,6 @@ import VisionBoardScreen from "./VisionBoardScreen";
 import GratitudeScreen from "./GratitudeScreen";
 import ExerciseDiaryScreen from "./ExerciseDiaryScreen";
 import WinsScreen from "./WinsScreen";
-import AlfredScreen from "./AlfredScreen";
 import ConfidenceScreen from "./ConfidenceScreen";
 import NotesScreen from "./NotesScreen";
 import BigIdeasScreen from "./BigIdeasScreen";   // 👈 NEW
@@ -38,7 +37,7 @@ const LS_DONE = "byb:onboarding_done";
 /* Tabs (route keys) */
 type Tab =
   | "today" | "menu" | "calendar" | "goals" | "vision" | "gratitude"
-  | "exercise" | "wins" | "alfred" | "confidence" | "notes" | "ideas" // 👈 added "ideas"
+  | "exercise" | "wins" | "confidence" | "notes" | "ideas" // 👈 added "ideas"
   | "focus" | "meditation" | "motivation" | "affirmations"
   | "tutorials"
   | "terms"
@@ -144,8 +143,6 @@ export default function App() {
         return <ExerciseDiaryScreen />;
       case "wins":
         return <WinsScreen />;
-      case "alfred":
-        return <AlfredScreen />;
       case "confidence":
         return <ConfidenceScreen />;
       case "notes":
