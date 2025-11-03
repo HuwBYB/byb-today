@@ -738,14 +738,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 
-  /* ===== Boost helpers (fix build errors) ===== */
+  /* ===== Boost helpers ===== */
   function openBoost() {
-    // Pick a fresh line each time Boost opens
     setBoostLine(pick(BOOST_LINES));
     setBoostOpen(true);
   }
   function nextBoost() {
-    // Cycle to another supportive line
     setBoostLine(pick(BOOST_LINES));
   }
 
@@ -899,7 +897,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
           </div>
         </div>
 
-        {/* Gentle Reset banner (shows if you were away and have backlog) */}
+        {/* Gentle Reset banner (still appears if you were away) */}
         {(missed && overdue.length > 0) && (
           <div
             className="card"
@@ -958,7 +956,23 @@ export default function TodayScreen({ externalDateISO }: Props) {
       </Section>
 
       {/* Overdue (pending) */}
-      <Section title="Overdue" right={overdue.length > 0 ? <span className="muted">{overdue.length}</span> : null}>
+      <Section
+        title="Overdue"
+        right={
+          overdue.length > 0 ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="muted">{overdue.length}</span>
+              <button
+                className="btn-soft"
+                onClick={() => setGentleOpen(true)}
+                title="Cancel (mark as Missed) all overdue tasks and clear them from today"
+              >
+                Cancel overdue…
+              </button>
+            </div>
+          ) : null
+        }
+      >
         {overdue.length === 0 ? (
           <div className="muted">Nothing overdue. Nice!</div>
         ) : (
@@ -1184,26 +1198,26 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* Gentle Reset Modal */}
+      {/* Cancel Overdue (Gentle Reset) Modal */}
       {gentleOpen && (
         <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="gentle-title">
           <div className="sheet" style={{ maxWidth: 520 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-              <div id="gentle-title" style={{ fontWeight: 800, fontSize: 18 }}>Start fresh?</div>
+              <div id="gentle-title" style={{ fontWeight: 800, fontSize: 18 }}>Cancel all overdue?</div>
               <button className="btn-ghost" onClick={() => setGentleOpen(false)} aria-label="Close">Close</button>
             </div>
             <p className="muted" style={{ marginTop: 0 }}>
-              We’ll mark your overdue tasks as <b>Missed</b> (no penalty) and clear them from today so you can focus on a clean list.
+              This will <b>cancel</b> your overdue tasks by marking them as <b>Missed</b> (no penalty) and clearing their due dates so you can start fresh.
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn-soft" onClick={() => setGentleOpen(false)}>Cancel</button>
-              <button className="btn-primary" onClick={gentleResetBacklog}>🌤️ Mark as Missed & Reset</button>
+              <button className="btn-soft" onClick={() => setGentleOpen(false)}>No, keep them</button>
+              <button className="btn-primary" onClick={gentleResetBacklog}>Yes — cancel overdue</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Pretty Confirm Reset */}
+      {/* Pretty Confirm Reset (Nicknames) */}
       {confirmResetOpen && (
         <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-reset-title">
           <div className="sheet" style={{ maxWidth: 420 }}>
@@ -1238,7 +1252,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     </div>
   );
 
-  /* ===== Profile helpers (placed at the end to keep main flow readable) ===== */
+  /* ===== Profile helpers ===== */
   async function loadProfileIntoForm() {
     try {
       if (userId) {
