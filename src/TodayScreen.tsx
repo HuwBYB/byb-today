@@ -147,7 +147,7 @@ function formatNiceDate(iso: string): string {
   }
 }
 
-/* ===== Celebration (Fireworks + Big Message) ===== */
+/* ===== Celebration (Fireworks + Big Message) — null-safe ===== */
 function useCelebration() {
   const [msg, setMsg] = useState<string | null>(null);
   const [active, setActive] = useState(false);
@@ -157,10 +157,11 @@ function useCelebration() {
   // Fit canvas to viewport
   useEffect(() => {
     function fit() {
-      const el = canvasRef.current;
-      if (!el) return;
-      el.width = window.innerWidth;
-      el.height = window.innerHeight;
+      const cur = canvasRef.current;
+      if (!cur) return;
+      const cEl: HTMLCanvasElement = cur; // non-null after guard
+      cEl.width = window.innerWidth;
+      cEl.height = window.innerHeight;
     }
     fit();
     window.addEventListener("resize", fit);
@@ -171,8 +172,9 @@ function useCelebration() {
   useEffect(() => {
     if (!active) return;
 
-    const cEl = canvasRef.current;
-    if (!cEl) return;
+    const cur = canvasRef.current;
+    if (!cur) return;
+    const cEl: HTMLCanvasElement = cur; // non-null after guard
 
     const ctxMaybe = cEl.getContext("2d");
     if (!(ctxMaybe instanceof CanvasRenderingContext2D)) return;
@@ -198,9 +200,10 @@ function useCelebration() {
       }
     }
 
-    function spawnRocket() {
-      const cx = Math.random() * cEl.width * 0.8 + cEl.width * 0.1;
-      const cy = Math.random() * cEl.height * 0.4 + cEl.height * 0.15;
+    // pass width/height so inner func doesn't capture canvas directly
+    function spawnRocket(cw: number, ch: number) {
+      const cx = Math.random() * cw * 0.8 + cw * 0.1;
+      const cy = Math.random() * ch * 0.4 + ch * 0.15;
       spawnBurst(cx, cy);
     }
 
@@ -210,7 +213,7 @@ function useCelebration() {
       ctx.fillRect(0, 0, cEl.width, cEl.height);
 
       if (ts - lastSpawn > 170) {
-        spawnRocket();
+        spawnRocket(cEl.width, cEl.height);
         lastSpawn = ts;
       }
 
@@ -1486,4 +1489,5 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 }
+
 
