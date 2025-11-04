@@ -156,7 +156,6 @@ function useCelebration() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
 
-  // Resize canvas to viewport
   useEffect(() => {
     function fit() {
       const c = canvasRef.current;
@@ -169,16 +168,17 @@ function useCelebration() {
     return () => window.removeEventListener("resize", fit);
   }, []);
 
-  // Firework engine
   useEffect(() => {
     if (!active) return;
 
-    // 🔧 TS fix: copy to a local, explicitly-typed variable and use only that in closures
-    if (!canvasRef.current) return;
-    const canvas = canvasRef.current as HTMLCanvasElement;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    const c = canvasRef.current;
+    if (!c) return;
 
+    const maybe = c.getContext("2d");
+    if (!(maybe instanceof CanvasRenderingContext2D)) return;
+    const context: CanvasRenderingContext2D = maybe; // <-- strongly typed, not nullable
+
+    type Particle = { x: number; y: number; vx: number; vy: number; life: number; ttl: number };
     const particles: Particle[] = [];
     let lastSpawn = 0;
 
@@ -199,46 +199,43 @@ function useCelebration() {
     }
 
     function spawnRocket() {
-      const cx = Math.random() * canvas.width * 0.8 + canvas.width * 0.1;
-      const cy = Math.random() * canvas.height * 0.4 + canvas.height * 0.15;
+      const cx = Math.random() * c.width * 0.8 + c.width * 0.1;
+      const cy = Math.random() * c.height * 0.4 + c.height * 0.15;
       spawnBurst(cx, cy);
     }
 
     function step(ts: number) {
-      // clear with slight trail
-      ctx.fillStyle = "rgba(0,0,0,0.08)";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // slightly translucent clear for trails
+      context.fillStyle = "rgba(0,0,0,0.08)";
+      context.fillRect(0, 0, c.width, c.height);
 
-      // spawn rockets ~ every 180ms
       if (ts - lastSpawn > 180) {
         spawnRocket();
         lastSpawn = ts;
       }
 
-      // update + draw particles
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         p.x += p.vx;
         p.y += p.vy;
-        p.vy += 0.03; // gravity
+        p.vy += 0.03;
         p.life += 1;
 
         const fade = Math.max(0, 1 - p.life / p.ttl);
-        (ctx as CanvasRenderingContext2D).globalAlpha = fade;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 2 + fade * 2, 0, Math.PI * 2);
+        context.globalAlpha = fade;
+        context.beginPath();
+        context.arc(p.x, p.y, 2 + fade * 2, 0, Math.PI * 2);
         const hue = ((p.x + p.y + ts / 10) % 360) | 0;
-        ctx.fillStyle = `hsl(${hue}, 80%, 60%)`;
-        ctx.fill();
+        context.fillStyle = `hsl(${hue}, 80%, 60%)`;
+        context.fill();
 
         if (p.life >= p.ttl) particles.splice(i, 1);
       }
 
-      ctx.globalAlpha = 1;
+      context.globalAlpha = 1;
       rafRef.current = requestAnimationFrame(step);
     }
 
-    // kick off
     rafRef.current = requestAnimationFrame(step);
 
     const timer = setTimeout(() => {
@@ -274,12 +271,7 @@ function useCelebration() {
     >
       <canvas
         ref={canvasRef}
-        style={{
-          position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
-        }}
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
       />
       {msg && (
         <div
@@ -304,6 +296,8 @@ function useCelebration() {
   );
 
   return { node, boom };
+}
+
 }
 
 /* ===== Toast ===== */
@@ -1484,3 +1478,4 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 }
+
