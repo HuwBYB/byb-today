@@ -157,10 +157,10 @@ function useCelebration() {
   // Fit canvas to viewport
   useEffect(() => {
     function fit() {
-      const c = canvasRef.current;
-      if (!c) return;
-      c.width = window.innerWidth;
-      c.height = window.innerHeight;
+      const el = canvasRef.current;
+      if (!el) return;
+      el.width = window.innerWidth;
+      el.height = window.innerHeight;
     }
     fit();
     window.addEventListener("resize", fit);
@@ -171,12 +171,12 @@ function useCelebration() {
   useEffect(() => {
     if (!active) return;
 
-    const c = canvasRef.current;
-    if (!c) return;
+    const cEl = canvasRef.current;
+    if (!cEl) return;
 
-    const maybe = c.getContext("2d");
-    if (!(maybe instanceof CanvasRenderingContext2D)) return;
-    const context: CanvasRenderingContext2D = maybe; // non-nullable
+    const ctxMaybe = cEl.getContext("2d");
+    if (!(ctxMaybe instanceof CanvasRenderingContext2D)) return;
+    const ctx: CanvasRenderingContext2D = ctxMaybe;
 
     type Particle = { x: number; y: number; vx: number; vy: number; life: number; ttl: number };
     const particles: Particle[] = [];
@@ -199,15 +199,15 @@ function useCelebration() {
     }
 
     function spawnRocket() {
-      const cx = Math.random() * c.width * 0.8 + c.width * 0.1;
-      const cy = Math.random() * c.height * 0.4 + c.height * 0.15;
+      const cx = Math.random() * cEl.width * 0.8 + cEl.width * 0.1;
+      const cy = Math.random() * cEl.height * 0.4 + cEl.height * 0.15;
       spawnBurst(cx, cy);
     }
 
     function step(ts: number) {
       // translucent clear for trails
-      context.fillStyle = "rgba(0,0,0,0.08)";
-      context.fillRect(0, 0, c.width, c.height);
+      ctx.fillStyle = "rgba(0,0,0,0.08)";
+      ctx.fillRect(0, 0, cEl.width, cEl.height);
 
       if (ts - lastSpawn > 170) {
         spawnRocket();
@@ -222,17 +222,17 @@ function useCelebration() {
         p.life += 1;
 
         const fade = Math.max(0, 1 - p.life / p.ttl);
-        context.globalAlpha = fade;
-        context.beginPath();
-        context.arc(p.x, p.y, 2 + fade * 2, 0, Math.PI * 2);
+        ctx.globalAlpha = fade;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2 + fade * 2, 0, Math.PI * 2);
         const hue = ((p.x + p.y + ts / 10) % 360) | 0;
-        context.fillStyle = `hsl(${hue}, 80%, 60%)`;
-        context.fill();
+        ctx.fillStyle = `hsl(${hue}, 80%, 60%)`;
+        ctx.fill();
 
         if (p.life >= p.ttl) particles.splice(i, 1);
       }
 
-      context.globalAlpha = 1;
+      ctx.globalAlpha = 1;
       rafRef.current = requestAnimationFrame(step);
     }
 
@@ -294,6 +294,7 @@ function useCelebration() {
 
   return { node, boom };
 }
+
 
 /* ===== Toast (small messages) ===== */
 const ENCOURAGE_LINES = [
@@ -1370,6 +1371,37 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
+{/* Nickname reset modal */}
+{confirmResetOpen && (
+  <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-reset-title">
+    <div className="sheet" style={{ maxWidth: 420 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+        <img
+          src={TOAST_LOGO_SRC}
+          alt=""
+          width={28}
+          height={28}
+          style={{ display: "block", objectFit: "contain", borderRadius: 6, border: `1px solid ${TOAST_BORDER}`, background: "#fff" }}
+          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+        />
+        <div id="confirm-reset-title" style={{ fontWeight: 800, fontSize: 18 }}>Reset nicknames?</div>
+      </div>
+      <p className="muted" style={{ marginTop: 0 }}>This will clear your selected and custom nicknames.</p>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+        <button className="btn-soft" onClick={() => setConfirmResetOpen(false)}>Cancel</button>
+        <button
+          className="btn-primary"
+          onClick={() => { setPoolInput([]); setConfirmResetOpen(false); }}
+          style={{ background: "#ef4444" }}
+        >
+          Reset
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+      
       {/* Toast & Celebration nodes */}
       {toast.node}
       {celebration.node}
@@ -1454,3 +1486,4 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 }
+
