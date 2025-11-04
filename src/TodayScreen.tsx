@@ -148,9 +148,7 @@ function formatNiceDate(iso: string): string {
 }
 
 /* ===== Celebration (Fireworks + Big Message) ===== */
-type Particle = {
-  x: number; y: number; vx: number; vy: number; life: number; ttl: number;
-};
+type Particle = { x: number; y: number; vx: number; vy: number; life: number; ttl: number };
 
 function useCelebration() {
   const [msg, setMsg] = useState<string | null>(null);
@@ -175,11 +173,12 @@ function useCelebration() {
   useEffect(() => {
     if (!active) return;
 
-    const c = canvasRef.current;
-    if (!c) return;
-    const ctx = c.getContext("2d");
-    if (!ctx) return;
+    const cEl = canvasRef.current;
+    if (!cEl) return;
+    const ctx2d = cEl.getContext("2d");
+    if (!ctx2d) return;
 
+    const ctx = ctx2d; // non-null
     const particles: Particle[] = [];
     let lastSpawn = 0;
 
@@ -200,15 +199,15 @@ function useCelebration() {
     }
 
     function spawnRocket() {
-      const cx = Math.random() * c.width * 0.8 + c.width * 0.1;
-      const cy = Math.random() * c.height * 0.4 + c.height * 0.15;
+      const cx = Math.random() * cEl.width * 0.8 + cEl.width * 0.1;
+      const cy = Math.random() * cEl.height * 0.4 + cEl.height * 0.15;
       spawnBurst(cx, cy);
     }
 
     function step(ts: number) {
       // clear with slight trail
       ctx.fillStyle = "rgba(0,0,0,0.08)";
-      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.fillRect(0, 0, cEl.width, cEl.height);
 
       // spawn rockets ~ every 180ms
       if (ts - lastSpawn > 180) {
@@ -228,7 +227,6 @@ function useCelebration() {
         ctx.globalAlpha = fade;
         ctx.beginPath();
         ctx.arc(p.x, p.y, 2 + fade * 2, 0, Math.PI * 2);
-        // let the browser choose colors: use HSL that varies by position/time
         const hue = ((p.x + p.y + ts / 10) % 360) | 0;
         ctx.fillStyle = `hsl(${hue}, 80%, 60%)`;
         ctx.fill();
@@ -240,13 +238,7 @@ function useCelebration() {
       rafRef.current = requestAnimationFrame(step);
     }
 
-    // prime background
-    const bg = c.getContext("2d");
-    if (bg) {
-      bg.fillStyle = "rgba(0,0,0,0)";
-      bg.fillRect(0, 0, c.width, c.height);
-    }
-
+    // kick off
     rafRef.current = requestAnimationFrame(step);
 
     const timer = setTimeout(() => {
@@ -314,7 +306,7 @@ function useCelebration() {
   return { node, boom };
 }
 
-/* ===== Toast (kept for small status notices) ===== */
+/* ===== Toast (bottom notices) ===== */
 const ENCOURAGE_LINES = [
   "Lovely momentum. Keep it rolling.",
   "One pebble at a time becomes a mountain.",
@@ -584,8 +576,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [gentleOpen, setGentleOpen] = useState(false);
 
   // Confirm skip ALL overdue
-  theConfirmSkipAllOpen: {
-  }
   const [confirmSkipAllOpen, setConfirmSkipAllOpen] = useState(false);
 
   // Confirm skip ONE task
@@ -777,7 +767,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
       if (error) throw error;
       await loadAll();
       if (markDone) {
-        // Big center message + fireworks
         celebration.boom(pick(ENCOURAGE_LINES));
       }
     } catch (e: any) { setErr(e.message || String(e)); }
