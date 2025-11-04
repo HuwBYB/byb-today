@@ -1,5 +1,5 @@
 // src/TodayScreen.tsx
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"; 
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 import { colorOf, normalizeCat } from "./theme/categories";
 import "./theme.css";
@@ -68,7 +68,7 @@ function generateOccurrences(startISO: string, repeat: Repeat): string[] {
     const out: string[] = [];
     const d = fromISO(startISO);
     while (out.length < REPEAT_COUNTS.weekdays) {
-      const dow = d.getDay();
+      const dow = d.getDay(); // 0=Sun..6=Sat
       if (dow >= 1 && dow <= 5) out.push(toISO(d));
       d.setDate(d.getDate() + 1);
     }
@@ -148,14 +148,13 @@ function formatNiceDate(iso: string): string {
 }
 
 /* ===== Celebration (Fireworks + Big Message) ===== */
-type Particle = { x: number; y: number; vx: number; vy: number; life: number; ttl: number };
-
 function useCelebration() {
   const [msg, setMsg] = useState<string | null>(null);
   const [active, setActive] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
 
+  // Fit canvas to viewport
   useEffect(() => {
     function fit() {
       const c = canvasRef.current;
@@ -168,6 +167,7 @@ function useCelebration() {
     return () => window.removeEventListener("resize", fit);
   }, []);
 
+  // Animation loop
   useEffect(() => {
     if (!active) return;
 
@@ -176,24 +176,24 @@ function useCelebration() {
 
     const maybe = c.getContext("2d");
     if (!(maybe instanceof CanvasRenderingContext2D)) return;
-    const context: CanvasRenderingContext2D = maybe; // <-- strongly typed, not nullable
+    const context: CanvasRenderingContext2D = maybe; // non-nullable
 
     type Particle = { x: number; y: number; vx: number; vy: number; life: number; ttl: number };
     const particles: Particle[] = [];
     let lastSpawn = 0;
 
     function spawnBurst(cx: number, cy: number) {
-      const count = 80;
+      const count = 90;
       for (let i = 0; i < count; i++) {
         const angle = (Math.PI * 2 * i) / count + Math.random() * 0.2;
-        const speed = 2 + Math.random() * 3.5;
+        const speed = 2 + Math.random() * 3.8;
         particles.push({
           x: cx,
           y: cy,
           vx: Math.cos(angle) * speed,
           vy: Math.sin(angle) * speed,
           life: 0,
-          ttl: 50 + Math.floor(Math.random() * 30),
+          ttl: 52 + Math.floor(Math.random() * 30),
         });
       }
     }
@@ -205,11 +205,11 @@ function useCelebration() {
     }
 
     function step(ts: number) {
-      // slightly translucent clear for trails
+      // translucent clear for trails
       context.fillStyle = "rgba(0,0,0,0.08)";
       context.fillRect(0, 0, c.width, c.height);
 
-      if (ts - lastSpawn > 180) {
+      if (ts - lastSpawn > 170) {
         spawnRocket();
         lastSpawn = ts;
       }
@@ -218,7 +218,7 @@ function useCelebration() {
         const p = particles[i];
         p.x += p.vx;
         p.y += p.vy;
-        p.vy += 0.03;
+        p.vy += 0.03; // gravity
         p.life += 1;
 
         const fade = Math.max(0, 1 - p.life / p.ttl);
@@ -269,21 +269,18 @@ function useCelebration() {
         placeItems: "center",
       }}
     >
-      <canvas
-        ref={canvasRef}
-        style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
-      />
+      <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />
       {msg && (
         <div
           style={{
             position: "relative",
-            padding: "14px 18px",
-            borderRadius: 16,
-            background: "rgba(255,255,255,0.9)",
-            border: "1px solid rgba(0,0,0,0.08)",
-            boxShadow: "0 20px 60px rgba(0,0,0,.18)",
+            padding: "16px 22px",
+            borderRadius: 18,
+            background: "rgba(255,255,255,0.95)",
+            border: "1px solid rgba(0,0,0,0.06)",
+            boxShadow: "0 24px 70px rgba(0,0,0,.22)",
             fontWeight: 900,
-            fontSize: 22,
+            fontSize: 24,
             textAlign: "center",
             color: "#0f172a",
             maxWidth: "90vw",
@@ -298,9 +295,7 @@ function useCelebration() {
   return { node, boom };
 }
 
-}
-
-/* ===== Toast ===== */
+/* ===== Toast (small messages) ===== */
 const ENCOURAGE_LINES = [
   "Lovely momentum. Keep it rolling.",
   "One pebble at a time becomes a mountain.",
@@ -575,6 +570,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
   // Confirm skip ONE task
   const [taskToSkip, setTaskToSkip] = useState<Task | null>(null);
 
+  // Celebration overlay
+  const celebration = useCelebration();
+
   // Responsive
   const [isCompact, setIsCompact] = useState<boolean>(false);
   useEffect(() => {
@@ -600,7 +598,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
   }, [summary.streak]);
 
   const toast = useToast();
-  const celebration = useCelebration();
 
   // external date change
   useEffect(() => { if (externalDateISO) setDateISO(externalDateISO); }, [externalDateISO]);
@@ -652,6 +649,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         completed_at: t.completed_at,
       }));
 
+      // Exclude done + skipped from the working set; include today's and overdue
       const list = normalized.filter(
         (t) =>
           t.due_date !== null &&
@@ -672,6 +670,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
       setTasks(list);
 
+      // goals
       const ids = Array.from(new Set(list.map((t) => t.goal_id).filter((v): v is number => typeof v === "number")));
       if (ids.length) {
         const { data: gs, error: ge } = await supabase.from("goals").select("id,title").in("id", ids);
@@ -736,6 +735,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   async function loadAll() { await load(); await loadStreaks(); }
   useEffect(() => { if (userId && dateISO) loadAll(); }, [userId, dateISO]);
 
+  // Recompute greeting line
   useEffect(() => {
     setGreetLine(buildGreetingLine(missed, greetName, summary.doneToday, summary.pendingToday));
   }, [missed, greetName, summary.doneToday, summary.pendingToday]);
@@ -758,7 +758,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
       if (error) throw error;
       await loadAll();
       if (markDone) {
-        celebration.boom(pick(ENCOURAGE_LINES));
+        celebration.boom(pick(ENCOURAGE_LINES)); // big centered message + fireworks
       }
     } catch (e: any) { setErr(e.message || String(e)); }
   }
@@ -801,6 +801,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     } catch (e: any) { setErr(e.message || String(e)); } finally { setAdding(false); }
   }
 
+  // Skip all overdue
   async function skipAllOverdue() {
     if (!userId) return;
     const backlogIds = tasks.filter(t => isOverdueFn(t)).map(t => t.id);
@@ -821,6 +822,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 
+  // Gentle Reset uses skipAllOverdue
   async function gentleResetBacklog() {
     await skipAllOverdue();
   }
@@ -843,6 +845,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 
+  // Skip ONE task
   function askSkipTask(t: Task) { setTaskToSkip(t); }
   async function confirmSkipTask() {
     if (!taskToSkip) return;
@@ -860,9 +863,11 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 
+  /* ===== Boost helpers ===== */
   function openBoost() { setBoostLine(pick(BOOST_LINES)); setBoostOpen(true); }
   function nextBoost() { setBoostLine(pick(BOOST_LINES)); }
 
+  /* ===== Computed ===== */
   const niceDate = useMemo(() => formatNiceDate(dateISO), [dateISO]);
   const greeting = useMemo(() => (greetLine || timeGreeting(now)), [greetLine, now]);
   const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -870,6 +875,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const overdue = tasks.filter(isOverdueFn);
   const todayPending = tasks.filter((t) => t.due_date === dateISO && t.status !== "done" && t.status !== "skipped");
 
+  /* ===== Section ===== */
   function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode }) {
     return (
       <div className="card" style={{ marginBottom: 12, overflowX: "clip", borderRadius: 16 }}>
@@ -899,6 +905,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
     );
   }
 
+  /* ===== Render ===== */
   return (
     <div
       style={{
@@ -1020,6 +1027,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
           </div>
         </div>
 
+        {/* Gentle Reset banner */}
         {(missed && overdue.length > 0) && (
           <div
             className="card"
@@ -1046,7 +1054,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-      {/* Today */}
+      {/* Today (pending) */}
       <Section title="Today">
         {todayPending.length === 0 ? (
           <div className="muted">Nothing due today.</div>
@@ -1079,7 +1087,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         )}
       </Section>
 
-      {/* Overdue */}
+      {/* Overdue (pending) */}
       <Section title="Overdue" right={overdue.length > 0 ? <span className="muted">{overdue.length}</span> : null}>
         {overdue.length === 0 ? (
           <div className="muted">Nothing overdue. Nice!</div>
@@ -1362,45 +1370,13 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* Nickname reset modal */}
-      {confirmResetOpen && (
-        <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-reset-title">
-          <div className="sheet" style={{ maxWidth: 420 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-              <img
-                src={TOAST_LOGO_SRC}
-                alt=""
-                width={28}
-                height={28}
-                style={{ display: "block", objectFit: "contain", borderRadius: 6, border: `1px solid ${TOAST_BORDER}`, background: "#fff" }}
-                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-              />
-              <div id="confirm-reset-title" style={{ fontWeight: 800, fontSize: 18 }}>Reset nicknames?</div>
-            </div>
-            <p className="muted" style={{ marginTop: 0 }}>This will clear your selected and custom nicknames.</p>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn-soft" onClick={() => setConfirmResetOpen(false)}>Cancel</button>
-              <button
-                className="btn-primary"
-                onClick={() => { setPoolInput([]); setConfirmResetOpen(false); }}
-                style={{ background: "#ef4444" }}
-              >
-                Reset
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Celebration node */}
-      {celebration.node}
-
-      {/* Toast */}
+      {/* Toast & Celebration nodes */}
       {toast.node}
+      {celebration.node}
     </div>
   );
 
-  /* ===== Profile helpers ===== */
+  /* ===== Profile helpers (inside component for state access) ===== */
   async function loadProfileIntoForm() {
     try {
       if (userId) {
@@ -1478,4 +1454,3 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 }
-
