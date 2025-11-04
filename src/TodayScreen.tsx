@@ -1,20 +1,13 @@
 // src/TodayScreen.tsx
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
-
-// ✅ Pull just what we use from the central categories module
 import { colorOf, normalizeCat } from "./theme/categories";
-// ✅ Keep global CSS as a side-effect import
 import "./theme.css";
 
-/* =============================================
-   BYB — Today Screen (Profile editor + Boost + Gentle Reset)
-   ============================================= */
-
-/* ===== Logo & Toast theme ===== */
-const TOAST_LOGO_SRC = "/LogoButterfly.png"; // served from public/
-const TOAST_BG = "#D7F0FA";                   // match App banner
-const TOAST_BORDER = "#bfe5f3";               // subtle border to suit the bg
+/* ===== Toast theme ===== */
+const TOAST_LOGO_SRC = "/LogoButterfly.png";
+const TOAST_BG = "#D7F0FA";
+const TOAST_BORDER = "#bfe5f3";
 
 /* ===== Types ===== */
 type Task = {
@@ -22,12 +15,11 @@ type Task = {
   user_id: string;
   title: string;
   due_date: string | null;
-  status: "pending" | "done" | "missed" | string; // added "missed" as a soft status
+  status: "pending" | "done" | "skipped" | string;
   priority: number | null;
   source: string | null;
   goal_id: number | null;
   completed_at: string | null;
-  // category fields
   category?: string | null;
   category_color?: string | null;
 };
@@ -43,9 +35,9 @@ function todayISO() {
   return `${yyyy}-${mm}-${dd}`;
 }
 function toISO(d: Date) {
-  const y = d.getFullYear(),
-    m = String(d.getMonth() + 1).padStart(2, "0"),
-    dd = String(d.getDate()).padStart(2, "0");
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
 function fromISO(s: string) {
@@ -99,26 +91,22 @@ function makeSeriesKey(repeat: Repeat) {
 
 /* ===== Greeting helpers ===== */
 const LS_NAME = "byb:display_name";
-const LS_POOL = "byb:display_pool"; // string[]
-const LS_ROTATE = "byb:rotate_nicknames"; // "1" | "0" (default on)
+const LS_POOL = "byb:display_pool";
+const LS_ROTATE = "byb:rotate_nicknames";
 const LS_LAST_VISIT = "byb:last_visit_ms";
 
 function pickGreetingLabel(): string {
   try {
     const name = (localStorage.getItem(LS_NAME) || "").trim();
-    const rotate = localStorage.getItem(LS_ROTATE) !== "0"; // default ON
+    const rotate = localStorage.getItem(LS_ROTATE) !== "0";
     const pool = rotate ? (JSON.parse(localStorage.getItem(LS_POOL) || "[]") as string[]) : [];
-    const list = [
-      ...(name ? [name] : []),
-      ...(Array.isArray(pool) ? pool.filter(Boolean) : []),
-    ];
+    const list = [...(name ? [name] : []), ...(Array.isArray(pool) ? pool.filter(Boolean) : [])];
     if (list.length === 0) return "";
     return list[Math.floor(Math.random() * list.length)];
   } catch {
     return "";
   }
 }
-
 const POSITIVE_GREETS = [
   "Great to see you",
   "Let’s make today a great day",
@@ -131,7 +119,6 @@ const PROGRESS_GREETS = [
   "Momentum looks great",
   "Lovely progress",
 ];
-
 function timeGreeting(date = new Date()): string {
   const h = date.getHours();
   if (h < 5) return "Up late";
@@ -145,17 +132,11 @@ function buildGreetingLine(missed: boolean, nameLabel: string, done: number, pen
   const didHalf = total > 0 && done >= Math.ceil(total / 2);
   const pool = didHalf ? PROGRESS_GREETS : POSITIVE_GREETS;
   const prefix = pool[Math.floor(Math.random() * pool.length)];
-  return nameLabel ? `${prefix}, ${nameLabel}` : prefix;
+  return nameLabel ? `${prefix}, ${nameLabel}` : `${prefix}`;
 }
 
 /* ===== Summary ===== */
-type Summary = {
-  doneToday: number;
-  pendingToday: number;
-  isWin: boolean;
-  streak: number;
-  bestStreak: number;
-};
+type Summary = { doneToday: number; pendingToday: number; isWin: boolean; streak: number; bestStreak: number };
 
 function formatNiceDate(iso: string): string {
   try {
@@ -166,106 +147,174 @@ function formatNiceDate(iso: string): string {
   }
 }
 
-/* ===== Fireworks (canvas) – replaces confetti ===== */
-function fireFireworks(durationMs = 2200) {
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
+/* ===== Celebration (Fireworks + Big Message) ===== */
+type Particle = {
+  x: number; y: number; vx: number; vy: number; life: number; ttl: number;
+};
 
-  canvas.style.position = "fixed";
-  canvas.style.inset = "0";
-  canvas.style.zIndex = "4000";
-  canvas.style.pointerEvents = "none";
-  document.body.appendChild(canvas);
+function useCelebration() {
+  const [msg, setMsg] = useState<string | null>(null);
+  const [active, setActive] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rafRef = useRef<number | null>(null);
 
-  const DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-  function resize() {
-    canvas.width = Math.floor(window.innerWidth * DPR);
-    canvas.height = Math.floor(window.innerHeight * DPR);
-  }
-  resize();
-  const onResize = () => resize();
-  window.addEventListener("resize", onResize);
-
-  type Particle = { x:number; y:number; vx:number; vy:number; life:number; maxLife:number; color:string };
-  const particles: Particle[] = [];
-  const COLORS = ["#fde047", "#60a5fa", "#34d399", "#f472b6", "#a78bfa", "#fb923c"];
-
-  function burst(cx: number, cy: number, count = 60) {
-    for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = 2 + Math.random() * 4;
-      particles.push({
-        x: cx, y: cy,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        life: 0,
-        maxLife: 40 + Math.random() * 20,
-        color: COLORS[(Math.random() * COLORS.length) | 0],
-      });
+  // Resize canvas to viewport
+  useEffect(() => {
+    function fit() {
+      const c = canvasRef.current;
+      if (!c) return;
+      c.width = window.innerWidth;
+      c.height = window.innerHeight;
     }
-  }
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, []);
 
-  const W = () => canvas.width;
-  const H = () => canvas.height;
-  const burstCount = 3 + ((Math.random() * 2) | 0);
-  for (let i = 0; i < burstCount; i++) {
-    const t = i * (durationMs / burstCount);
-    setTimeout(() => {
-      const x = (0.25 + Math.random() * 0.5) * W();
-      const y = (0.25 + Math.random() * 0.5) * H();
-      burst(x, y);
-    }, t);
-  }
+  // Firework engine
+  useEffect(() => {
+    if (!active) return;
 
-  let raf = 0;
-  const gravity = 0.06 * DPR;
-  const start = performance.now();
+    const c = canvasRef.current;
+    if (!c) return;
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
 
-  function tick(now: number) {
-    // fade frame for trails
-    ctx.globalCompositeOperation = "source-over";
-    ctx.fillStyle = "rgba(0,0,0,0.15)";
-    ctx.fillRect(0, 0, W(), H());
-    ctx.globalCompositeOperation = "lighter";
+    const particles: Particle[] = [];
+    let lastSpawn = 0;
 
-    for (let i = particles.length - 1; i >= 0; i--) {
-      const p = particles[i];
-      p.life++;
-      p.x += p.vx;
-      p.y += p.vy;
-      p.vy += gravity;
-
-      const alpha = 1 - p.life / p.maxLife;
-      if (alpha <= 0) {
-        particles.splice(i, 1);
-        continue;
+    function spawnBurst(cx: number, cy: number) {
+      const count = 80;
+      for (let i = 0; i < count; i++) {
+        const angle = (Math.PI * 2 * i) / count + Math.random() * 0.2;
+        const speed = 2 + Math.random() * 3.5;
+        particles.push({
+          x: cx,
+          y: cy,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 0,
+          ttl: 50 + Math.floor(Math.random() * 30),
+        });
       }
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 2 * DPR, 0, Math.PI * 2);
-      ctx.fillStyle = p.color;
-      ctx.globalAlpha = Math.max(0, alpha);
-      ctx.fill();
     }
-    ctx.globalAlpha = 1;
 
-    if (now - start < durationMs || particles.length > 0) {
-      raf = requestAnimationFrame(tick);
-    } else {
-      cleanup();
+    function spawnRocket() {
+      const cx = Math.random() * c.width * 0.8 + c.width * 0.1;
+      const cy = Math.random() * c.height * 0.4 + c.height * 0.15;
+      spawnBurst(cx, cy);
     }
+
+    function step(ts: number) {
+      // clear with slight trail
+      ctx.fillStyle = "rgba(0,0,0,0.08)";
+      ctx.fillRect(0, 0, c.width, c.height);
+
+      // spawn rockets ~ every 180ms
+      if (ts - lastSpawn > 180) {
+        spawnRocket();
+        lastSpawn = ts;
+      }
+
+      // update + draw particles
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.03; // gravity
+        p.life += 1;
+
+        const fade = Math.max(0, 1 - p.life / p.ttl);
+        ctx.globalAlpha = fade;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2 + fade * 2, 0, Math.PI * 2);
+        // let the browser choose colors: use HSL that varies by position/time
+        const hue = ((p.x + p.y + ts / 10) % 360) | 0;
+        ctx.fillStyle = `hsl(${hue}, 80%, 60%)`;
+        ctx.fill();
+
+        if (p.life >= p.ttl) particles.splice(i, 1);
+      }
+
+      ctx.globalAlpha = 1;
+      rafRef.current = requestAnimationFrame(step);
+    }
+
+    // prime background
+    const bg = c.getContext("2d");
+    if (bg) {
+      bg.fillStyle = "rgba(0,0,0,0)";
+      bg.fillRect(0, 0, c.width, c.height);
+    }
+
+    rafRef.current = requestAnimationFrame(step);
+
+    const timer = setTimeout(() => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      setActive(false);
+      setMsg(null);
+    }, 2000);
+
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      clearTimeout(timer);
+    };
+  }, [active]);
+
+  function boom(text: string) {
+    setMsg(text);
+    setActive(true);
   }
 
-  function cleanup() {
-    cancelAnimationFrame(raf);
-    window.removeEventListener("resize", onResize);
-    canvas.remove();
-  }
+  const node = !active ? null : (
+    <div
+      aria-live="polite"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 5000,
+        pointerEvents: "none",
+        display: "grid",
+        placeItems: "center",
+      }}
+    >
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+        }}
+      />
+      {msg && (
+        <div
+          style={{
+            position: "relative",
+            padding: "14px 18px",
+            borderRadius: 16,
+            background: "rgba(255,255,255,0.9)",
+            border: "1px solid rgba(0,0,0,0.08)",
+            boxShadow: "0 20px 60px rgba(0,0,0,.18)",
+            fontWeight: 900,
+            fontSize: 22,
+            textAlign: "center",
+            color: "#0f172a",
+            maxWidth: "90vw",
+          }}
+        >
+          {msg}
+        </div>
+      )}
+    </div>
+  );
 
-  raf = requestAnimationFrame(tick);
+  return { node, boom };
 }
 
-/* ===== Encouragements + Toast ===== */
+/* ===== Toast (kept for small status notices) ===== */
 const ENCOURAGE_LINES = [
   "Lovely momentum. Keep it rolling.",
   "One pebble at a time becomes a mountain.",
@@ -276,15 +325,12 @@ const ENCOURAGE_LINES = [
 function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)] as T;
 }
-
 function useToast() {
   const [msg, setMsg] = useState<string | null>(null);
-
   function show(m: string) {
     setMsg(m);
     setTimeout(() => setMsg(null), 2500);
   }
-
   const node = (
     <div
       aria-live="polite"
@@ -336,68 +382,14 @@ function useToast() {
       )}
     </div>
   );
-
   return { node, show };
 }
 
-/* ===== Big Celebration Message (center overlay) ===== */
-function useCelebration() {
-  const [text, setText] = useState<string | null>(null);
-
-  function show(message: string, ms = 2200) {
-    setText(message);
-    window.clearTimeout((show as any)._t);
-    (show as any)._t = window.setTimeout(() => setText(null), ms);
-  }
-
-  const node = (
-    <div
-      aria-live="polite"
-      style={{
-        position: "fixed",
-        inset: 0,
-        display: text ? "grid" : "none",
-        placeItems: "center",
-        zIndex: 4500,
-        pointerEvents: "none",
-      }}
-    >
-      <div
-        className="card"
-        style={{
-          pointerEvents: "auto",
-          background: "rgba(255,255,255,0.96)",
-          border: "1px solid #e5e7eb",
-          padding: "18px 22px",
-          borderRadius: 16,
-          boxShadow: "0 20px 60px rgba(0,0,0,.15)",
-          maxWidth: "min(92vw, 720px)",
-        }}
-      >
-        <div
-          style={{
-            fontWeight: 900,
-            fontSize: "clamp(20px, 4.5vw, 36px)",
-            textAlign: "center",
-            lineHeight: 1.2,
-          }}
-        >
-          {text}
-        </div>
-      </div>
-    </div>
-  );
-
-  return { node, show };
-}
-
-/* ===== Nickname options (match onboarding) ===== */
+/* ===== Defaults (nicknames, boost) ===== */
 const DEFAULT_NICKNAMES = [
   "King","Champ","Legend","Boss","Chief","Star","Ace","Hero","Captain","Tiger",
   "Queen","Princess","Gurl","Boss Lady","Diva","Hot Stuff","Girlfriend",
 ];
-
-/* ===== Boost lines (unisex, always positive) ===== */
 const BOOST_LINES = [
   "You have the power to make a difference.",
   "The world is a better place with you in it.",
@@ -500,7 +492,7 @@ const BOOST_LINES = [
    Component
    ============================================= */
 export default function TodayScreen({ externalDateISO }: Props) {
-  /* ===== Global theme + NO-BLEED CSS ===== */
+  /* ===== Global theme injection ===== */
   useEffect(() => {
     const style = document.createElement("style");
     style.setAttribute("data-byb-global", "1");
@@ -565,7 +557,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Add task (top composer)
+  // Add task
   const [newTitle, setNewTitle] = useState("");
   const [newRepeat, setNewRepeat] = useState<Repeat>("");
   const [adding, setAdding] = useState(false);
@@ -588,8 +580,16 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [boostOpen, setBoostOpen] = useState(false);
   const [boostLine, setBoostLine] = useState<string>("");
 
-  // Supportive backlog reset
+  // Gentle Reset
   const [gentleOpen, setGentleOpen] = useState(false);
+
+  // Confirm skip ALL overdue
+  theConfirmSkipAllOpen: {
+  }
+  const [confirmSkipAllOpen, setConfirmSkipAllOpen] = useState(false);
+
+  // Confirm skip ONE task
+  const [taskToSkip, setTaskToSkip] = useState<Task | null>(null);
 
   // Responsive
   const [isCompact, setIsCompact] = useState<boolean>(false);
@@ -601,13 +601,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
   }, []);
 
   // Summary
-  const [summary, setSummary] = useState<Summary>({
-    doneToday: 0,
-    pendingToday: 0,
-    isWin: false,
-    streak: 0,
-    bestStreak: 0,
-  });
+  const [summary, setSummary] = useState<Summary>({ doneToday: 0, pendingToday: 0, isWin: false, streak: 0, bestStreak: 0 });
 
   // streak micro animation
   const prevStreak = useRef(0);
@@ -648,11 +642,14 @@ export default function TodayScreen({ externalDateISO }: Props) {
   // clock
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id); }, []);
 
-  // Overdue helper
+  // Overdue helper — exclude "skipped"
   const isOverdueFn = (t: Task) =>
-    !!t.due_date && t.status !== "done" && fromISO(t.due_date.slice(0, 10)).getTime() < fromISO(dateISO).getTime();
+    !!t.due_date &&
+    t.status !== "done" &&
+    t.status !== "skipped" &&
+    fromISO(t.due_date.slice(0, 10)).getTime() < fromISO(dateISO).getTime();
 
-  /* ===== Data loading (DEFENSIVE) ===== */
+  /* ===== Data loading ===== */
   async function load() {
     if (!userId) return;
     setLoading(true);
@@ -665,15 +662,19 @@ export default function TodayScreen({ externalDateISO }: Props) {
       if (error) throw error;
 
       const raw = (data as Task[]) || [];
-
       const normalized: Task[] = raw.map((t) => ({
         ...t,
         due_date: t.due_date ? t.due_date.slice(0, 10) : null,
         completed_at: t.completed_at,
       }));
 
+      // Exclude done + skipped from the working set; include today's and overdue
       const list = normalized.filter(
-        (t) => t.due_date !== null && (t.due_date === dateISO || (t.due_date < dateISO && t.status !== "done"))
+        (t) =>
+          t.due_date !== null &&
+          (t.due_date === dateISO || t.due_date < dateISO) &&
+          t.status !== "done" &&
+          t.status !== "skipped"
       );
 
       list.sort((a, b) => {
@@ -688,6 +689,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
       setTasks(list);
 
+      // goals
       const ids = Array.from(new Set(list.map((t) => t.goal_id).filter((v): v is number => typeof v === "number")));
       if (ids.length) {
         const { data: gs, error: ge } = await supabase.from("goals").select("id,title").in("id", ids);
@@ -700,7 +702,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
       }
 
       const doneToday = normalized.filter((t) => t.status === "done" && dateOnly(t.completed_at) === dateISO).length;
-      const pendingToday = normalized.filter((t) => t.due_date === dateISO && t.status !== "done").length;
+      const pendingToday = normalized.filter((t) => t.due_date === dateISO && t.status !== "done" && t.status !== "skipped").length;
       const isWin = doneToday >= 3;
       setSummary((s) => ({ ...s, doneToday, pendingToday, isWin }));
     } catch (e: any) {
@@ -757,7 +759,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
     setGreetLine(buildGreetingLine(missed, greetName, summary.doneToday, summary.pendingToday));
   }, [missed, greetName, summary.doneToday, summary.pendingToday]);
 
-  function displayTitle(t: Task) {
+  function displayTitle(t: Task | null) {
+    if (!t) return "";
     const base = (t.title || "").trim();
     const g = t.goal_id != null ? goalMap[t.goal_id] : "";
     return g ? `${base} (${g})` : base;
@@ -774,10 +777,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
       if (error) throw error;
       await loadAll();
       if (markDone) {
-        fireFireworks();
-        celebration.show(pick(ENCOURAGE_LINES));
-        // Optionally keep the tiny toast too:
-        // toast.show(pick(ENCOURAGE_LINES));
+        // Big center message + fireworks
+        celebration.boom(pick(ENCOURAGE_LINES));
       }
     } catch (e: any) { setErr(e.message || String(e)); }
   }
@@ -820,24 +821,30 @@ export default function TodayScreen({ externalDateISO }: Props) {
     } catch (e: any) { setErr(e.message || String(e)); } finally { setAdding(false); }
   }
 
-  // ===== Gentle Reset helpers =====
-  async function gentleResetBacklog() {
+  // Skip all overdue
+  async function skipAllOverdue() {
     if (!userId) return;
     const backlogIds = tasks.filter(t => isOverdueFn(t)).map(t => t.id);
-    if (backlogIds.length === 0) { setGentleOpen(false); return; }
+    if (backlogIds.length === 0) { setGentleOpen(false); setConfirmSkipAllOpen(false); return; }
     try {
-      // Mark overdue as "missed" (soft archive) and clear due_date so they no longer appear
       const { error } = await supabase
         .from("tasks")
-        .update({ status: "missed", due_date: null, completed_at: null })
+        .update({ status: "skipped", due_date: null, completed_at: null })
         .in("id", backlogIds);
       if (error) throw error;
+
       await loadAll();
       setGentleOpen(false);
-      toast.show("Fresh page set — you’re good to go.");
+      setConfirmSkipAllOpen(false);
+      toast.show("Overdue skipped — fresh page set.");
     } catch (e: any) {
       setErr(e.message || String(e));
     }
+  }
+
+  // Gentle Reset uses skipAllOverdue
+  async function gentleResetBacklog() {
+    await skipAllOverdue();
   }
 
   async function completeAllOverdue() {
@@ -852,21 +859,33 @@ export default function TodayScreen({ externalDateISO }: Props) {
       if (error) throw error;
       await loadAll();
       setGentleOpen(false);
-      fireFireworks();
-      celebration.show(pick(ENCOURAGE_LINES));
+      celebration.boom(pick(ENCOURAGE_LINES));
     } catch (e: any) {
       setErr(e.message || String(e));
     }
   }
 
-  /* ===== Boost helpers (fix build errors & use BOOST_LINES) ===== */
-  function openBoost() {
-    setBoostLine(pick(BOOST_LINES));
-    setBoostOpen(true);
+  // Skip ONE task
+  function askSkipTask(t: Task) { setTaskToSkip(t); }
+  async function confirmSkipTask() {
+    if (!taskToSkip) return;
+    try {
+      const { error } = await supabase
+        .from("tasks")
+        .update({ status: "skipped", due_date: null, completed_at: null })
+        .eq("id", taskToSkip.id);
+      if (error) throw error;
+      setTaskToSkip(null);
+      await loadAll();
+      toast.show("Task skipped.");
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    }
   }
-  function nextBoost() {
-    setBoostLine(pick(BOOST_LINES));
-  }
+
+  /* ===== Boost helpers ===== */
+  function openBoost() { setBoostLine(pick(BOOST_LINES)); setBoostOpen(true); }
+  function nextBoost() { setBoostLine(pick(BOOST_LINES)); }
 
   /* ===== Computed ===== */
   const niceDate = useMemo(() => formatNiceDate(dateISO), [dateISO]);
@@ -874,9 +893,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   const overdue = tasks.filter(isOverdueFn);
-  const todayPending = tasks.filter((t) => t.due_date === dateISO && t.status !== "done");
+  const todayPending = tasks.filter((t) => t.due_date === dateISO && t.status !== "done" && t.status !== "skipped");
 
-  /* ===== Section helper ===== */
+  /* ===== Section ===== */
   function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode }) {
     return (
       <div className="card" style={{ marginBottom: 12, overflowX: "clip", borderRadius: 16 }}>
@@ -1003,14 +1022,24 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {/* Date controls */}
         <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%", minWidth: 0 }}>
           {overdue.length > 0 && (
-            <button
-              onClick={moveAllOverdueHere}
-              className="btn-soft"
-              title="Change due date for all overdue pending tasks to this day"
-              style={{ flex: isCompact ? "1 1 100%" : undefined, minWidth: 0 }}
-            >
-              Move all overdue here ({overdue.length})
-            </button>
+            <>
+              <button
+                onClick={moveAllOverdueHere}
+                className="btn-soft"
+                title="Change due date for all overdue pending tasks to this day"
+                style={{ flex: isCompact ? "1 1 100%" : undefined, minWidth: 0 }}
+              >
+                Move all overdue here ({overdue.length})
+              </button>
+              <button
+                onClick={() => setConfirmSkipAllOpen(true)}
+                className="btn-soft"
+                title="Skip all overdue tasks and clear their due dates"
+                style={{ flex: isCompact ? "1 1 100%" : undefined, minWidth: 0 }}
+              >
+                Skip overdue ({overdue.length})
+              </button>
+            </>
           )}
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", flexWrap: "wrap", width: isCompact ? "100%" : "auto", minWidth: 0 }}>
             <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} style={{ flex: isCompact ? "1 1 220px" : undefined, minWidth: 0, maxWidth: "100%" }} />
@@ -1018,7 +1047,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
           </div>
         </div>
 
-        {/* Gentle Reset banner (shows if you were away and have backlog) */}
+        {/* Gentle Reset banner */}
         {(missed && overdue.length > 0) && (
           <div
             className="card"
@@ -1036,7 +1065,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
             </div>
             <div className="muted">You have {overdue.length} past-due task{overdue.length === 1 ? "" : "s"}.</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn-soft" onClick={() => setGentleOpen(true)}>🌤️ Mark as Missed & Reset</button>
+              <button className="btn-soft" onClick={() => setGentleOpen(true)}>🌤️ Skip overdue & reset</button>
               <button className="btn-soft" onClick={completeAllOverdue}>✅ Mark all as Done</button>
             </div>
           </div>
@@ -1053,11 +1082,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
           <ul className="list">
             {todayPending.map((t) => (
               <li key={t.id} className="item">
-                <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
                   <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
-                      {/* Category dot */}
                       <span
                         aria-hidden="true"
                         style={{
@@ -1067,9 +1095,12 @@ export default function TodayScreen({ externalDateISO }: Props) {
                         }}
                       />
                       <span style={{ minWidth: 0 }}>{displayTitle(t)}</span>
+                      <button className="btn-soft" style={{ marginLeft: "auto" }} onClick={() => askSkipTask(t)} title="Skip this task">
+                        Skip
+                      </button>
                     </div>
                   </div>
-                </label>
+                </div>
               </li>
             ))}
           </ul>
@@ -1084,11 +1115,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
           <ul className="list">
             {overdue.map((t) => (
               <li key={t.id} className="item">
-                <label style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
                   <input type="checkbox" checked={t.status === "done"} onChange={() => toggleDone(t)} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", wordBreak: "break-word", minWidth: 0 }}>
-                      {/* Category dot */}
                       <span
                         aria-hidden="true"
                         style={{
@@ -1099,22 +1129,25 @@ export default function TodayScreen({ externalDateISO }: Props) {
                       />
                       <span style={{ minWidth: 0 }}>{displayTitle(t)}</span>
                       <span className="badge">Overdue</span>
-                      <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => moveToSelectedDate(t.id)}>
+                      <button className="btn-ghost" onClick={() => moveToSelectedDate(t.id)} title="Move to selected date">
                         Move to {dateISO}
+                      </button>
+                      <button className="btn-soft" onClick={() => askSkipTask(t)} title="Skip this overdue task">
+                        Skip
                       </button>
                     </div>
                     <div className="muted" style={{ marginTop: 4, minWidth: 0 }}>
                       Due {t.due_date}
                     </div>
                   </div>
-                </label>
+                </div>
               </li>
             ))}
           </ul>
         )}
       </Section>
 
-      {/* ===== Fixed Bottom Bar: Boost (left) + Profile (right) ===== */}
+      {/* Bottom toolbar */}
       <div
         role="toolbar"
         aria-label="Quick actions"
@@ -1146,8 +1179,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
             style={{
               appearance: "none",
               border: 0,
-              background: "#99F6E4", // pastel teal
-              color: "#000",          // black text
+              background: "#99F6E4",
+              color: "#000",
               fontWeight: 700,
               fontSize: 14,
               lineHeight: "44px",
@@ -1166,8 +1199,8 @@ export default function TodayScreen({ externalDateISO }: Props) {
             style={{
               appearance: "none",
               border: 0,
-              background: "#E9D5FF", // pastel purple
-              color: "#000",          // black text
+              background: "#E9D5FF",
+              color: "#000",
               fontWeight: 700,
               fontSize: 14,
               lineHeight: "44px",
@@ -1184,13 +1217,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
       {boostOpen && (
         <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="boost-title">
           <div className="sheet" style={{ maxWidth: 520 }}>
-            {/* Header row with close */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
               <div id="boost-title" style={{ fontWeight: 800, fontSize: 18 }}>Here’s a little boost</div>
               <button className="btn-ghost" onClick={() => setBoostOpen(false)} aria-label="Close boost">Close</button>
             </div>
-
-            {/* Message + BYB logo on the right */}
             <div
               className="card"
               style={{
@@ -1215,8 +1245,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
               />
             </div>
-
-            {/* Actions */}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
               <button className="btn-soft" onClick={nextBoost} title="Show another">Another</button>
               <button className="btn-primary" onClick={() => setBoostOpen(false)}>Got it</button>
@@ -1262,7 +1290,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 })}
               </div>
 
-              {/* Selected chips incl. customs (removable) */}
               <div>
                 <div className="section-title" style={{ marginBottom: 6 }}>Selected nicknames</div>
                 {poolInput.length === 0 ? (
@@ -1312,23 +1339,96 @@ export default function TodayScreen({ externalDateISO }: Props) {
               <button className="btn-ghost" onClick={() => setGentleOpen(false)} aria-label="Close">Close</button>
             </div>
             <p className="muted" style={{ marginTop: 0 }}>
-              We’ll mark your overdue tasks as <b>Missed</b> (no penalty) and clear them from today so you can focus on a clean list.
+              We’ll <b>skip</b> your overdue tasks (no penalty) and clear their due dates so you can focus on a clean list.
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
               <button className="btn-soft" onClick={() => setGentleOpen(false)}>Cancel</button>
-              <button className="btn-primary" onClick={gentleResetBacklog}>🌤️ Mark as Missed & Reset</button>
+              <button className="btn-primary" onClick={gentleResetBacklog}>🌤️ Skip overdue & reset</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Celebration + Toast nodes */}
+      {/* Confirm Skip ALL Overdue */}
+      {confirmSkipAllOpen && (
+        <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="skip-overdue-title">
+          <div className="sheet" style={{ maxWidth: 520 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+              <div id="skip-overdue-title" style={{ fontWeight: 800, fontSize: 18 }}>Skip all overdue?</div>
+              <button className="btn-ghost" onClick={() => setConfirmSkipAllOpen(false)} aria-label="Close">Close</button>
+            </div>
+            <p className="muted" style={{ marginTop: 0 }}>
+              This will <b>skip</b> your overdue tasks (no penalty) and clear their due dates so you can start fresh.
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn-soft" onClick={() => setConfirmSkipAllOpen(false)}>No, keep them</button>
+              <button className="btn-primary" onClick={skipAllOverdue}>Yes — skip overdue</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Skip ONE Task */}
+      {taskToSkip && (
+        <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="skip-one-title">
+          <div className="sheet" style={{ maxWidth: 520 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+              <div id="skip-one-title" style={{ fontWeight: 800, fontSize: 18 }}>Skip this task?</div>
+              <button className="btn-ghost" onClick={() => setTaskToSkip(null)} aria-label="Close">Close</button>
+            </div>
+            <p style={{ marginTop: 0 }}>
+              <b>{displayTitle(taskToSkip)}</b>
+            </p>
+            <p className="muted" style={{ marginTop: 0 }}>
+              This will mark it as <b>skipped</b> and clear its due date. You can always re-add it later.
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn-soft" onClick={() => setTaskToSkip(null)}>No, keep it</button>
+              <button className="btn-primary" onClick={confirmSkipTask}>Yes — skip it</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Nickname reset modal */}
+      {confirmResetOpen && (
+        <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-reset-title">
+          <div className="sheet" style={{ maxWidth: 420 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+              <img
+                src={TOAST_LOGO_SRC}
+                alt=""
+                width={28}
+                height={28}
+                style={{ display: "block", objectFit: "contain", borderRadius: 6, border: `1px solid ${TOAST_BORDER}`, background: "#fff" }}
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+              />
+              <div id="confirm-reset-title" style={{ fontWeight: 800, fontSize: 18 }}>Reset nicknames?</div>
+            </div>
+            <p className="muted" style={{ marginTop: 0 }}>This will clear your selected and custom nicknames.</p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn-soft" onClick={() => setConfirmResetOpen(false)}>Cancel</button>
+              <button
+                className="btn-primary"
+                onClick={() => { setPoolInput([]); setConfirmResetOpen(false); }}
+                style={{ background: "#ef4444" }}
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Celebration node (centered fireworks + message) */}
       {celebration.node}
+
+      {/* Toast (bottom) */}
       {toast.node}
     </div>
   );
 
-  /* ===== Profile helpers (placed at the end to keep main flow readable) ===== */
+  /* ===== Profile helpers (inside component for state access) ===== */
   async function loadProfileIntoForm() {
     try {
       if (userId) {
