@@ -1,5 +1,5 @@
 // src/TodayScreen.tsx
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"; 
 import { supabase } from "./lib/supabaseClient";
 import { colorOf, normalizeCat } from "./theme/categories";
 import "./theme.css";
@@ -68,7 +68,7 @@ function generateOccurrences(startISO: string, repeat: Repeat): string[] {
     const out: string[] = [];
     const d = fromISO(startISO);
     while (out.length < REPEAT_COUNTS.weekdays) {
-      const dow = d.getDay(); // 0=Sun..6=Sat
+      const dow = d.getDay();
       if (dow >= 1 && dow <= 5) out.push(toISO(d));
       d.setDate(d.getDate() + 1);
     }
@@ -173,12 +173,12 @@ function useCelebration() {
   useEffect(() => {
     if (!active) return;
 
-    const cEl = canvasRef.current;
-    if (!cEl) return;
-    const ctx2d = cEl.getContext("2d");
-    if (!ctx2d) return;
+    // 🔧 TS fix: copy to a local, explicitly-typed variable and use only that in closures
+    if (!canvasRef.current) return;
+    const canvas = canvasRef.current as HTMLCanvasElement;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
 
-    const ctx = ctx2d; // non-null
     const particles: Particle[] = [];
     let lastSpawn = 0;
 
@@ -199,15 +199,15 @@ function useCelebration() {
     }
 
     function spawnRocket() {
-      const cx = Math.random() * cEl.width * 0.8 + cEl.width * 0.1;
-      const cy = Math.random() * cEl.height * 0.4 + cEl.height * 0.15;
+      const cx = Math.random() * canvas.width * 0.8 + canvas.width * 0.1;
+      const cy = Math.random() * canvas.height * 0.4 + canvas.height * 0.15;
       spawnBurst(cx, cy);
     }
 
     function step(ts: number) {
       // clear with slight trail
       ctx.fillStyle = "rgba(0,0,0,0.08)";
-      ctx.fillRect(0, 0, cEl.width, cEl.height);
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       // spawn rockets ~ every 180ms
       if (ts - lastSpawn > 180) {
@@ -224,7 +224,7 @@ function useCelebration() {
         p.life += 1;
 
         const fade = Math.max(0, 1 - p.life / p.ttl);
-        ctx.globalAlpha = fade;
+        (ctx as CanvasRenderingContext2D).globalAlpha = fade;
         ctx.beginPath();
         ctx.arc(p.x, p.y, 2 + fade * 2, 0, Math.PI * 2);
         const hue = ((p.x + p.y + ts / 10) % 360) | 0;
@@ -306,7 +306,7 @@ function useCelebration() {
   return { node, boom };
 }
 
-/* ===== Toast (bottom notices) ===== */
+/* ===== Toast ===== */
 const ENCOURAGE_LINES = [
   "Lovely momentum. Keep it rolling.",
   "One pebble at a time becomes a mountain.",
@@ -658,7 +658,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
         completed_at: t.completed_at,
       }));
 
-      // Exclude done + skipped from the working set; include today's and overdue
       const list = normalized.filter(
         (t) =>
           t.due_date !== null &&
@@ -679,7 +678,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
 
       setTasks(list);
 
-      // goals
       const ids = Array.from(new Set(list.map((t) => t.goal_id).filter((v): v is number => typeof v === "number")));
       if (ids.length) {
         const { data: gs, error: ge } = await supabase.from("goals").select("id,title").in("id", ids);
@@ -744,7 +742,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
   async function loadAll() { await load(); await loadStreaks(); }
   useEffect(() => { if (userId && dateISO) loadAll(); }, [userId, dateISO]);
 
-  // Recompute greeting line
   useEffect(() => {
     setGreetLine(buildGreetingLine(missed, greetName, summary.doneToday, summary.pendingToday));
   }, [missed, greetName, summary.doneToday, summary.pendingToday]);
@@ -810,7 +807,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
     } catch (e: any) { setErr(e.message || String(e)); } finally { setAdding(false); }
   }
 
-  // Skip all overdue
   async function skipAllOverdue() {
     if (!userId) return;
     const backlogIds = tasks.filter(t => isOverdueFn(t)).map(t => t.id);
@@ -831,7 +827,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 
-  // Gentle Reset uses skipAllOverdue
   async function gentleResetBacklog() {
     await skipAllOverdue();
   }
@@ -854,7 +849,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 
-  // Skip ONE task
   function askSkipTask(t: Task) { setTaskToSkip(t); }
   async function confirmSkipTask() {
     if (!taskToSkip) return;
@@ -872,11 +866,9 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 
-  /* ===== Boost helpers ===== */
   function openBoost() { setBoostLine(pick(BOOST_LINES)); setBoostOpen(true); }
   function nextBoost() { setBoostLine(pick(BOOST_LINES)); }
 
-  /* ===== Computed ===== */
   const niceDate = useMemo(() => formatNiceDate(dateISO), [dateISO]);
   const greeting = useMemo(() => (greetLine || timeGreeting(now)), [greetLine, now]);
   const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -884,7 +876,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const overdue = tasks.filter(isOverdueFn);
   const todayPending = tasks.filter((t) => t.due_date === dateISO && t.status !== "done" && t.status !== "skipped");
 
-  /* ===== Section ===== */
   function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode }) {
     return (
       <div className="card" style={{ marginBottom: 12, overflowX: "clip", borderRadius: 16 }}>
@@ -914,7 +905,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
     );
   }
 
-  /* ===== Render ===== */
   return (
     <div
       style={{
@@ -1036,7 +1026,6 @@ export default function TodayScreen({ externalDateISO }: Props) {
           </div>
         </div>
 
-        {/* Gentle Reset banner */}
         {(missed && overdue.length > 0) && (
           <div
             className="card"
@@ -1063,7 +1052,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
 
-      {/* Today (pending) */}
+      {/* Today */}
       <Section title="Today">
         {todayPending.length === 0 ? (
           <div className="muted">Nothing due today.</div>
@@ -1096,7 +1085,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         )}
       </Section>
 
-      {/* Overdue (pending) */}
+      {/* Overdue */}
       <Section title="Overdue" right={overdue.length > 0 ? <span className="muted">{overdue.length}</span> : null}>
         {overdue.length === 0 ? (
           <div className="muted">Nothing overdue. Nice!</div>
@@ -1409,15 +1398,15 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
       )}
 
-      {/* Celebration node (centered fireworks + message) */}
+      {/* Celebration node */}
       {celebration.node}
 
-      {/* Toast (bottom) */}
+      {/* Toast */}
       {toast.node}
     </div>
   );
 
-  /* ===== Profile helpers (inside component for state access) ===== */
+  /* ===== Profile helpers ===== */
   async function loadProfileIntoForm() {
     try {
       if (userId) {
