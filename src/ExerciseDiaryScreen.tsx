@@ -9,7 +9,7 @@ type Session = {
   session_date: string; // YYYY-MM-DD
   start_time: string | null;
   notes: string | null;
-  // Optional (new) — some databases may have this column; we handle fallback if it doesn't exist.
+  // Optional (new)
   name?: string | null;
 };
 
@@ -17,7 +17,7 @@ type Item = {
   id: number;
   session_id: number;
   user_id: string;
-  kind: "weights" | "run" | "jog" | "walk" | "yoga" | "class"  | "cycling" | "other" | string;
+  kind: "weights" | "run" | "jog" | "walk" | "yoga" | "class" | "cycling" | "other" | string;
   title: string;
   order_index: number;
   metrics: any;
@@ -52,14 +52,29 @@ type TemplateRow = {
   };
 };
 
-/* ---------- Date helpers ---------- */
+/* ---------- Date + math helpers ---------- */
+function totalsFromSets(sets: WSet[]) {
+  let reps = 0;
+  let kg = 0;
+  for (const s of sets) {
+    const r = Number(s.reps || 0);
+    const w = Number(s.weight_kg || 0);
+    if (r > 0) reps += r;
+    if (r > 0 && w > 0) kg += r * w;
+  }
+  return { reps, kg: Math.round(kg) };
+}
+
 function toISO(d: Date) {
-  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
+  const y = d.getFullYear(),
+    m = String(d.getMonth() + 1).padStart(2, "0"),
+    dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
 function secondsToMMSS(sec?: number | null) {
   if (!sec || sec <= 0) return "00:00";
-  const m = Math.floor(sec / 60), s = sec % 60;
+  const m = Math.floor(sec / 60),
+    s = sec % 60;
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 function secondsToHHMMSS(total?: number | null) {
@@ -72,7 +87,7 @@ function secondsToHHMMSS(total?: number | null) {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 function mmssToSeconds(v: string) {
-  const [m, s] = v.split(":").map(n => Number(n || 0));
+  const [m, s] = v.split(":").map((n) => Number(n || 0));
   return (isFinite(m) ? m : 0) * 60 + (isFinite(s) ? s : 0);
 }
 function paceStr(distanceKm?: number, durSec?: number) {
@@ -94,31 +109,32 @@ const START_KEY = (sid: number) => `byb_session_start_${sid}`;
 
 /* ---------- Scroll memory (per-session) ---------- */
 function useScrollMemory(key: string, ready: boolean) {
-  // Save on scroll and lifecycle edges
   useEffect(() => {
     if (!key) return;
 
     const save = () => {
       try {
-        sessionStorage.setItem(key, String(document.scrollingElement?.scrollTop ?? window.scrollY ?? 0));
+        sessionStorage.setItem(
+          key,
+          String(document.scrollingElement?.scrollTop ?? (window as any).scrollY ?? 0)
+        );
       } catch {}
     };
 
-    window.addEventListener("scroll", save, { passive: true });
+    window.addEventListener("scroll", save, { passive: true } as any);
     const onHide = () => save();
     document.addEventListener("visibilitychange", onHide);
-    window.addEventListener("pagehide", onHide);
-    window.addEventListener("beforeunload", onHide);
+    window.addEventListener("pagehide", onHide as any);
+    window.addEventListener("beforeunload", onHide as any);
 
     return () => {
-      window.removeEventListener("scroll", save);
+      window.removeEventListener("scroll", save as any);
       document.removeEventListener("visibilitychange", onHide);
-      window.removeEventListener("pagehide", onHide);
-      window.removeEventListener("beforeunload", onHide);
+      window.removeEventListener("pagehide", onHide as any);
+      window.removeEventListener("beforeunload", onHide as any);
     };
   }, [key]);
 
-  // Restore once, after content is rendered
   useEffect(() => {
     if (!key || !ready) return;
     try {
@@ -135,26 +151,66 @@ function useScrollMemory(key: string, ready: boolean) {
 
 /* ---------- Lightweight modal ---------- */
 function Modal({
-  open, onClose, title, children,
-}: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+  open,
+  onClose,
+  title,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: ReactNode;
+}) {
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    if (open) window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    if (open) window.addEventListener("keydown", onKey as any);
+    return () => window.removeEventListener("keydown", onKey as any);
   }, [open, onClose]);
-  useEffect(() => { if (open && closeRef.current) closeRef.current.focus(); }, [open]);
+  useEffect(() => {
+    if (open && closeRef.current) closeRef.current.focus();
+  }, [open]);
   if (!open) return null;
   return (
-    <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 2000,
-               display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 780, width: "100%", background: "#fff", borderRadius: 12,
-                 boxShadow: "0 10px 30px rgba(0,0,0,0.2)", padding: 20 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.35)",
+        zIndex: 2000,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: 780,
+          width: "100%",
+          background: "#fff",
+          borderRadius: 12,
+          boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+          padding: 20,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            marginBottom: 8,
+          }}
+        >
           <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
-          <button ref={closeRef} onClick={onClose} aria-label="Close" title="Close" style={{ borderRadius: 8 }}>✕</button>
+          <button ref={closeRef} onClick={onClose} aria-label="Close" title="Close" style={{ borderRadius: 8 }}>
+            ✕
+          </button>
         </div>
         <div style={{ maxHeight: "70vh", overflow: "auto" }}>{children}</div>
       </div>
@@ -167,7 +223,6 @@ export default function ExerciseDiaryScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [dateISO, setDateISO] = useState(() => toISO(new Date()));
 
-  // keep all sessions for the selected day + the active one
   const [sessionsToday, setSessionsToday] = useState<Session[]>([]);
   const [session, setSession] = useState<Session | null>(null);
 
@@ -178,38 +233,27 @@ export default function ExerciseDiaryScreen() {
 
   const [recent, setRecent] = useState<Session[]>([]);
 
-  // history preview
   const [openHistoryFor, setOpenHistoryFor] = useState<Record<number, boolean>>({});
   const [loadingPrevFor, setLoadingPrevFor] = useState<Record<number, boolean>>({});
   const [prevByItem, setPrevByItem] = useState<Record<number, PrevEntry[]>>({});
 
-  // collapsed
   const [finished, setFinished] = useState(false);
-
-  // preview-collapse (don’t mark finished; helpful for scrolling)
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
 
-  // backup
   const [offerBackup, setOfferBackup] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
 
-  // when we create a new session, scroll quick add into view
   const quickAddRef = useRef<HTMLDivElement>(null);
   const [scrollToQuickAdd, setScrollToQuickAdd] = useState(false);
 
-  // when clicking from "Recent", remember the exact session to open
   const desiredSessionIdRef = useRef<number | null>(null);
 
-  // confirm-complete modal (+ name input)
   const [confirmCompleteOpen, setConfirmCompleteOpen] = useState(false);
   const [sessionNameDraft, setSessionNameDraft] = useState("");
 
-  // undo last template insert
   const [undoBanner, setUndoBanner] = useState<{ itemIds: number[] } | null>(null);
-  // allow cancelling right after reopen (even if items exist)
   const [justReopened, setJustReopened] = useState(false);
 
-  // === NEW: Persist/restore scroll per active session+date
   const scrollKey = session ? `byb:exercise_scroll:${session.id}:${dateISO}` : "";
   useScrollMemory(scrollKey, !!session);
 
@@ -226,21 +270,29 @@ export default function ExerciseDiaryScreen() {
     if (error) setErr(error.message);
   }, []);
 
-  const queueSetSave = useCallback((id: number, patch: Partial<WSet>) => {
-    pendingSetPatches.current[id] = { ...(pendingSetPatches.current[id] || {}), ...patch };
-    if (setTimers.current[id]) window.clearTimeout(setTimers.current[id]);
-    setTimers.current[id] = window.setTimeout(() => { commitSetPatch(id); }, DEBOUNCE_MS) as unknown as number;
-  }, [commitSetPatch]);
+  const queueSetSave = useCallback(
+    (id: number, patch: Partial<WSet>) => {
+      pendingSetPatches.current[id] = { ...(pendingSetPatches.current[id] || {}), ...patch };
+      if (setTimers.current[id]) window.clearTimeout(setTimers.current[id]);
+      setTimers.current[id] = window.setTimeout(() => {
+        commitSetPatch(id);
+      }, DEBOUNCE_MS) as unknown as number;
+    },
+    [commitSetPatch]
+  );
 
-  const flushSetSaves = useCallback(async (id?: number) => {
-    const ids = id == null ? Object.keys(pendingSetPatches.current).map(Number) : [id];
-    for (const k of ids) {
-      if (setTimers.current[k]) window.clearTimeout(setTimers.current[k]);
-      await commitSetPatch(k);
-    }
-  }, [commitSetPatch]);
+  const flushSetSaves = useCallback(
+    async (id?: number) => {
+      const ids = id == null ? Object.keys(pendingSetPatches.current).map(Number) : [id];
+      for (const k of ids) {
+        if (setTimers.current[k]) window.clearTimeout(setTimers.current[k]);
+        await commitSetPatch(k);
+      }
+    },
+    [commitSetPatch]
+  );
 
-  /* === Debounced rename for item titles (fixes typing lag) === */
+  /* === Debounced rename for item titles === */
   const TITLE_DEBOUNCE_MS = 450;
   const titleTimers = useRef<Record<number, number>>({});
   const pendingTitles = useRef<Record<number, string>>({});
@@ -253,31 +305,68 @@ export default function ExerciseDiaryScreen() {
     if (error) setErr(error.message);
   }, []);
 
-  const queueTitleSave = useCallback((id: number, title: string) => {
-    pendingTitles.current[id] = title;
-    if (titleTimers.current[id]) window.clearTimeout(titleTimers.current[id]);
-    titleTimers.current[id] = window.setTimeout(() => { commitTitle(id); }, TITLE_DEBOUNCE_MS) as unknown as number;
-  }, [commitTitle]);
+  const queueTitleSave = useCallback(
+    (id: number, title: string) => {
+      pendingTitles.current[id] = title;
+      if (titleTimers.current[id]) window.clearTimeout(titleTimers.current[id]);
+      titleTimers.current[id] = window.setTimeout(() => {
+        commitTitle(id);
+      }, TITLE_DEBOUNCE_MS) as unknown as number;
+    },
+    [commitTitle]
+  );
 
-  const flushTitleSaves = useCallback(async (id?: number) => {
-    const ids = id == null ? Object.keys(pendingTitles.current).map(Number) : [id];
-    for (const k of ids) {
-      if (titleTimers.current[k]) window.clearTimeout(titleTimers.current[k]);
-      await commitTitle(k);
+  const flushTitleSaves = useCallback(
+    async (id?: number) => {
+      const ids = id == null ? Object.keys(pendingTitles.current).map(Number) : [id];
+      for (const k of ids) {
+        if (titleTimers.current[k]) window.clearTimeout(titleTimers.current[k]);
+        await commitTitle(k);
+      }
+    },
+    [commitTitle]
+  );
+
+  const sessionTotals = useMemo(() => {
+    let sets = 0,
+      reps = 0,
+      kg = 0;
+    for (const it of items) {
+      const list = setsByItem[it.id] || [];
+      sets += list.length;
+      const t = totalsFromSets(list);
+      reps += t.reps;
+      kg += t.kg;
     }
-  }, [commitTitle]);
+    return { sets, reps, kg: Math.round(kg) };
+  }, [items, setsByItem]);
 
   // flush pending saves on unmount/nav
-  useEffect(() => () => { flushSetSaves().catch(() => {}); flushTitleSaves().catch(() => {}); }, [flushSetSaves, flushTitleSaves]);
+  useEffect(
+    () => () => {
+      flushSetSaves().catch(() => {});
+      flushTitleSaves().catch(() => {});
+    },
+    [flushSetSaves, flushTitleSaves]
+  );
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
-      if (error) { setErr(error.message); return; }
+      if (error) {
+        setErr(error.message);
+        return;
+      }
       setUserId(data.user?.id ?? null);
     });
   }, []);
 
-  useEffect(() => { if (userId) { loadSessionsForDay(dateISO); loadRecent(); checkOfferBackup(); } }, [userId, dateISO]);
+  useEffect(() => {
+    if (userId) {
+      loadSessionsForDay(dateISO);
+      loadRecent();
+      checkOfferBackup();
+    }
+  }, [userId, dateISO]);
 
   useEffect(() => {
     if (session) {
@@ -286,16 +375,15 @@ export default function ExerciseDiaryScreen() {
     } else {
       setFinished(false);
     }
-    // Clear preview when session/date changes
     setPreviewCollapsed(false);
-    // keep draft name synced to existing session name/notes
     const draft =
       (session?.name || "") ||
-      (session?.notes?.startsWith("Session: ") ? session?.notes?.split("\n")[0].replace(/^Session:\s*/, "") : "");
+      (session?.notes?.startsWith("Session: ")
+        ? session?.notes?.split("\n")[0].replace(/^Session:\s*/, "")
+        : "");
     setSessionNameDraft(draft || "");
   }, [session?.id, session?.name, session?.notes, dateISO]);
 
-  // scroll Quick add into view right after creating a session
   useEffect(() => {
     if (scrollToQuickAdd && session && !finished) {
       quickAddRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -308,8 +396,10 @@ export default function ExerciseDiaryScreen() {
     if (!userId) return;
     setErr(null);
     const { data, error } = await supabase
-      .from("workout_sessions").select("*")
-      .eq("user_id", userId).eq("session_date", iso)
+      .from("workout_sessions")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("session_date", iso)
       .order("id", { ascending: true });
     if (error) {
       setErr(error.message);
@@ -322,31 +412,49 @@ export default function ExerciseDiaryScreen() {
     const list = (data as Session[]) || [];
     setSessionsToday(list);
 
-    // Prefer the specific session (e.g., clicked from Recent); else newest
     const desired = desiredSessionIdRef.current;
     const active = desired
-      ? (list.find(x => x.id === desired) || (list.length ? list[list.length - 1] : null))
-      : (list.length ? list[list.length - 1] : null);
+      ? list.find((x) => x.id === desired) || (list.length ? list[list.length - 1] : null)
+      : list.length
+      ? list[list.length - 1]
+      : null;
     desiredSessionIdRef.current = null;
 
     setSession(active);
-    if (active) await loadItems(active.id); else { setItems([]); setSetsByItem({}); }
+    if (active) await loadItems(active.id);
+    else {
+      setItems([]);
+      setSetsByItem({});
+    }
   }
 
   async function loadItems(sessionId: number) {
     const { data, error } = await supabase
-      .from("workout_items").select("*")
+      .from("workout_items")
+      .select("*")
       .eq("session_id", sessionId)
-      .order("order_index", { ascending: true }).order("id", { ascending: true });
-    if (error) { setErr(error.message); setItems([]); setSetsByItem({}); return; }
-    const list = (data as Item[]).map(r => ({ ...r, metrics: r.metrics || {} }));
+      .order("order_index", { ascending: true })
+      .order("id", { ascending: true });
+    if (error) {
+      setErr(error.message);
+      setItems([]);
+      setSetsByItem({});
+      return;
+    }
+    const list = (data as Item[]).map((r) => ({ ...r, metrics: r.metrics || {} }));
     setItems(list);
-    const ids = list.map(i => i.id);
+    const ids = list.map((i) => i.id);
     if (ids.length) {
       const { data: sets, error: se } = await supabase
-        .from("workout_sets").select("*").in("item_id", ids)
+        .from("workout_sets")
+        .select("*")
+        .in("item_id", ids)
         .order("set_number", { ascending: true });
-      if (se) { setErr(se.message); setSetsByItem({}); return; }
+      if (se) {
+        setErr(se.message);
+        setSetsByItem({});
+        return;
+      }
       const grouped: Record<number, WSet[]> = {};
       for (const s of (sets as WSet[])) (grouped[s.item_id] ||= []).push(s);
       setSetsByItem(grouped);
@@ -355,12 +463,19 @@ export default function ExerciseDiaryScreen() {
 
   async function loadRecent() {
     if (!userId) return;
-    const since = new Date(); since.setDate(since.getDate() - 21);
+    const since = new Date();
+    since.setDate(since.getDate() - 21);
     const { data, error } = await supabase
-      .from("workout_sessions").select("*")
-      .eq("user_id", userId).gte("session_date", toISO(since))
+      .from("workout_sessions")
+      .select("*")
+      .eq("user_id", userId)
+      .gte("session_date", toISO(since))
       .order("session_date", { ascending: false });
-    if (error) { setErr(error.message); setRecent([]); return; }
+    if (error) {
+      setErr(error.message);
+      setRecent([]);
+      return;
+    }
     setRecent(data as Session[]);
   }
 
@@ -368,21 +483,25 @@ export default function ExerciseDiaryScreen() {
     if (!userId) return;
     const { data, error } = await supabase
       .from("workout_sessions")
-      .select("session_date").eq("user_id", userId)
-      .order("session_date", { ascending: true }).limit(1);
-    if (error || !data || !data.length) { setOfferBackup(false); return; }
+      .select("session_date")
+      .eq("user_id", userId)
+      .order("session_date", { ascending: true })
+      .limit(1);
+    if (error || !data || !data.length) {
+      setOfferBackup(false);
+      return;
+    }
     const first = new Date((data as any)[0].session_date);
     const days = (Date.now() - first.getTime()) / 86400000;
     setOfferBackup(days >= 365);
   }
 
   /* ----- Session actions ----- */
-  // ----- replace entire createSession -----
   async function createSession() {
     if (!userId) return;
-    setBusy(true); setErr(null);
+    setBusy(true);
+    setErr(null);
     try {
-      // 1) create the row
       const { data, error } = await supabase
         .from("workout_sessions")
         .insert({ user_id: userId, session_date: dateISO })
@@ -392,19 +511,16 @@ export default function ExerciseDiaryScreen() {
 
       const newS = data as Session;
 
-      // 2) stamp start_time immediately (so standby right after start still works)
       const nowISO = new Date().toISOString();
       try {
         await supabase.from("workout_sessions").update({ start_time: nowISO } as any).eq("id", newS.id);
         newS.start_time = nowISO;
-      } catch { /* column may not exist; ignore */ }
+      } catch {}
 
-      // 3) set local state and localStorage guard keys
-      setSessionsToday(prev => [...prev, newS]);
+      setSessionsToday((prev) => [...prev, newS]);
       setSession(newS);
       localStorage.setItem(FIN_KEY(newS.id, dateISO), "0");
 
-      // also persist a local start ms backup used by the timer (works even if DB col missing)
       try {
         localStorage.setItem(`byb:exercise_start_ms:${newS.id}`, String(Date.now()));
       } catch {}
@@ -431,14 +547,11 @@ export default function ExerciseDiaryScreen() {
     localStorage.setItem(FIN_KEY(session.id, dateISO), "0");
     setFinished(false);
     setPreviewCollapsed(false);
-    setJustReopened(true); // ✅ allow cancelling this reopened session
+    setJustReopened(true);
   }
 
-  // ⬇️ new UI helpers still called elsewhere
   function openConfirmComplete() {
-    const seed =
-      (session?.name?.trim()) ||
-      extractSessionNameFromNotes(session?.notes);
+    const seed = session?.name?.trim() || extractSessionNameFromNotes(session?.notes);
     setSessionNameDraft(seed || "");
     setConfirmCompleteOpen(true);
   }
@@ -449,19 +562,17 @@ export default function ExerciseDiaryScreen() {
   }
 
   function switchSessionById(id: number) {
-    const s = sessionsToday.find(x => x.id === id) || null;
+    const s = sessionsToday.find((x) => x.id === id) || null;
     setSession(s);
     setItems([]);
     setSetsByItem({});
-    setJustReopened(false); // switching clears reopen state
+    setJustReopened(false);
     if (s) loadItems(s.id);
   }
 
-  // cancel/delete current session if empty
   async function cancelCurrentSession() {
     if (!session) return;
 
-    // If it's a reopened session with items, allow full delete with confirmation.
     if (items.length > 0 && !justReopened) {
       setErr("This session has exercises, so it can’t be cancelled. Delete the items first if you really want to remove it.");
       return;
@@ -471,13 +582,13 @@ export default function ExerciseDiaryScreen() {
       if (!ok) return;
     }
 
-    setBusy(true); setErr(null);
+    setBusy(true);
+    setErr(null);
     try {
       const sid = session.id;
 
-      // cascade delete items+sets if needed
       if (items.length > 0) {
-        const itemIds = items.map(i => i.id);
+        const itemIds = items.map((i) => i.id);
         await supabase.from("workout_sets").delete().in("item_id", itemIds);
         await supabase.from("workout_items").delete().in("id", itemIds);
       }
@@ -488,12 +599,15 @@ export default function ExerciseDiaryScreen() {
       localStorage.removeItem(FIN_KEY(sid, dateISO));
       setJustReopened(false);
 
-      setSessionsToday(prev => {
-        const next = prev.filter(s => s.id !== sid);
+      setSessionsToday((prev) => {
+        const next = prev.filter((s) => s.id !== sid);
         const nextActive = next.length ? next[next.length - 1] : null;
         setSession(nextActive);
         if (nextActive) loadItems(nextActive.id);
-        else { setItems([]); setSetsByItem({}); }
+        else {
+          setItems([]);
+          setSetsByItem({});
+        }
         return next;
       });
 
@@ -505,12 +619,13 @@ export default function ExerciseDiaryScreen() {
     }
   }
 
-  // Ensure exactly ONE "success" per weights session (logs to tasks)
   async function ensureWinForSession() {
     if (!userId || !session) return;
     try {
       const { data: existing, error: qerr } = await supabase
-        .from("tasks").select("id").eq("user_id", userId)
+        .from("tasks")
+        .select("id")
+        .eq("user_id", userId)
         .eq("source", "exercise_session")
         .eq("due_date", dateISO)
         .eq("status", "done")
@@ -535,11 +650,10 @@ export default function ExerciseDiaryScreen() {
     }
   }
 
-  /* ---------- Session Timer (robust + survives standby) ---------- */
+  /* ---------- Session Timer ---------- */
   const [elapsedSec, setElapsedSec] = useState(0);
   const [startMs, setStartMs] = useState<number | null>(null);
 
-  // Resolve (or create) a start time and persist it (DB + localStorage)
   useEffect(() => {
     let cancelled = false;
 
@@ -553,14 +667,12 @@ export default function ExerciseDiaryScreen() {
       const sid = session.id;
       const lsKey = START_KEY(sid);
 
-      // Prefer DB start_time
       let ms: number | null = null;
       if (session.start_time) {
         const parsed = Date.parse(session.start_time);
         if (isFinite(parsed)) ms = parsed;
       }
 
-      // Fallback: localStorage
       if (ms == null) {
         const raw = localStorage.getItem(lsKey);
         if (raw) {
@@ -569,15 +681,16 @@ export default function ExerciseDiaryScreen() {
         }
       }
 
-      // If still missing, start now and persist
       if (ms == null) {
         const nowISO = new Date().toISOString();
         ms = Date.parse(nowISO);
         try {
           await supabase.from("workout_sessions").update({ start_time: nowISO } as any).eq("id", sid);
-          setSession(prev => (prev ? { ...prev, start_time: nowISO } : prev));
+          setSession((prev) => (prev ? { ...prev, start_time: nowISO } : prev));
         } catch {}
-        try { localStorage.setItem(lsKey, String(ms)); } catch {}
+        try {
+          localStorage.setItem(lsKey, String(ms));
+        } catch {}
       }
 
       if (!cancelled) {
@@ -586,10 +699,11 @@ export default function ExerciseDiaryScreen() {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [session?.id, session?.start_time]);
 
-  // Tick every second; recompute when the app becomes visible again
   useEffect(() => {
     if (!session || !startMs) return;
     const tick = () => setElapsedSec(Math.floor((Date.now() - startMs) / 1000));
@@ -604,130 +718,123 @@ export default function ExerciseDiaryScreen() {
   }, [session?.id, startMs]);
 
   async function completeSessionNow() {
-  if (!session) return;
+    if (!session) return;
 
-  const cleanName = sessionNameDraft.trim();
-  const dur = secondsToHHMMSS(elapsedSec);
+    const cleanName = sessionNameDraft.trim();
+    const dur = secondsToHHMMSS(elapsedSec);
 
-  // 1) read freshest notes (non-fatal if it fails)
-  let currentNotes = "";
-  const { data: fresh } = await supabase
-    .from("workout_sessions")
-    .select("notes")
-    .eq("id", session.id)
-    .single();
-  currentNotes = (fresh?.notes as string) || "";
-
-  // 2) compose final notes with Session + Duration (so we always keep a name in notes)
-  const finalNotes = normalizeNotesWithNameAndDuration({
-    existingNotes: currentNotes,
-    name: cleanName || session?.name || "",
-    durationHHMMSS: dur,
-  });
-
-  // 3) try to write (check .error instead of relying on throw)
-  let wrote = false;
-
-  // Try with "name" if provided (schema may not have this column)
-  if (cleanName) {
-    const { error } = await supabase
+    // fresh notes (non-fatal)
+    let currentNotes = "";
+    const { data: fresh } = await supabase
       .from("workout_sessions")
-      .update({ name: cleanName, notes: finalNotes } as any)
-      .eq("id", session.id);
+      .select("notes")
+      .eq("id", session.id)
+      .single();
+    currentNotes = (fresh?.notes as string) || "";
 
-    if (!error) {
-      wrote = true;
+    const finalNotes = normalizeNotesWithNameAndDuration({
+      existingNotes: currentNotes,
+      name: cleanName || session?.name || "",
+      durationHHMMSS: dur,
+    });
+
+    let wrote = false;
+
+    if (cleanName) {
+      const { error } = await supabase
+        .from("workout_sessions")
+        .update({ name: cleanName, notes: finalNotes } as any)
+        .eq("id", session.id);
+      if (!error) {
+        wrote = true;
+      }
     }
+
+    if (!wrote) {
+      const { error } = await supabase.from("workout_sessions").update({ notes: finalNotes }).eq("id", session.id);
+      if (error) {
+        setErr(error.message);
+        return;
+      }
+    }
+
+    setSession((prev) => (prev ? { ...prev, name: cleanName || prev.name, notes: finalNotes } : prev));
+    setRecent((prev) => prev.map((r) => (r.id === session.id ? { ...r, name: cleanName || r.name, notes: finalNotes } : r)));
+
+    markLocalFinished();
+    await ensureWinForSession();
+    setConfirmCompleteOpen(false);
+    setPreviewCollapsed(false);
+    await loadRecent();
   }
 
-  // Fallback: write notes-only (works even if "name" column doesn't exist)
-  if (!wrote) {
-    const { error } = await supabase
-      .from("workout_sessions")
-      .update({ notes: finalNotes })
-      .eq("id", session.id);
-    if (error) {
-      setErr(error.message);
-      return;
-    }
-  }
-
-  // 4) local state
-  setSession(prev => (prev ? { ...prev, name: cleanName || prev.name, notes: finalNotes } : prev));
-  setRecent(prev => prev.map(r => (r.id === session.id ? { ...r, name: cleanName || r.name, notes: finalNotes } : r)));
-
-  // 5) finish UI + streak
-  markLocalFinished();
-  await ensureWinForSession();
-  setConfirmCompleteOpen(false);
-  setPreviewCollapsed(false);
-  await loadRecent();
-}
-
-  // === Re-add: save notes live from the textarea ===
-  // (keep this close to the other session actions)
   async function saveSessionNotes(notes: string) {
     if (!session) return;
-    const { error } = await supabase
-      .from("workout_sessions")
-      .update({ notes })
-      .eq("id", session.id);
+    const { error } = await supabase.from("workout_sessions").update({ notes }).eq("id", session.id);
     if (error) setErr(error.message);
-    else setSession(prev => (prev ? { ...prev, notes } : prev));
+    else setSession((prev) => (prev ? { ...prev, notes } : prev));
   }
 
   /* ----- Item actions ----- */
   async function addWeightsExercise(title = "") {
     if (!session || !userId) return;
-    const order_index = items.length ? Math.max(...items.map(i => i.order_index)) + 1 : 0;
+    const order_index = items.length ? Math.max(...items.map((i) => i.order_index)) + 1 : 0;
     const { error } = await supabase.from("workout_items").insert({
-      session_id: session.id, user_id: userId, kind: "weights", title: title.trim(), order_index, metrics: {}
+      session_id: session.id,
+      user_id: userId,
+      kind: "weights",
+      title: title.trim(),
+      order_index,
+      metrics: {},
     });
-    if (error) { setErr(error.message); return; }
+    if (error) {
+      setErr(error.message);
+      return;
+    }
     await loadItems(session.id);
   }
 
   async function addCardio(kind: Item["kind"], title: string, distanceKm: number | null, durMMSS: string) {
     if (!session || !userId) return;
-    const order_index = items.length ? Math.max(...items.map(i => i.order_index)) + 1 : 0;
+    const order_index = items.length ? Math.max(...items.map((i) => i.order_index)) + 1 : 0;
     const duration_sec = mmssToSeconds(durMMSS || "00:00");
     const metrics: any = { duration_sec };
     if (distanceKm && distanceKm > 0) metrics.distance_km = distanceKm;
     const { error } = await supabase.from("workout_items").insert({
-      session_id: session.id, user_id: userId, kind, title: title || kind, order_index, metrics
+      session_id: session.id,
+      user_id: userId,
+      kind,
+      title: title || kind,
+      order_index,
+      metrics,
     });
-    if (error) { setErr(error.message); return; }
+    if (error) {
+      setErr(error.message);
+      return;
+    }
     await loadItems(session.id);
   }
 
-  function normalizeNotesWithNameAndDuration(opts: {
-    existingNotes?: string | null;
-    name?: string;
-    durationHHMMSS: string;
-  }) {
+  function normalizeNotesWithNameAndDuration(opts: { existingNotes?: string | null; name?: string; durationHHMMSS: string }) {
     const { existingNotes, name, durationHHMMSS } = opts;
-    const base = existingNotes ?? ""; // guard against null
+    const base = existingNotes ?? "";
 
-    // remove any existing "Session:" line (wherever it is)
     const withoutOldSession = base.replace(/^\s*Session:\s*.*$(\r?\n)?/m, "").trim();
 
-    // ensure Session line if we have a name
-    const withSession = name?.trim()
-      ? `Session: ${name.trim()}\n${withoutOldSession}`.trim()
-      : (withoutOldSession || "");
+    const withSession = name?.trim() ? `Session: ${name.trim()}\n${withoutOldSession}`.trim() : withoutOldSession || "";
 
-    // ensure Duration line once
     const hasDuration = /(^|\n)\s*Duration:\s*/m.test(withSession);
     const finalNotes = hasDuration
       ? withSession
-      : (withSession ? `${withSession}\nDuration: ${durationHHMMSS}` : `Duration: ${durationHHMMSS}`);
+      : withSession
+      ? `${withSession}\nDuration: ${durationHHMMSS}`
+      : `Duration: ${durationHHMMSS}`;
 
     return finalNotes;
   }
 
-  // Debounced local rename (no network on each keystroke)
   function renameItemLocal(item: Item, newTitle: string) {
-    setItems(prev => prev.map(i => i.id === item.id ? { ...i, title: newTitle } : i));
+    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, title: newTitle } : i)));
     queueTitleSave(item.id, newTitle);
   }
 
@@ -735,7 +842,10 @@ export default function ExerciseDiaryScreen() {
     try {
       await supabase.from("workout_sets").delete().eq("item_id", itemId);
       const { error } = await supabase.from("workout_items").delete().eq("id", itemId);
-      if (error) { setErr(error.message); return; }
+      if (error) {
+        setErr(error.message);
+        return;
+      }
       if (session) await loadItems(session.id);
     } catch (e: any) {
       setErr(e.message || String(e));
@@ -746,31 +856,51 @@ export default function ExerciseDiaryScreen() {
   async function addSet(itemId: number) {
     if (!userId) return;
     const current = setsByItem[itemId] || [];
-    const nextNum = current.length ? Math.max(...current.map(s => s.set_number)) + 1 : 1;
-    const { data, error } = await supabase.from("workout_sets").insert({
-      item_id: itemId, user_id: userId, set_number: nextNum, weight_kg: null, reps: null
-    }).select().single();
-    if (error) { setErr(error.message); return; }
+    const nextNum = current.length ? Math.max(...current.map((s) => s.set_number)) + 1 : 1;
+    const { data, error } = await supabase
+      .from("workout_sets")
+      .insert({
+        item_id: itemId,
+        user_id: userId,
+        set_number: nextNum,
+        weight_kg: null,
+        reps: null,
+      })
+      .select()
+      .single();
+    if (error) {
+      setErr(error.message);
+      return;
+    }
     setSetsByItem({ ...setsByItem, [itemId]: [...current, data as WSet] });
   }
 
-  async function addSetsBulk(itemId: number, payloads: Array<{ weight_kg: number | null; reps: number | null; duration_sec: number | null }>) {
+  async function addSetsBulk(
+    itemId: number,
+    payloads: Array<{ weight_kg: number | null; reps: number | null; duration_sec: number | null }>
+  ) {
     if (!userId || payloads.length === 0) return;
     const current = setsByItem[itemId] || [];
-    const baseNum = current.length ? Math.max(...current.map(s => s.set_number)) : 0;
+    const baseNum = current.length ? Math.max(...current.map((s) => s.set_number)) : 0;
     const rows = payloads.map((p, idx) => ({
-      item_id: itemId, user_id: userId, set_number: baseNum + idx + 1,
-      weight_kg: p.weight_kg ?? null, reps: p.reps ?? null, duration_sec: p.duration_sec ?? null,
+      item_id: itemId,
+      user_id: userId,
+      set_number: baseNum + idx + 1,
+      weight_kg: p.weight_kg ?? null,
+      reps: p.reps ?? null,
+      duration_sec: p.duration_sec ?? null,
     }));
     const { data, error } = await supabase.from("workout_sets").insert(rows).select();
-    if (error) { setErr(error.message); return; }
+    if (error) {
+      setErr(error.message);
+      return;
+    }
     setSetsByItem({ ...setsByItem, [itemId]: [...current, ...((data as WSet[]) || [])] });
   }
 
-  // OPTIMISTIC + DEBOUNCED
   function updateSet(set: WSet, patch: Partial<WSet>) {
-    setSetsByItem(prev => {
-      const list = (prev[set.item_id] || []).map(s => s.id === set.id ? ({ ...s, ...patch }) as WSet : s);
+    setSetsByItem((prev) => {
+      const list = (prev[set.item_id] || []).map((s) => (s.id === set.id ? ({ ...s, ...patch } as WSet) : s));
       return { ...prev, [set.item_id]: list };
     });
     queueSetSave(set.id, patch);
@@ -778,15 +908,18 @@ export default function ExerciseDiaryScreen() {
 
   async function deleteSet(set: WSet) {
     const { error } = await supabase.from("workout_sets").delete().eq("id", set.id);
-    if (error) { setErr(error.message); return; }
-    const list = (setsByItem[set.item_id] || []).filter(s => s.id !== set.id);
+    if (error) {
+      setErr(error.message);
+      return;
+    }
+    const list = (setsByItem[set.item_id] || []).filter((s) => s.id !== set.id);
     setSetsByItem({ ...setsByItem, [set.item_id]: list });
   }
 
   /* ----- History (per exercise title) ----- */
   async function loadPrevForItem(it: Item, limit = 3) {
     if (!userId) return;
-    setLoadingPrevFor(prev => ({ ...prev, [it.id]: true }));
+    setLoadingPrevFor((prev) => ({ ...prev, [it.id]: true }));
     try {
       const { data: itemsRows, error: iErr } = await supabase
         .from("workout_items")
@@ -800,10 +933,13 @@ export default function ExerciseDiaryScreen() {
       if (iErr) throw iErr;
 
       const prevItems = (itemsRows as Array<{ id: number; session_id: number }>) || [];
-      if (prevItems.length === 0) { setPrevByItem(prev => ({ ...prev, [it.id]: [] })); return; }
+      if (prevItems.length === 0) {
+        setPrevByItem((prev) => ({ ...prev, [it.id]: [] }));
+        return;
+      }
 
-      const itemIds = [...new Set(prevItems.map(r => r.id))];
-      const sessionIds = [...new Set(prevItems.map(r => r.session_id))];
+      const itemIds = [...new Set(prevItems.map((r) => r.id))];
+      const sessionIds = [...new Set(prevItems.map((r) => r.session_id))];
 
       const { data: setsRows, error: sErr } = await supabase
         .from("workout_sets")
@@ -812,33 +948,41 @@ export default function ExerciseDiaryScreen() {
         .order("set_number", { ascending: true });
       if (sErr) throw sErr;
 
-      const { data: sessRows, error: dErr } = await supabase
-        .from("workout_sessions")
-        .select("id, session_date").in("id", sessionIds);
+      const { data: sessRows, error: dErr } = await supabase.from("workout_sessions").select("id, session_date").in("id", sessionIds);
       if (dErr) throw dErr;
 
       const idToDate: Record<number, string> = {};
-      (sessRows || []).forEach((s: any) => { idToDate[s.id] = s.session_date; });
-      const idToSets: Record<number, Array<{ weight_kg: number | null; reps: number | null; duration_sec: number | null }>> = {};
-      (setsRows as any[] || []).forEach(s => {
+      (sessRows || []).forEach((s: any) => {
+        idToDate[s.id] = s.session_date;
+      });
+      const idToSets: Record<
+        number,
+        Array<{ weight_kg: number | null; reps: number | null; duration_sec: number | null }>
+      > = {};
+      ((setsRows as any[]) || []).forEach((s) => {
         (idToSets[s.item_id] ||= []).push({
-          weight_kg: s.weight_kg ?? null, reps: s.reps ?? null, duration_sec: s.duration_sec ?? null,
+          weight_kg: s.weight_kg ?? null,
+          reps: s.reps ?? null,
+          duration_sec: s.duration_sec ?? null,
         });
       });
 
       const entries: PrevEntry[] = prevItems
-        .map(pi => ({ date: idToDate[pi.session_id] || "", sets: idToSets[pi.id] || [] }))
-        .filter(e => !!e.date && e.sets.length > 0)
+        .map((pi) => ({ date: idToDate[pi.session_id] || "", sets: idToSets[pi.id] || [] }))
+        .filter((e) => !!e.date && e.sets.length > 0)
         .sort((a, b) => b.date.localeCompare(a.date))
         .slice(0, limit);
 
-      setPrevByItem(prev => ({ ...prev, [it.id]: entries }));
-    } catch (e: any) { setErr(e.message || String(e)); }
-    finally { setLoadingPrevFor(prev => ({ ...prev, [it.id]: false })); }
+      setPrevByItem((prev) => ({ ...prev, [it.id]: entries }));
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setLoadingPrevFor((prev) => ({ ...prev, [it.id]: false }));
+    }
   }
 
   function toggleHistory(it: Item) {
-    setOpenHistoryFor(prev => {
+    setOpenHistoryFor((prev) => {
       const nextOpen = !prev[it.id];
       if (nextOpen && !prevByItem[it.id]) loadPrevForItem(it, 3);
       return { ...prev, [it.id]: nextOpen };
@@ -851,7 +995,7 @@ export default function ExerciseDiaryScreen() {
     await addSetsBulk(it.id, hist[0].sets);
   }
 
-  /* ----- Template save (name + include weights/reps separately) ----- */
+  /* ----- Template save/load ----- */
   const [tplOpen, setTplOpen] = useState(false);
   const [tplName, setTplName] = useState("");
   const [tplIncludeWeights, setTplIncludeWeights] = useState(false);
@@ -870,15 +1014,15 @@ export default function ExerciseDiaryScreen() {
     const cleanName = tplName.trim();
     if (!cleanName || cleanName.toLowerCase() === "insert template name") return;
 
-    const weightsItems = items.filter(i => i.kind === "weights");
+    const weightsItems = items.filter((i) => i.kind === "weights");
     const payload = {
-      items: weightsItems.map(it => {
-        const sets = (setsByItem[it.id] || []);
+      items: weightsItems.map((it) => {
+        const sets = setsByItem[it.id] || [];
         return {
           title: it.title,
           sets: sets.length,
-          ...(tplIncludeWeights ? { weights: sets.map(s => s.weight_kg) } : {}),
-          ...(tplIncludeReps ? { reps: sets.map(s => s.reps) } : {}),
+          ...(tplIncludeWeights ? { weights: sets.map((s) => s.weight_kg) } : {}),
+          ...(tplIncludeReps ? { reps: sets.map((s) => s.reps) } : {}),
         };
       }),
     };
@@ -891,7 +1035,7 @@ export default function ExerciseDiaryScreen() {
         data: payload,
       } as any);
       if (error) {
-        // fallback: localStorage (if table doesn't exist)
+        // fallback: localStorage
         const key = `byb:workout_templates:${userId}`;
         const prev = JSON.parse(localStorage.getItem(key) || "[]");
         prev.push({ id: Date.now(), name: cleanName, data: payload });
@@ -905,19 +1049,16 @@ export default function ExerciseDiaryScreen() {
     }
   }
 
-  /* ----- Template LOAD (with Undo) ----- */
   const [loadTplOpen, setLoadTplOpen] = useState(false);
   const [loadTplLoading, setLoadTplLoading] = useState(false);
   const [tplList, setTplList] = useState<TemplateRow[]>([]);
   const [useTplWeights, setUseTplWeights] = useState(true);
   const [useTplReps, setUseTplReps] = useState(false);
-  // (the rest of the component continues…)
 
-   async function fetchTemplates() {
+  async function fetchTemplates() {
     if (!userId) return;
     setLoadTplLoading(true);
     try {
-      // primary
       let rows: TemplateRow[] = [];
       const { data, error } = await supabase
         .from("workout_templates")
@@ -926,7 +1067,6 @@ export default function ExerciseDiaryScreen() {
         .order("name", { ascending: true });
       if (!error && data) rows = data as TemplateRow[];
 
-      // legacy fallback table (if primary empty)
       if (rows.length === 0) {
         try {
           const { data: legacy, error: le } = await supabase
@@ -935,17 +1075,15 @@ export default function ExerciseDiaryScreen() {
             .eq("user_id", userId)
             .order("name", { ascending: true });
           if (!le && legacy) rows = legacy as TemplateRow[];
-        } catch { /* ignore legacy failure */ }
+        } catch {}
       }
 
-      // localStorage merge fallback
       const key = `byb:workout_templates:${userId}`;
       const ls = JSON.parse(localStorage.getItem(key) || "[]");
       const merged = [...rows, ...(ls as TemplateRow[])];
 
       setTplList(merged);
     } catch {
-      // Final fallback to localStorage only
       const key = `byb:workout_templates:${userId}`;
       const ls = JSON.parse(localStorage.getItem(key) || "[]");
       setTplList(ls as TemplateRow[]);
@@ -964,7 +1102,7 @@ export default function ExerciseDiaryScreen() {
   async function insertTemplate(tpl: TemplateRow, opts: { weights: boolean; reps: boolean }) {
     if (!userId || !session) return;
 
-    let nextOrder = items.length ? Math.max(...items.map(i => i.order_index)) + 1 : 0;
+    let nextOrder = items.length ? Math.max(...items.map((i) => i.order_index)) + 1 : 0;
     const createdItemIds: number[] = [];
 
     try {
@@ -986,19 +1124,15 @@ export default function ExerciseDiaryScreen() {
         const itemId = (newItem as Item).id;
         createdItemIds.push(itemId);
 
-        const count = Math.max(
-          it.sets || 0,
-          opts.weights && it.weights ? it.weights.length : 0,
-          opts.reps && it.reps ? it.reps.length : 0
-        );
+        const count = Math.max(it.sets || 0, opts.weights && it.weights ? it.weights.length : 0, opts.reps && it.reps ? it.reps.length : 0);
 
         if (count > 0) {
           const rows = Array.from({ length: count }, (_, idx) => ({
             item_id: itemId,
             user_id: userId,
             set_number: idx + 1,
-            weight_kg: opts.weights && it.weights ? (it.weights[idx] ?? null) : null,
-            reps: opts.reps && it.reps ? (it.reps[idx] ?? null) : null,
+            weight_kg: opts.weights && it.weights ? it.weights[idx] ?? null : null,
+            reps: opts.reps && it.reps ? it.reps[idx] ?? null : null,
             duration_sec: null,
           }));
           const { error: sErr } = await supabase.from("workout_sets").insert(rows);
@@ -1017,7 +1151,6 @@ export default function ExerciseDiaryScreen() {
   async function undoLastTemplateInsert() {
     if (!undoBanner || !userId) return;
     try {
-      // delete sets first, then items
       await supabase.from("workout_sets").delete().in("item_id", undoBanner.itemIds);
       await supabase.from("workout_items").delete().in("id", undoBanner.itemIds);
       if (session) await loadItems(session.id);
@@ -1033,18 +1166,18 @@ export default function ExerciseDiaryScreen() {
     setBackingUp(true);
     try {
       const { data: sessions, error: se } = await supabase
-        .from("workout_sessions").select("*").eq("user_id", userId)
+        .from("workout_sessions")
+        .select("*")
+        .eq("user_id", userId)
         .order("session_date", { ascending: true });
       if (se) throw se;
 
-      const sessionIds = (sessions as Session[]).map(s => s.id);
-      const { data: itemsRows, error: ie } = await supabase
-        .from("workout_items").select("*").in("session_id", sessionIds);
+      const sessionIds = (sessions as Session[]).map((s) => s.id);
+      const { data: itemsRows, error: ie } = await supabase.from("workout_items").select("*").in("session_id", sessionIds);
       if (ie) throw ie;
 
-      const itemIds = (itemsRows as Item[]).map(i => i.id);
-      const { data: setsRows, error: te } = await supabase
-        .from("workout_sets").select("*").in("item_id", itemIds);
+      const itemIds = (itemsRows as Item[]).map((i) => i.id);
+      const { data: setsRows, error: te } = await supabase.from("workout_sets").select("*").in("item_id", itemIds);
       if (te) throw te;
 
       const payload = {
@@ -1077,67 +1210,81 @@ export default function ExerciseDiaryScreen() {
 
   async function openHistoryModal(it: Item, limit = 10) {
     if (!userId) return;
-    setModalOpen(true); setModalTitle(it.title); setModalForItemId(it.id); setModalLoading(true);
+    setModalOpen(true);
+    setModalTitle(it.title);
+    setModalForItemId(it.id);
+    setModalLoading(true);
     try {
       const { data: itemsRows, error: iErr } = await supabase
-        .from("workout_items").select("id, session_id")
-        .eq("user_id", userId).eq("kind", "weights").ilike("title", it.title)
-        .neq("id", it.id).order("id", { ascending: false }).limit(limit * 4);
+        .from("workout_items")
+        .select("id, session_id")
+        .eq("user_id", userId)
+        .eq("kind", "weights")
+        .ilike("title", it.title)
+        .neq("id", it.id)
+        .order("id", { ascending: false })
+        .limit(limit * 4);
       if (iErr) throw iErr;
 
       const prevItems = (itemsRows as Array<{ id: number; session_id: number }>) || [];
-      if (prevItems.length === 0) { setModalEntries([]); return; }
+      if (prevItems.length === 0) {
+        setModalEntries([]);
+        return;
+      }
 
-      const itemIds = [...new Set(prevItems.map(r => r.id))];
-      const sessionIds = [...new Set(prevItems.map(r => r.session_id))];
+      const itemIds = [...new Set(prevItems.map((r) => r.id))];
+      const sessionIds = [...new Set(prevItems.map((r) => r.session_id))];
 
       const { data: setsRows, error: sErr } = await supabase
-        .from("workout_sets").select("item_id, set_number, weight_kg, reps, duration_sec")
-        .in("item_id", itemIds).order("set_number", { ascending: true });
+        .from("workout_sets")
+        .select("item_id, set_number, weight_kg, reps, duration_sec")
+        .in("item_id", itemIds)
+        .order("set_number", { ascending: true });
       if (sErr) throw sErr;
 
-      const { data: sessRows, error: dErr } = await supabase
-        .from("workout_sessions").select("id, session_date").in("id", sessionIds);
+      const { data: sessRows, error: dErr } = await supabase.from("workout_sessions").select("id, session_date").in("id", sessionIds);
       if (dErr) throw dErr;
 
       const idToDate: Record<number, string> = {};
-      (sessRows || []).forEach((s: any) => { idToDate[s.id] = s.session_date; });
-      const idToSets: Record<number, Array<{ weight_kg: number | null; reps: number | null; duration_sec: number | null }>> = {};
-      (setsRows as any[] || []).forEach(s => {
+      (sessRows || []).forEach((s: any) => {
+        idToDate[s.id] = s.session_date;
+      });
+      const idToSets: Record<
+        number,
+        Array<{ weight_kg: number | null; reps: number | null; duration_sec: number | null }>
+      > = {};
+      ((setsRows as any[]) || []).forEach((s) => {
         (idToSets[s.item_id] ||= []).push({
-          weight_kg: s.weight_kg ?? null, reps: s.reps ?? null, duration_sec: s.duration_sec ?? null,
+          weight_kg: s.weight_kg ?? null,
+          reps: s.reps ?? null,
+          duration_sec: s.duration_sec ?? null,
         });
       });
 
       const entries: PrevEntry[] = prevItems
-        .map(pi => ({ date: idToDate[pi.session_id] || "", sets: idToSets[pi.id] || [] }))
-        .filter(e => !!e.date && e.sets.length > 0)
+        .map((pi) => ({ date: idToDate[pi.session_id] || "", sets: idToSets[pi.id] || [] }))
+        .filter((e) => !!e.date && e.sets.length > 0)
         .sort((a, b) => b.date.localeCompare(a.date))
         .slice(0, limit);
 
       setModalEntries(entries);
-    } catch (e: any) { setErr(e.message || String(e)); }
-    finally { setModalLoading(false); }
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setModalLoading(false);
+    }
   }
-  function closeModal() { setModalOpen(false); setModalTitle(""); setModalEntries([]); setModalForItemId(null); }
-  async function copySetsFromModal(entry: PrevEntry) { if (modalForItemId) await addSetsBulk(modalForItemId, entry.sets); }
-
-  // summary for collapsed/complete view
-  const summary = useMemo(() => {
-    const weightsItems = items.filter(i => i.kind === "weights");
-    const cardioItems = items.filter(i => i.kind !== "weights");
-    const totalSets = items.reduce((n, it) => n + ((setsByItem[it.id]?.length) || 0), 0);
-    const cardioLabels = cardioItems.map(ci => ci.title || ci.kind);
-    return { weightsCount: weightsItems.length, cardioCount: cardioItems.length, totalSets, cardioLabels };
-  }, [items, setsByItem]);
-
-  // click handler for RECENT: open that exact session (not just the date)
-  function openRecentSession(s: Session) {
-    desiredSessionIdRef.current = s.id;
-    setDateISO(s.session_date);
-    setJustReopened(false); // viewing a historical session is not a "reopen"
+  function closeModal() {
+    setModalOpen(false);
+    setModalTitle("");
+    setModalEntries([]);
+    setModalForItemId(null);
+  }
+  async function copySetsFromModal(entry: PrevEntry) {
+    if (modalForItemId) await addSetsBulk(modalForItemId, entry.sets);
   }
 
+  /* ---------- UI ---------- */
   return (
     <div className="page-exercise" style={{ display: "grid", gap: 12 }}>
       {/* Title */}
@@ -1145,13 +1292,22 @@ export default function ExerciseDiaryScreen() {
         <h1 style={{ margin: 0 }}>Exercise Diary</h1>
       </div>
 
-      {/* Optional Undo banner for last template insert */}
+      {/* Optional Undo banner */}
       {undoBanner && (
-        <div className="card card--wash" style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
-          <div><b>Template inserted.</b> You can undo if this was accidental.</div>
+        <div
+          className="card card--wash"
+          style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between" }}
+        >
+          <div>
+            <b>Template inserted.</b> You can undo if this was accidental.
+          </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn-soft" onClick={undoLastTemplateInsert}>Undo</button>
-            <button className="btn-soft" onClick={() => setUndoBanner(null)}>Dismiss</button>
+            <button className="btn-soft" onClick={undoLastTemplateInsert}>
+              Undo
+            </button>
+            <button className="btn-soft" onClick={() => setUndoBanner(null)}>
+              Dismiss
+            </button>
           </div>
         </div>
       )}
@@ -1174,18 +1330,34 @@ export default function ExerciseDiaryScreen() {
                   padding: "8px 10px",
                   display: "flex",
                   alignItems: "center",
-                  gap: 10
+                  gap: 10,
                 }}
               >
-                <span className="muted" style={{ fontWeight: 600 }}>Session timer</span>
+                <span className="muted" style={{ fontWeight: 600 }}>
+                  Session timer
+                </span>
                 <span aria-live="polite" style={{ fontVariantNumeric: "tabular-nums" }}>
                   {secondsToHHMMSS(elapsedSec)}
                 </span>
+
+                <div className="muted" style={{ display: "flex", gap: 12 }}>
+                  <span>
+                    Sets: <b>{sessionTotals.sets}</b>
+                  </span>
+                  <span>
+                    Reps: <b>{sessionTotals.reps}</b>
+                  </span>
+                  <span>
+                    Total: <b>{sessionTotals.kg} kg</b>
+                  </span>
+                </div>
               </div>
             )}
 
-            {/* Top controls — NO date bar; just New/Cancel/Switch */}
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "space-between" }}>
+            {/* Top controls — New/Cancel/Switch */}
+            <div
+              style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "space-between" }}
+            >
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 {!session ? (
                   <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius: 8 }}>
@@ -1194,31 +1366,31 @@ export default function ExerciseDiaryScreen() {
                 ) : (
                   <>
                     {sessionsToday.length > 1 ? (
-                      <select
-                        value={session.id}
-                        onChange={e => switchSessionById(Number(e.target.value))}
-                        title="Switch session"
-                      >
-                        {sessionsToday.map(s => (
-                          <option key={s.id} value={s.id}>Session #{s.id}</option>
+                      <select value={session.id} onChange={(e) => switchSessionById(Number(e.target.value))} title="Switch session">
+                        {sessionsToday.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            Session #{s.id}
+                          </option>
                         ))}
                       </select>
                     ) : (
                       <span className="muted">Session #{session.id}</span>
                     )}
 
-                    {/* Show Cancel when the session is empty and not finished */}
                     {!finished && !previewCollapsed && (items.length === 0 || justReopened) && (
                       <button
                         className="btn-soft"
                         onClick={cancelCurrentSession}
-                        title={justReopened ? "Delete this reopened session (including its items)" : "Delete this empty session"}
+                        title={
+                          justReopened ? "Delete this reopened session (including its items)" : "Delete this empty session"
+                        }
                       >
                         Cancel session
                       </button>
                     )}
 
                     {(finished || previewCollapsed) && <button onClick={reopenSession}>Reopen</button>}
+
                     <button className="btn-primary" onClick={createSession} disabled={busy} style={{ borderRadius: 8 }}>
                       {busy ? "Starting…" : "New session"}
                     </button>
@@ -1229,15 +1401,27 @@ export default function ExerciseDiaryScreen() {
 
             {/* Body */}
             {!session ? (
-              <div className="muted">Tap <b>New session</b> to begin.</div>
-            ) : (finished || previewCollapsed) ? (
+              <div className="muted">
+                Tap <b>New session</b> to begin.
+              </div>
+            ) : finished || previewCollapsed ? (
               <div className="card card--wash" style={{ display: "grid", gap: 10 }}>
                 <h2 style={{ margin: 0 }}>{finished ? "Session complete" : "Preview collapsed"}</h2>
                 <div className="muted">
-                  Weights: <b>{summary.weightsCount}</b> · Sets: <b>{summary.totalSets}</b>
-                  {summary.cardioCount > 0 && <> · Cardio: <b>{summary.cardioCount}</b></>}
+                  Weights: <b>{items.filter((i) => i.kind === "weights").length}</b> · Sets:{" "}
+                  <b>{items.reduce((n, it) => n + ((setsByItem[it.id]?.length as number) || 0), 0)}</b>
+                  {items.filter((i) => i.kind !== "weights").length > 0 && (
+                    <>
+                      {" "}
+                      · Cardio: <b>{items.filter((i) => i.kind !== "weights").length}</b>
+                    </>
+                  )}
                 </div>
-                {summary.cardioCount > 0 && <div className="muted">Cardio: {summary.cardioLabels.join(" · ")}</div>}
+                {items.filter((i) => i.kind !== "weights").length > 0 && (
+                  <div className="muted">
+                    Cardio: {items.filter((i) => i.kind !== "weights").map((ci) => ci.title || ci.kind).join(" · ")}
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
                   {!finished && previewCollapsed && (
                     <>
@@ -1268,14 +1452,22 @@ export default function ExerciseDiaryScreen() {
                 {/* Items */}
                 <div style={{ display: "grid", gap: 10 }}>
                   {items.length === 0 && <div className="muted">No items yet. Use Quick add above.</div>}
-                  {items.map(it => (
+                  {items.map((it) => (
                     <div key={it.id} style={{ border: "1px solid #eee", borderRadius: 10, padding: 10 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          marginBottom: 8,
+                          flexWrap: "wrap",
+                        }}
+                      >
                         <KindBadge kind={it.kind} />
                         <input
                           placeholder={it.kind === "weights" ? "Exercise name" : "Title"}
                           value={it.title}
-                          onChange={e => renameItemLocal(it, e.target.value)}
+                          onChange={(e) => renameItemLocal(it, e.target.value)}
                           onBlur={() => flushTitleSaves(it.id)}
                           style={{ flex: 1, minWidth: 0 }}
                         />
@@ -1285,10 +1477,14 @@ export default function ExerciseDiaryScreen() {
                               <button onClick={() => toggleHistory(it)}>
                                 {openHistoryFor[it.id] ? "Hide previous" : "Show previous"}
                               </button>
-                              <button onClick={() => openHistoryModal(it)} title="See more dates">Open history</button>
+                              <button onClick={() => openHistoryModal(it)} title="See more dates">
+                                Open history
+                              </button>
                             </>
                           )}
-                          <button onClick={() => deleteItem(it.id)} title="Delete">×</button>
+                          <button onClick={() => deleteItem(it.id)} title="Delete">
+                            ×
+                          </button>
                         </div>
                       </div>
 
@@ -1300,16 +1496,28 @@ export default function ExerciseDiaryScreen() {
                             onChange={(set, patch) => updateSet(set, patch)}
                             onDelete={(set) => deleteSet(set)}
                             flush={(id) => flushSetSaves(id)}
-                            onAddExercise={(name) => addWeightsExercise(name)} // bottom-only add, NO prompt
+                            onAddExercise={(name) => addWeightsExercise(name)}
                           />
                           {openHistoryFor[it.id] && (
-                            <div className="muted" style={{ border: "1px dashed #e5e7eb", borderRadius: 8, padding: 8, marginTop: 8 }}>
+                            <div
+                              className="muted"
+                              style={{
+                                border: "1px dashed #e5e7eb",
+                                borderRadius: 8,
+                                padding: 8,
+                                marginTop: 8,
+                              }}
+                            >
                               {loadingPrevFor[it.id] && <div>Loading previous…</div>}
-                              {!loadingPrevFor[it.id] && (prevByItem[it.id]?.length ?? 0) === 0 && <div>No previous entries for this title.</div>}
+                              {!loadingPrevFor[it.id] && (prevByItem[it.id]?.length ?? 0) === 0 && (
+                                <div>No previous entries for this title.</div>
+                              )}
                               {!loadingPrevFor[it.id] && (prevByItem[it.id]?.length ?? 0) > 0 && (
                                 <>
                                   <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
-                                    <button className="btn-soft" onClick={() => copyLastSetsTo(it)}>Copy last sets</button>
+                                    <button className="btn-soft" onClick={() => copyLastSetsTo(it)}>
+                                      Copy last sets
+                                    </button>
                                   </div>
                                   <ul className="list">
                                     {prevByItem[it.id]!.map((p, idx) => (
@@ -1319,7 +1527,12 @@ export default function ExerciseDiaryScreen() {
                                           {p.sets.map((s, j) => {
                                             const w = s.weight_kg != null ? `${s.weight_kg}kg` : "";
                                             const r = s.reps != null ? `${s.reps}` : "";
-                                            return <span key={j}>{j > 0 ? " · " : ""}{w && r ? `${w}×${r}` : (w || r || "")}</span>;
+                                            return (
+                                              <span key={j}>
+                                                {j > 0 ? " · " : ""}
+                                                {w && r ? `${w}×${r}` : w || r || ""}
+                                              </span>
+                                            );
                                           })}
                                         </div>
                                       </li>
@@ -1339,7 +1552,7 @@ export default function ExerciseDiaryScreen() {
 
                 <div style={{ borderTop: "1px solid #eee", paddingTop: 8 }}>
                   <div className="section-title">Notes</div>
-                  <textarea rows={3} value={session?.notes || ""} onChange={e => saveSessionNotes(e.target.value)} />
+                  <textarea rows={3} value={session?.notes || ""} onChange={(e) => saveSessionNotes(e.target.value)} />
                 </div>
               </>
             )}
@@ -1359,7 +1572,7 @@ export default function ExerciseDiaryScreen() {
                   marginTop: 8,
                   paddingBottom: "calc(10px + env(safe-area-inset-bottom))",
                   display: "flex",
-                  justifyContent: "flex-end"
+                  justifyContent: "flex-end",
                 }}
               >
                 <button className="btn-primary" onClick={openConfirmComplete} style={{ borderRadius: 8 }}>
@@ -1374,15 +1587,9 @@ export default function ExerciseDiaryScreen() {
             <h2 style={{ margin: 0 }}>Recent</h2>
             <ul className="list" style={{ overflow: "auto", maxHeight: "60vh" }}>
               {recent.length === 0 && <li className="muted">No recent sessions.</li>}
-              {recent.map(s => {
-
-                // Prefer real name; else look for "Session: ..." in notes
-                const sessionName =
-                  (s.name && s.name.trim()) ||
-                  extractSessionNameFromNotes(s.notes);
-
+              {recent.map((s) => {
+                const sessionName = (s.name && s.name.trim()) || extractSessionNameFromNotes(s.notes);
                 const label = sessionName ? `${s.session_date} — ${sessionName}` : s.session_date;
-
                 const isActive = session?.id === s.id;
 
                 return (
@@ -1393,7 +1600,7 @@ export default function ExerciseDiaryScreen() {
                       borderRadius: 8,
                       padding: 4,
                       background: isActive ? "#e0f2fe" : "#fff",
-                      border: isActive ? "1px solid #bae6fd" : "1px solid var(--border)"
+                      border: isActive ? "1px solid #bae6fd" : "1px solid var(--border)",
                     }}
                   >
                     <button
@@ -1407,7 +1614,7 @@ export default function ExerciseDiaryScreen() {
                         background: "transparent",
                         border: 0,
                         padding: 0,
-                        cursor: "pointer"
+                        cursor: "pointer",
                       }}
                       title={label}
                     >
@@ -1442,16 +1649,25 @@ export default function ExerciseDiaryScreen() {
       {/* History Modal */}
       {modalOpen && (
         <div
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "grid", placeItems: "center", zIndex: 2100 }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,.35)",
+            display: "grid",
+            placeItems: "center",
+            zIndex: 2100,
+          }}
           onClick={closeModal}
         >
-          <div className="card" style={{ width: "min(720px, 92vw)", maxHeight: "80vh", overflow: "auto" }} onClick={e => e.stopPropagation()}>
+          <div className="card" style={{ width: "min(720px, 92vw)", maxHeight: "80vh", overflow: "auto" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
               <h2 style={{ margin: 0 }}>History · {modalTitle}</h2>
               <button onClick={closeModal}>Close</button>
             </div>
             {modalLoading && <div className="muted" style={{ marginTop: 8 }}>Loading…</div>}
-            {!modalLoading && modalEntries.length === 0 && <div className="muted" style={{ marginTop: 8 }}>No previous entries found for this title.</div>}
+            {!modalLoading && modalEntries.length === 0 && (
+              <div className="muted" style={{ marginTop: 8 }}>No previous entries found for this title.</div>
+            )}
             {!modalLoading && modalEntries.length > 0 && (
               <ul className="list" style={{ marginTop: 8 }}>
                 {modalEntries.map((p, idx) => (
@@ -1464,7 +1680,11 @@ export default function ExerciseDiaryScreen() {
                         return <span key={j}>{j > 0 ? " · " : ""}{w && r ? `${w}×${r}` : (w || r || "")}</span>;
                       })}
                     </div>
-                    {modalForItemId && <button onClick={() => copySetsFromModal(p)} className="btn-soft">Copy sets</button>}
+                    {modalForItemId && (
+                      <button onClick={() => copySetsFromModal(p)} className="btn-soft">
+                        Copy sets
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -1476,23 +1696,25 @@ export default function ExerciseDiaryScreen() {
       {/* Save Template Modal */}
       <Modal open={tplOpen} onClose={() => setTplOpen(false)} title="Save as template">
         <div style={{ display: "grid", gap: 10 }}>
-          <div className="muted">Save today’s <b>weights</b> exercises as a reusable template.</div>
+          <div className="muted">
+            Save today’s <b>weights</b> exercises as a reusable template.
+          </div>
           <label style={{ display: "grid", gap: 6 }}>
             <span>Template name</span>
-            <input
-              value={tplName}
-              onChange={e => setTplName(e.target.value)}
-              placeholder="insert template name"
-            />
+            <input value={tplName} onChange={(e) => setTplName(e.target.value)} placeholder="insert template name" />
           </label>
           <div style={{ display: "grid", gap: 6 }}>
             <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input type="checkbox" checked={tplIncludeWeights} onChange={e => setTplIncludeWeights(e.target.checked)} />
-              <span>Also save <b>weights</b></span>
+              <input type="checkbox" checked={tplIncludeWeights} onChange={(e) => setTplIncludeWeights(e.target.checked)} />
+              <span>
+                Also save <b>weights</b>
+              </span>
             </label>
             <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input type="checkbox" checked={tplIncludeReps} onChange={e => setTplIncludeReps(e.target.checked)} />
-              <span>Also save <b>reps</b></span>
+              <input type="checkbox" checked={tplIncludeReps} onChange={(e) => setTplIncludeReps(e.target.checked)} />
+              <span>
+                Also save <b>reps</b>
+              </span>
             </label>
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
@@ -1512,24 +1734,22 @@ export default function ExerciseDiaryScreen() {
       {/* Load Template Modal */}
       <Modal open={loadTplOpen} onClose={() => setLoadTplOpen(false)} title="Add template">
         <div style={{ display: "grid", gap: 10 }}>
-          <div className="muted">Insert a saved <b>weights</b> template into this session.</div>
+          <div className="muted">
+            Insert a saved <b>weights</b> template into this session.
+          </div>
 
           <div style={{ display: "grid", gap: 6 }}>
             <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input
-                type="checkbox"
-                checked={useTplWeights}
-                onChange={e => setUseTplWeights(e.target.checked)}
-              />
-              <span>Apply saved <b>weights</b> (kg)</span>
+              <input type="checkbox" checked={useTplWeights} onChange={(e) => setUseTplWeights(e.target.checked)} />
+              <span>
+                Apply saved <b>weights</b> (kg)
+              </span>
             </label>
             <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input
-                type="checkbox"
-                checked={useTplReps}
-                onChange={e => setUseTplReps(e.target.checked)}
-              />
-              <span>Apply saved <b>reps</b></span>
+              <input type="checkbox" checked={useTplReps} onChange={(e) => setUseTplReps(e.target.checked)} />
+              <span>
+                Apply saved <b>reps</b>
+              </span>
             </label>
           </div>
 
@@ -1539,7 +1759,7 @@ export default function ExerciseDiaryScreen() {
             <div className="muted">No templates found. Try saving one via “Save as template”.</div>
           ) : (
             <ul className="list">
-              {tplList.map(t => (
+              {tplList.map((t) => (
                 <li key={t.id} className="item" style={{ alignItems: "center" }}>
                   <div style={{ fontWeight: 600 }}>{t.name}</div>
                   <div className="muted" style={{ flex: 1 }}>
@@ -1569,11 +1789,17 @@ export default function ExerciseDiaryScreen() {
               placeholder="e.g. Push Day A, 5k easy, Legs & Core"
             />
           </label>
-          <div className="muted">Your session will still be listed by date; a name makes it easier to find later.</div>
+          <div className="muted">
+            Your session will still be listed by date; a name makes it easier to find later.
+          </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
             <button onClick={() => setConfirmCompleteOpen(false)}>Keep editing</button>
-            <button className="btn-soft" onClick={previewCollapse}>Preview collapse</button>
-            <button className="btn-primary" onClick={completeSessionNow}>Complete now</button>
+            <button className="btn-soft" onClick={previewCollapse}>
+              Preview collapse
+            </button>
+            <button className="btn-primary" onClick={completeSessionNow}>
+              Complete now
+            </button>
           </div>
         </div>
       </Modal>
@@ -1584,33 +1810,68 @@ export default function ExerciseDiaryScreen() {
 /* ---------- sub components ---------- */
 function KindBadge({ kind }: { kind: Item["kind"] }) {
   const label = kind[0].toUpperCase() + kind.slice(1);
-  const bg = ({
-    weights: "#e0f2fe", run: "#fee2e2", jog: "#fee2e2", walk: "#fee2e2",
-    yoga: "#dcfce7", class: "#ede9fe", cycling: "#fee2e2", other: "#f3f4f6"
-  } as any)[kind] || "#f3f4f6";
-  return <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 999, background: bg, border: "1px solid #e5e7eb" }}>{label}</span>;
+  const bg =
+    (
+      {
+        weights: "#e0f2fe",
+        run: "#fee2e2",
+        jog: "#fee2e2",
+        walk: "#fee2e2",
+        yoga: "#dcfce7",
+        class: "#ede9fe",
+        cycling: "#fee2e2",
+        other: "#f3f4f6",
+      } as any
+    )[kind] || "#f3f4f6";
+  return (
+    <span
+      style={{
+        fontSize: 12,
+        padding: "2px 8px",
+        borderRadius: 999,
+        background: bg,
+        border: "1px solid #e5e7eb",
+      }}
+    >
+      {label}
+    </span>
+  );
 }
 
 function WeightsEditor({
-  sets, onAdd, onChange, onDelete, flush, onAddExercise
+  sets,
+  onAdd,
+  onChange,
+  onDelete,
+  flush,
+  onAddExercise,
 }: {
   sets: WSet[];
   onAdd: () => void;
   onChange: (s: WSet, patch: Partial<WSet>) => void;
   onDelete: (s: WSet) => void;
   flush: (id?: number) => void;
-  onAddExercise: (name: string) => void; // accepts a name for the new exercise
+  onAddExercise: (name: string) => void;
 }) {
+  // ✅ per-exercise totals live inside the editor
+  const totals = totalsFromSets(sets);
+
   return (
     <div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
         <div style={{ fontWeight: 600 }}>Sets</div>
         <button onClick={onAdd}>+ Add set</button>
+        <div className="muted" style={{ marginLeft: "auto", fontSize: 12 }}>
+          Reps: <b>{totals.reps}</b> · Total: <b>{totals.kg} kg</b>
+        </div>
       </div>
       <div style={{ display: "grid", gap: 6 }}>
         {sets.length === 0 && <div className="muted">No sets yet.</div>}
-        {sets.map(s => (
-          <div key={s.id} style={{ display: "grid", gridTemplateColumns: "68px minmax(0,1fr) minmax(0,1fr) 32px", gap: 6, alignItems: "center" }}>
+        {sets.map((s) => (
+          <div
+            key={s.id}
+            style={{ display: "grid", gridTemplateColumns: "68px minmax(0,1fr) minmax(0,1fr) 32px", gap: 6, alignItems: "center" }}
+          >
             <div className="muted">Set {s.set_number}</div>
             <input
               type="number"
@@ -1629,16 +1890,15 @@ function WeightsEditor({
               onChange={(e) => onChange(s, { reps: e.currentTarget.value === "" ? null : Number(e.currentTarget.value) })}
               onBlur={() => flush(s.id)}
             />
-            <button onClick={() => onDelete(s)} title="Delete set">×</button>
+            <button onClick={() => onDelete(s)} title="Delete set">
+              ×
+            </button>
           </div>
         ))}
       </div>
-      {/* Bottom-only: add exercise WITHOUT any pop-up (name inline or via Quick Add) */}
+      {/* Bottom-only add exercise (no prompt) */}
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-        <button
-          className="btn-soft"
-          onClick={() => onAddExercise("")}
-        >
+        <button className="btn-soft" onClick={() => onAddExercise("")}>
           + Add exercise
         </button>
       </div>
@@ -1650,10 +1910,17 @@ function CardioSummary({ item }: { item: Item }) {
   const d = item.metrics?.distance_km as number | undefined;
   const sec = item.metrics?.duration_sec as number | undefined;
   const pace = paceStr(d, sec);
-  return <div className="muted">{d ? `${d} km` : ""}{(d && sec) ? " • " : ""}{sec ? secondsToMMSS(sec) : ""}{pace ? ` • ${pace}` : ""}</div>;
+  return (
+    <div className="muted">
+      {d ? `${d} km` : ""}
+      {d && sec ? " • " : ""}
+      {sec ? secondsToMMSS(sec) : ""}
+      {pace ? ` • ${pace}` : ""}
+    </div>
+  );
 }
 
-/* ---------- BYB Kind Picker (logo + options) ---------- */
+/* ---------- Kind Picker ---------- */
 function QuickKindPicker({
   value,
   onChange,
@@ -1678,12 +1945,12 @@ function QuickKindPicker({
     { id: "run", label: "Run" },
     { id: "jog", label: "Jog" },
     { id: "walk", label: "Walk" },
-    { id: "cycling", label: "Cycling" }, // <-- NEW
+    { id: "cycling", label: "Cycling" },
     { id: "yoga", label: "Yoga" },
     { id: "class", label: "Class (custom title)" },
   ];
 
-  const currentLabel = KIND_OPTIONS.find(k => k.id === value)?.label ?? value;
+  const currentLabel = KIND_OPTIONS.find((k) => k.id === value)?.label ?? value;
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
@@ -1691,7 +1958,7 @@ function QuickKindPicker({
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
-        onClick={() => setOpen(v => !v)}
+        onClick={() => setOpen((v) => !v)}
         className="btn-soft"
         style={{ minWidth: 140, display: "inline-flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}
       >
@@ -1717,23 +1984,30 @@ function QuickKindPicker({
           }}
         >
           {/* Logo header */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: "1px solid #f1f5f9" }}>
-            <img
-              src="/LogoButterfly.png"
-              alt="BYB"
-              style={{ width: 20, height: 20, objectFit: "contain" }}
-            />
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "10px 12px",
+              borderBottom: "1px solid #f1f5f9",
+            }}
+          >
+            <img src="/LogoButterfly.png" alt="BYB" style={{ width: 20, height: 20, objectFit: "contain" }} />
             <div style={{ fontWeight: 600 }}>BYB quick add</div>
           </div>
 
           <ul style={{ listStyle: "none", margin: 0, padding: 6 }}>
-            {KIND_OPTIONS.map(opt => (
+            {KIND_OPTIONS.map((opt) => (
               <li key={opt.id}>
                 <button
                   type="button"
                   role="option"
                   aria-selected={opt.id === value}
-                  onClick={() => { onChange(opt.id); setOpen(false); }}
+                  onClick={() => {
+                    onChange(opt.id);
+                    setOpen(false);
+                  }}
                   style={{
                     width: "100%",
                     textAlign: "left",
@@ -1755,12 +2029,12 @@ function QuickKindPicker({
   );
 }
 
-/* ---------- Quick Add (updated) ---------- */
+/* ---------- Quick Add ---------- */
 function QuickAddCard({
   onAddWeights,
   onAddCardio,
   onOpenLoadTemplate,
-  onOpenSaveTemplate
+  onOpenSaveTemplate,
 }: {
   onAddWeights: (name: string) => void;
   onAddCardio: (kind: Item["kind"], title: string, distanceKm: number | null, mmss: string) => void;
@@ -1768,9 +2042,9 @@ function QuickAddCard({
   onOpenSaveTemplate: () => void;
 }) {
   const [kind, setKind] = useState<Item["kind"]>("weights");
-  const [title, setTitle] = useState("");       // used for cardio/class only
+  const [title, setTitle] = useState(""); // cardio/class only
   const [dist, setDist] = useState<string>(""); // cardio only
-  const [dur, setDur] = useState<string>("");   // cardio only
+  const [dur, setDur] = useState<string>(""); // cardio only
 
   function addCardio() {
     onAddCardio(
@@ -1791,25 +2065,23 @@ function QuickAddCard({
         <QuickKindPicker value={kind} onChange={(k) => setKind(k)} />
 
         {kind === "weights" ? (
-          // Weights: remove the 'Exercise name (optional)' input.
-          // Always add a blank exercise; the user renames inline on the item row.
           <>
-            <button
-              className="btn-soft"
-              onClick={() => onAddWeights("")}
-            >
+            <button className="btn-soft" onClick={() => onAddWeights("")}>
               Add exercise
             </button>
-            <button className="btn-soft" onClick={onOpenLoadTemplate}>Add template</button>
-            <button className="btn-soft" onClick={onOpenSaveTemplate}>Save as template</button>
+            <button className="btn-soft" onClick={onOpenLoadTemplate}>
+              Add template
+            </button>
+            <button className="btn-soft" onClick={onOpenSaveTemplate}>
+              Save as template
+            </button>
           </>
         ) : (
-          // Cardio / Class: keep title + distance + duration inputs
           <>
             <input
               placeholder={kind === "class" ? "Class title" : "Title (optional)"}
               value={title}
-              onChange={e => setTitle(e.target.value)}
+              onChange={(e) => setTitle(e.target.value)}
             />
             <input
               type="number"
@@ -1817,13 +2089,9 @@ function QuickAddCard({
               step="0.1"
               placeholder="Distance (km)"
               value={dist}
-              onChange={e => setDist(e.target.value)}
+              onChange={(e) => setDist(e.target.value)}
             />
-            <input
-              placeholder="Duration mm:ss"
-              value={dur}
-              onChange={e => setDur(e.target.value)}
-            />
+            <input placeholder="Duration mm:ss" value={dur} onChange={(e) => setDur(e.target.value)} />
             <button className="btn-primary" onClick={addCardio}>
               Add {kind[0].toUpperCase() + kind.slice(1)}
             </button>
