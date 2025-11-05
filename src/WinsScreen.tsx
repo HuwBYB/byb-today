@@ -1,8 +1,6 @@
 // src/WinsScreen.tsx
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
-
-// ✅ Use the shared theme (colors, category styles, utility classes)
 import "./theme.css";
 
 /* ---------- Types ---------- */
@@ -54,7 +52,7 @@ type Detail = {
   kind?: string;
 };
 
-/* ---------- Helpers ---------- */
+/* ---------- Helpers (dates) ---------- */
 function toISO(d: Date) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -82,6 +80,16 @@ function endOfWeekMonday(d: Date) {
   e.setDate(s.getDate() + 6);
   return e;
 }
+function inISOInclusive(iso: string, startISO: string, endISO: string) {
+  return iso >= startISO && iso <= endISO;
+}
+function weekKeyOf(dateISO: string) {
+  // Key weeks by their Monday start ISO (YYYY-MM-DD)
+  const d = fromISO(dateISO);
+  return toISO(startOfWeekMonday(d));
+}
+
+/* ---------- Time/pace helpers ---------- */
 function secondsToMMSS(sec?: number | null) {
   if (!sec || sec <= 0) return "00:00";
   const m = Math.floor(sec / 60);
@@ -140,8 +148,7 @@ const SCORE_WEIGHTS = {
   exercise: 2,
   gratitude: 0.5,
 } as const;
-
-const DAILY_TARGET_DEFAULT = 5; // tweakable per-user later
+const DAILY_TARGET_DEFAULT = 5;
 
 type DailyBucketCounts = {
   dateISO: string;
@@ -194,8 +201,7 @@ function buildCalendarWindow(days = 28) {
 }
 
 function calcStreak(dailyScores: Record<string, number>, target: number) {
-  // current streak (count back from today)
-  const days = buildCalendarWindow(180).reverse(); // check last 6 months
+  const days = buildCalendarWindow(180).reverse(); // last 6 months
   let current = 0;
   for (const iso of days) {
     const met = (dailyScores[iso] || 0) >= target;
@@ -215,82 +221,60 @@ function calcStreak(dailyScores: Record<string, number>, target: number) {
   return { current, best };
 }
 
-/* ---------- UI: Progress Ring + Streak Chip + Heatmap + Confetti ---------- */
-function ProgressRing({ value, target }: { value: number; target: number }) {
-  const pct = Math.max(0, Math.min(1, value / Math.max(1, target)));
-  const size = 120, stroke = 10;
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
-  const dash = c * pct;
+/* ---------- Weights parsing ---------- */
+type WeightsTotals = { totalReps: number; totalWeightKg: number };
+function parseWeightsFromMetrics(metrics: Record<string, unknown> | null | undefined): WeightsTotals {
+  if (!metrics) return { totalReps: 0, totalWeightKg: 0 };
+  let totalReps = 0;
+  let totalWeightKg = 0;
 
-  return (
-    <div aria-label={`Daily progress ${Math.round(pct * 100)}%`} role="img"
-         style={{ width: size, height: size, position: "relative" }}>
-      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
-        <circle cx={size/2} cy={size/2} r={r} stroke="var(--muted)" strokeWidth={stroke} fill="none" opacity={0.25}/>
-        <circle cx={size/2} cy={size/2} r={r} stroke="currentColor" strokeWidth={stroke} fill="none"
-                strokeDasharray={`${dash} ${c - dash}`} strokeLinecap="round"/>
-      </svg>
-      <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", textAlign: "center" }}>
-        <div style={{ fontSize: 22, fontWeight: 800 }}>{value}</div>
-        <div className="muted" style={{ fontSize: 12 }}>/ {target}</div>
-      </div>
-    </div>
-  );
+  // Common shapes we’ll support defensively:
+  // 1) sets: [{ reps, weight_kg }]
+  const sets = (metrics as any).sets as Array<any> | undefined;
+  if (Array.isArray(sets)) {
+    for (const s of sets) {
+      const r = Number(s?.reps) || 0;
+      const w = Number(s?.weight_kg ?? s?.weight) || 0;
+      totalReps += r;
+      totalWeightKg += r * w;
+    }
+  }
+
+  // 2) single lift summary: reps, weight_kg
+  const reps = Number((metrics as any).reps) || 0;
+  const wkg = Number((metrics as any).weight_kg ?? (metrics as any).weight) || 0;
+  if (reps && wkg) {
+    totalReps += reps;
+    totalWeightKg += reps * wkg;
+  }
+
+  // 3) precomputed totals (if stored)
+  const tReps = Number((metrics as any).total_reps) || 0;
+  const tW = Number((metrics as any).total_weight_kg ?? (metrics as any).total_weight) || 0;
+  if (tReps) totalReps += tReps;
+  if (tW) totalWeightKg += tW;
+
+  return { totalReps, totalWeightKg };
 }
 
-function StreakChip({ current, best }:{ current:number; best:number }) {
-  return (
-    <div aria-label={`Current streak ${current} days, best ${best} days`}
-      style={{
-        display:"inline-flex", alignItems:"center", gap:8,
-        padding:"8px 12px", borderRadius:999, border:"1px solid var(--border)",
-        background:"var(--card)", fontWeight:700
-      }}>
-      🔥 {current} <span className="muted" style={{ fontWeight:500 }}>(best {best})</span>
-    </div>
-  );
-}
-
-function Heatmap28({ dailyScores, target }:{ dailyScores:Record<string,number>; target:number }) {
-  const days = buildCalendarWindow(28);
-  return (
-    <div style={{ display:"grid", gridTemplateColumns:"repeat(7, 12px)", gap:4 }}>
-      {days.map(d => {
-        const met = (dailyScores[d] || 0) >= target;
-        return (
-          <div key={d} title={`${d}: ${Math.round(dailyScores[d] || 0)} / ${target}`}
-               style={{
-                 width:12, height:12, borderRadius:2,
-                 background: met ? "hsl(var(--pastel-hsl))" : "var(--muted-bg)",
-                 border: "1px solid var(--border)"
-               }}/>
-        );
-      })}
-    </div>
-  );
-}
-
-function ConfettiBurst({ show }:{ show:boolean }) {
-  if (!show) return null;
-  const pieces = Array.from({ length: 16 });
-  return (
-    <div aria-hidden
-      style={{ position:"fixed", inset:0, pointerEvents:"none", overflow:"hidden", zIndex:3000 }}>
-      {pieces.map((_, i) => (
-        <span key={i}
-          style={{
-            position:"absolute",
-            left: `${(i / pieces.length) * 100}%`,
-            top: -10,
-            width:6, height:10, borderRadius:1,
-            background:"hsl(var(--pastel-hsl))",
-            animation: `fall ${600 + i*20}ms ease-out forwards`,
-          }}/>
-      ))}
-      <style>{`@keyframes fall{ to { transform: translateY(100vh) rotate(260deg); opacity:.2; } }`}</style>
-    </div>
-  );
+/* ---------- Coach voice helpers ---------- */
+type Coach = "hype" | "warm" | "calm";
+const LS_COACH = "byb:coach";
+function praiseLine(coach: Coach, hasPB: boolean) {
+  if (coach === "hype") {
+    return hasPB
+      ? "You hit a new personal best this week. Way to go, champ."
+      : "You showed up this week. That’s what champions do.";
+  }
+  if (coach === "warm") {
+    return hasPB
+      ? "Look at that. You grew this week. You should be proud of yourself."
+      : "Consistency takes courage. You honored yourself by showing up.";
+  }
+  // calm
+  return hasPB
+    ? "Progress is unfolding within you. Notice how it feels."
+    : "Your presence this week was enough. Your effort matters.";
 }
 
 /* ======================================================================= */
@@ -309,6 +293,9 @@ export default function WinsScreen() {
   const [period, setPeriod] = useState<PeriodKey>("today");
   const [active, setActive] = useState<BucketKey>("all");
 
+  // Coach
+  const [coach, setCoach] = useState<Coach>("hype");
+
   /* Auth */
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
@@ -324,6 +311,21 @@ export default function WinsScreen() {
     if (!userId) return;
     setLoading(true); setErr(null);
     try {
+      // Coach voice from profiles (fallback to localStorage)
+      try {
+        const { data: prof, error: pErr } = await supabase.from("profiles").select("coach").eq("id", userId).maybeSingle();
+        if (!pErr && prof && (prof as any).coach) {
+          const c = (prof as any).coach as Coach;
+          if (c === "hype" || c === "warm" || c === "calm") setCoach(c);
+        } else {
+          const local = (localStorage.getItem(LS_COACH) || "hype") as Coach;
+          setCoach(local);
+        }
+      } catch {
+        const local = (localStorage.getItem(LS_COACH) || "hype") as Coach;
+        setCoach(local);
+      }
+
       // 1) done tasks — exclude the auto exercise-session task (exercise is shown via sessions)
       const { data: tdata, error: terror } = await supabase
         .from("tasks")
@@ -344,7 +346,7 @@ export default function WinsScreen() {
       const sess = (sData as WorkoutSession[]) || [];
       setSessions(sess);
 
-      // items per session (for labels)
+      // items per session (for labels + weights totals)
       let itemsBySession: Record<number, WorkoutItemRow[]> = {};
       if (sess.length) {
         const sessionIds = sess.map(s => s.id);
@@ -522,16 +524,79 @@ export default function WinsScreen() {
     return m;
   }, [dailyAgg]);
   const todayScore = dailyScores[toISO(new Date())] || 0;
-  const DAILY_TARGET = DAILY_TARGET_DEFAULT; // later per-user
+  const DAILY_TARGET = DAILY_TARGET_DEFAULT;
   const streak = useMemo(() => calcStreak(dailyScores, DAILY_TARGET), [dailyScores]);
 
-  /* Celebration + optional haptic */
-  const [celebrate, setCelebrate] = useState(false);
-  useEffect(() => {
-    const crossed = todayScore >= DAILY_TARGET;
-    setCelebrate(crossed);
-    if (crossed && (navigator as any).vibrate) (navigator as any).vibrate(10);
-  }, [todayScore, DAILY_TARGET]);
+  /* -------------------- Weekly Summary + Weights -------------------- */
+  const weekRange = useMemo(() => {
+    const s = startOfWeekMonday(new Date());
+    const e = endOfWeekMonday(new Date());
+    return { startISO: toISO(s), endISO: toISO(e) };
+  }, []);
+
+  const weekly = useMemo(() => {
+    // Counts
+    const weekTasks = doneTasks.filter(t => {
+      const d = dateOnlyLocal(t.completed_at);
+      return d && inISOInclusive(d, weekRange.startISO, weekRange.endISO);
+    });
+    const stepsTowardBig = weekTasks.filter(isBigGoal).length;
+    const tasksCompleted = weekTasks.length;
+    const workouts = sessions.filter(s => inISOInclusive(s.session_date, weekRange.startISO, weekRange.endISO));
+    const gratCount = grats.filter(g => inISOInclusive(g.entry_date, weekRange.startISO, weekRange.endISO)).length;
+
+    // Weights totals
+    let totalReps = 0;
+    let totalWeightKg = 0;
+    for (const sess of workouts) {
+      const items = sessionItems[sess.id] || [];
+      for (const it of items) {
+        if (it.kind === "weights") {
+          const { totalReps: r, totalWeightKg: w } = parseWeightsFromMetrics(it.metrics);
+          totalReps += r;
+          totalWeightKg += w;
+        }
+      }
+    }
+
+    return {
+      stepsTowardBig,
+      tasksCompleted,
+      workoutsLogged: workouts.length,
+      gratitudes: gratCount,
+      totalReps,
+      totalWeightKg: Math.round(totalWeightKg), // integer kg for clean display
+    };
+  }, [doneTasks, sessions, sessionItems, grats, weekRange.startISO, weekRange.endISO]);
+
+  // Historical best (any previous week)
+  const weeklyPB = useMemo(() => {
+    if (!sessions.length) return { isPB: false, prevBestKg: 0 };
+    // Build totals per weekKey across all time
+    const perWeek: Record<string, number> = {};
+    for (const sess of sessions) {
+      const wk = weekKeyOf(sess.session_date);
+      const items = sessionItems[sess.id] || [];
+      let sum = 0;
+      for (const it of items) {
+        if (it.kind === "weights") {
+          sum += parseWeightsFromMetrics(it.metrics).totalWeightKg;
+        }
+      }
+      perWeek[wk] = (perWeek[wk] || 0) + sum;
+    }
+    const thisKey = weekKeyOf(weekRange.startISO);
+    const thisWeek = Math.round(perWeek[thisKey] || 0);
+    // previous best excluding current week
+    const prevBest = Math.round(
+      Object.entries(perWeek)
+        .filter(([k]) => k !== thisKey)
+        .reduce((m, [, v]) => (v > m ? v : m), 0)
+    );
+    return { isPB: thisWeek > prevBest && thisWeek > 0, prevBestKg: prevBest };
+  }, [sessions, sessionItems, weekRange.startISO]);
+
+  const praise = useMemo(() => praiseLine(coach, weeklyPB.isPB), [coach, weeklyPB.isPB]);
 
   /* Render */
   return (
@@ -542,7 +607,26 @@ export default function WinsScreen() {
           <h1 style={{ margin: 0 }}>Your Wins</h1>
         </div>
 
-        {/* Hero: Daily Score + Streak + Heatmap */}
+        {/* NEW: Weekly Summary (clean numbers, no icons) */}
+        <div className="card" style={{ display: "grid", gap: 10 }}>
+          <div className="section-title">Weekly Summary</div>
+          <div style={{ display: "grid", gap: 6, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" }}>
+            <Row label="Steps toward your Big Goal" value={weekly.stepsTowardBig} />
+            <Row label="Tasks completed" value={weekly.tasksCompleted} />
+            <Row label="Workouts logged" value={weekly.workoutsLogged} />
+            <Row label="Gratitudes" value={weekly.gratitudes} />
+            <Row
+              label="Total weight lifted this week"
+              value={`${weekly.totalWeightKg} kg`}
+              tag={weeklyPB.isPB ? "Personal Best" : undefined}
+            />
+            <Row label="Total reps completed this week" value={weekly.totalReps} />
+          </div>
+          {/* Praise line (coach voice) */}
+          <div style={{ marginTop: 6, fontWeight: 700 }}>{praise}</div>
+        </div>
+
+        {/* Hero: Daily Score + Streak + Heatmap (keep minimal) */}
         <div className="card" style={{ display:"grid", gridTemplateColumns:"auto 1fr", gap:12, alignItems:"center" }}>
           <ProgressRing value={Math.round(todayScore)} target={DAILY_TARGET} />
           <div style={{ display:"grid", gap:8 }}>
@@ -635,13 +719,11 @@ export default function WinsScreen() {
 
         {err && <div style={{ color: "red" }}>{err}</div>}
       </div>
-
-      <ConfettiBurst show={celebrate} />
     </div>
   );
 }
 
-/* ---------- Tiny component ---------- */
+/* ---------- Tiny components ---------- */
 function KpiCard({ title, count, onClick, active }:{
   title: string; count: number; onClick: ()=>void; active: boolean;
 }) {
@@ -663,5 +745,80 @@ function KpiCard({ title, count, onClick, active }:{
       <div className="section-title">{title}</div>
       <div style={{ fontSize: 28, fontWeight: 700 }}>{count}</div>
     </button>
+  );
+}
+
+function ProgressRing({ value, target }: { value: number; target: number }) {
+  const pct = Math.max(0, Math.min(1, value / Math.max(1, target)));
+  const size = 120, stroke = 10;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const dash = c * pct;
+
+  return (
+    <div aria-label={`Daily progress ${Math.round(pct * 100)}%`} role="img"
+         style={{ width: size, height: size, position: "relative" }}>
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={size/2} cy={size/2} r={r} stroke="var(--muted)" strokeWidth={stroke} fill="none" opacity={0.25}/>
+        <circle cx={size/2} cy={size/2} r={r} stroke="currentColor" strokeWidth={stroke} fill="none"
+                strokeDasharray={`${dash} ${c - dash}`} strokeLinecap="round"/>
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", textAlign: "center" }}>
+        <div style={{ fontSize: 22, fontWeight: 800 }}>{value}</div>
+        <div className="muted" style={{ fontSize: 12 }}>/ {target}</div>
+      </div>
+    </div>
+  );
+}
+
+function StreakChip({ current, best }:{ current:number; best:number }) {
+  return (
+    <div aria-label={`Current streak ${current} days, best ${best} days`}
+      style={{
+        display:"inline-flex", alignItems:"center", gap:8,
+        padding:"8px 12px", borderRadius:999, border:"1px solid var(--border)",
+        background:"var(--card)", fontWeight:700
+      }}>
+      {current} <span className="muted" style={{ fontWeight:500 }}>(best {best})</span>
+    </div>
+  );
+}
+
+function Heatmap28({ dailyScores, target }:{ dailyScores:Record<string,number>; target:number }) {
+  const days = buildCalendarWindow(28);
+  return (
+    <div style={{ display:"grid", gridTemplateColumns:"repeat(7, 12px)", gap:4 }}>
+      {days.map(d => {
+        const met = (dailyScores[d] || 0) >= target;
+        return (
+          <div key={d} title={`${d}: ${Math.round(dailyScores[d] || 0)} / ${target}`}
+               style={{
+                 width:12, height:12, borderRadius:2,
+                 background: met ? "hsl(var(--pastel-hsl))" : "var(--muted-bg)",
+                 border: "1px solid var(--border)"
+               }}/>
+        );
+      })}
+    </div>
+  );
+}
+
+function Row({ label, value, tag }:{ label:string; value:string|number; tag?:string }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, alignItems: "baseline" }}>
+      <div className="muted">{label}</div>
+      <div style={{ fontVariantNumeric: "tabular-nums", fontWeight: 800 }}>{value}</div>
+      {tag ? (
+        <div style={{
+          border: "1px solid var(--border)",
+          borderRadius: 999,
+          padding: "2px 8px",
+          fontSize: 12,
+          fontWeight: 700
+        }}>
+          {tag}
+        </div>
+      ) : null}
+    </div>
   );
 }
