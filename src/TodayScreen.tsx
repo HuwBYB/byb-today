@@ -94,6 +94,8 @@ const LS_NAME = "byb:display_name";
 const LS_POOL = "byb:display_pool";
 const LS_ROTATE = "byb:rotate_nicknames";
 const LS_LAST_VISIT = "byb:last_visit_ms";
+/* NEW: Coach local storage key */
+const LS_COACH = "byb:coach"; // 'hype' | 'warm' | 'calm'
 
 function pickGreetingLabel(): string {
   try {
@@ -561,6 +563,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
   const [savingProfile, setSavingProfile] = useState(false);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
+  // NEW: Coach selector state
+  type Coach = "hype" | "warm" | "calm";
+  const [coachInput, setCoachInput] = useState<Coach>("hype");
+
   // Boost modal
   const [boostOpen, setBoostOpen] = useState(false);
   const [boostLine, setBoostLine] = useState<string>("");
@@ -962,7 +968,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
 
         {(greetName || greetLine) && (
-          <div style={{ fontWeight: 700, wordBreak: "break-word" }}>
+          <div style={{ fontWeight: 700, wordBreak: "word-break", wordBreak: "break-word" as any }}>
             {greeting} {missed ? "💜" : ""}
           </div>
         )}
@@ -1303,6 +1309,55 @@ export default function TodayScreen({ externalDateISO }: Props) {
                 <button className="btn-soft" onClick={() => setConfirmResetOpen(true)} title="Clear all nicknames">Reset</button>
               </div>
 
+              {/* ===== NEW: Coach Selector ===== */}
+              <div>
+                <div className="section-title" style={{ marginBottom: 6 }}>Voice & Support Style</div>
+                <div role="radiogroup" aria-label="Voice & Support Style" style={{ display: "grid", gap: 8 }}>
+                  <label style={{ display: "grid", gap: 4, border: "1px solid var(--border)", borderRadius: 12, padding: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <input
+                        type="radio"
+                        name="coach"
+                        value="hype"
+                        checked={coachInput === "hype"}
+                        onChange={() => setCoachInput("hype")}
+                      />
+                      <div style={{ fontWeight: 700 }}>Hype Coach</div>
+                    </div>
+                    <div className="muted">Direct, positive energy. “Way to go, champ.”</div>
+                  </label>
+
+                  <label style={{ display: "grid", gap: 4, border: "1px solid var(--border)", borderRadius: 12, padding: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <input
+                        type="radio"
+                        name="coach"
+                        value="warm"
+                        checked={coachInput === "warm"}
+                        onChange={() => setCoachInput("warm")}
+                      />
+                      <div style={{ fontWeight: 700 }}>Warm Mentor</div>
+                    </div>
+                    <div className="muted">Supportive and encouraging. “You should be proud of yourself.”</div>
+                  </label>
+
+                  <label style={{ display: "grid", gap: 4, border: "1px solid var(--border)", borderRadius: 12, padding: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <input
+                        type="radio"
+                        name="coach"
+                        value="calm"
+                        checked={coachInput === "calm"}
+                        onChange={() => setCoachInput("calm")}
+                      />
+                      <div style={{ fontWeight: 700 }}>Calm Supporter</div>
+                    </div>
+                    <div className="muted">Gentle and grounded. “Your effort was enough.”</div>
+                  </label>
+                </div>
+              </div>
+              {/* ===== /Coach Selector ===== */}
+
               {err && <div style={{ color: "red" }}>{err}</div>}
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
@@ -1419,6 +1474,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         if (!error && data) {
           const dn = (data as any).display_name ?? localStorage.getItem(LS_NAME) ?? "";
           setNameInput(dn);
+
           const raw = (data as any).display_pool;
           if (Array.isArray(raw)) {
             setPoolInput(raw as string[]);
@@ -1427,14 +1483,27 @@ export default function TodayScreen({ externalDateISO }: Props) {
           } else {
             try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
           }
+
+          // NEW: load coach from DB if exists, else from localStorage
+          const coachDb = (data as any).coach;
+          if (coachDb === "hype" || coachDb === "warm" || coachDb === "calm") {
+            setCoachInput(coachDb);
+          } else {
+            const localCoach = (localStorage.getItem(LS_COACH) || "hype") as "hype" | "warm" | "calm";
+            setCoachInput(localCoach);
+          }
           return;
         }
       }
       setNameInput(localStorage.getItem(LS_NAME) || "");
       try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
+      const localCoach = (localStorage.getItem(LS_COACH) || "hype") as "hype" | "warm" | "calm";
+      setCoachInput(localCoach);
     } catch {
       setNameInput(localStorage.getItem(LS_NAME) || "");
       try { setPoolInput(JSON.parse(localStorage.getItem(LS_POOL) || "[]")); } catch { setPoolInput([]); }
+      const localCoach = (localStorage.getItem(LS_COACH) || "hype") as "hype" | "warm" | "calm";
+      setCoachInput(localCoach);
     }
   }
 
@@ -1456,16 +1525,18 @@ export default function TodayScreen({ externalDateISO }: Props) {
   async function saveProfile() {
     const cleanName = (nameInput || "").trim() || "Friend";
     const chosenPool = poolInput || [];
+    const chosenCoach = coachInput || "hype";
     setSavingProfile(true);
     let wroteToDB = false;
     try {
       if (userId) {
         try {
-          const payload: any = { display_name: cleanName, display_pool: chosenPool, onboarding_done: true };
+          const payload: any = { display_name: cleanName, display_pool: chosenPool, onboarding_done: true, coach: chosenCoach };
           const { error } = await supabase.from("profiles").upsert({ id: userId, ...payload }).select().limit(1);
           if (error) throw error;
           wroteToDB = true;
         } catch {
+          // fallback if display_pool or coach column doesn't exist
           const { error: e2 } = await supabase
             .from("profiles")
             .upsert({ id: userId, display_name: cleanName, onboarding_done: true })
@@ -1477,9 +1548,10 @@ export default function TodayScreen({ externalDateISO }: Props) {
       try {
         localStorage.setItem(LS_NAME, cleanName);
         localStorage.setItem(LS_POOL, JSON.stringify(chosenPool));
+        localStorage.setItem(LS_COACH, chosenCoach);
       } catch {}
       setGreetName(pickGreetingLabel());
-      toast.show(wroteToDB ? "Profile updated" : "Saved locally (no display_pool column)");
+      toast.show(wroteToDB ? "Profile updated" : "Saved (local)");
       setProfileOpen(false);
     } catch (e: any) {
       setErr(e.message || String(e));
@@ -1489,5 +1561,3 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 }
-
-
