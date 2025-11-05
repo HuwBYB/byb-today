@@ -968,7 +968,7 @@ export default function TodayScreen({ externalDateISO }: Props) {
         </div>
 
         {(greetName || greetLine) && (
-          <div style={{ fontWeight: 700, wordBreak: "word-break", wordBreak: "break-word" as any }}>
+        <div style={{ fontWeight: 700, overflowWrap: "anywhere" }}>
             {greeting} {missed ? "💜" : ""}
           </div>
         )}
@@ -1561,3 +1561,4 @@ export default function TodayScreen({ externalDateISO }: Props) {
     }
   }
 }
+
