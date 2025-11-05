@@ -570,6 +570,14 @@ export default function ExerciseDiaryScreen() {
     if (s) loadItems(s.id);
   }
 
+// click handler for RECENT: open that exact session (not just the date)
+function openRecentSession(s: Session) {
+  desiredSessionIdRef.current = s.id;
+  setDateISO(s.session_date);
+  setJustReopened(false); // viewing a historical session is not a "reopen"
+}
+
+  
   async function cancelCurrentSession() {
     if (!session) return;
 
