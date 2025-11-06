@@ -1,4 +1,4 @@
-// ExerciseDiaryScreen.tsx
+// src/ExerciseDiaryScreen.tsx
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 
@@ -52,6 +52,26 @@ type TemplateRow = {
   };
 };
 
+/* ---------- NEW: Snapshot + Totals types ---------- */
+type SnapshotRow = {
+  user_id: string;
+  session_id: number;
+  session_date: string; // YYYY-MM-DD
+  exercise_title: string;
+  set_index: number; // 1-based
+  weight_kg: number | null;
+  reps: number | null;
+  duration_sec: number | null;
+};
+
+type DayTotals = {
+  sets: number;
+  reps: number;
+  kg: number;
+  cardio_sec: number;
+  cardio_km: number;
+};
+
 /* ---------- Date + math helpers ---------- */
 function totalsFromSets(sets: WSet[]) {
   let reps = 0;
@@ -63,6 +83,28 @@ function totalsFromSets(sets: WSet[]) {
     if (r > 0 && w > 0) kg += r * w;
   }
   return { reps, kg: Math.round(kg) };
+}
+
+function calcSessionTotals(items: Item[], setsByItem: Record<number, WSet[]>): DayTotals {
+  let sets = 0, reps = 0, kg = 0, cardio_sec = 0, cardio_km = 0;
+  for (const it of items) {
+    if (it.kind === "weights") {
+      const list = setsByItem[it.id] || [];
+      sets += list.length;
+      for (const s of list) {
+        const r = Number(s.reps || 0);
+        const w = Number(s.weight_kg || 0);
+        if (r > 0) reps += r;
+        if (r > 0 && w > 0) kg += Math.round(r * w);
+      }
+    } else {
+      const sec = Number(it.metrics?.duration_sec || 0);
+      cardio_sec += sec > 0 ? sec : 0;
+      const km = Number(it.metrics?.distance_km || 0);
+      cardio_km += km > 0 ? km : 0;
+    }
+  }
+  return { sets, reps, kg, cardio_sec, cardio_km };
 }
 
 function toISO(d: Date) {
@@ -461,16 +503,15 @@ export default function ExerciseDiaryScreen() {
     } else setSetsByItem({});
   }
 
+  // Recent: lift the 21-day cap so you can scroll more history
   async function loadRecent() {
     if (!userId) return;
-    const since = new Date();
-    since.setDate(since.getDate() - 21);
     const { data, error } = await supabase
       .from("workout_sessions")
       .select("*")
       .eq("user_id", userId)
-      .gte("session_date", toISO(since))
-      .order("session_date", { ascending: false });
+      .order("session_date", { ascending: false })
+      .limit(200); // adjust higher/lower as you like
     if (error) {
       setErr(error.message);
       setRecent([]);
@@ -570,14 +611,13 @@ export default function ExerciseDiaryScreen() {
     if (s) loadItems(s.id);
   }
 
-// click handler for RECENT: open that exact session (not just the date)
-function openRecentSession(s: Session) {
-  desiredSessionIdRef.current = s.id;
-  setDateISO(s.session_date);
-  setJustReopened(false); // viewing a historical session is not a "reopen"
-}
+  // click handler for RECENT: open that exact session (not just the date)
+  function openRecentSession(s: Session) {
+    desiredSessionIdRef.current = s.id;
+    setDateISO(s.session_date);
+    setJustReopened(false); // viewing a historical session is not a "reopen"
+  }
 
-  
   async function cancelCurrentSession() {
     if (!session) return;
 
@@ -655,6 +695,69 @@ function openRecentSession(s: Session) {
       }
     } catch (e: any) {
       setErr(e.message || String(e));
+    }
+  }
+
+  /* ---------- NEW: Day totals upsert + Snapshot ---------- */
+  async function upsertDayTotalsFor(dateStr: string) {
+    if (!userId) return;
+
+    // Calculate from current UI state (items & setsByItem are fresh)
+    const totals = calcSessionTotals(items, setsByItem);
+
+    try {
+      const { data: existing } = await supabase
+        .from("workout_day_totals")
+        .select("sets,reps,kg,cardio_sec,cardio_km")
+        .eq("user_id", userId)
+        .eq("day", dateStr)
+        .single();
+
+      const merged: DayTotals = existing
+        ? {
+            sets: existing.sets + totals.sets,
+            reps: existing.reps + totals.reps,
+            kg: existing.kg + totals.kg,
+            cardio_sec: existing.cardio_sec + totals.cardio_sec,
+            cardio_km: Number(existing.cardio_km) + totals.cardio_km,
+          }
+        : totals;
+
+      await supabase.from("workout_day_totals").upsert({
+        user_id: userId,
+        day: dateStr,
+        ...merged,
+        updated_at: new Date().toISOString(),
+      } as any);
+    } catch {
+      // table may not exist yet; ignore silently
+    }
+  }
+
+  async function snapshotSessionHistory() {
+    if (!userId || !session) return;
+    try {
+      const rows: SnapshotRow[] = [];
+      for (const it of items) {
+        if (it.kind !== "weights") continue;
+        const list = (setsByItem[it.id] || []).slice().sort((a, b) => a.set_number - b.set_number);
+        list.forEach((s, idx) => {
+          rows.push({
+            user_id: userId,
+            session_id: session.id,
+            session_date: session.session_date,
+            exercise_title: it.title || "Untitled",
+            set_index: idx + 1,
+            weight_kg: s.weight_kg ?? null,
+            reps: s.reps ?? null,
+            duration_sec: s.duration_sec ?? null,
+          });
+        });
+      }
+      if (rows.length === 0) return;
+      await supabase.from("workout_history_snapshots").insert(rows as any);
+    } catch {
+      // table may not exist; ignore
     }
   }
 
@@ -766,9 +869,15 @@ function openRecentSession(s: Session) {
       }
     }
 
+    // Update local state
     setSession((prev) => (prev ? { ...prev, name: cleanName || prev.name, notes: finalNotes } : prev));
     setRecent((prev) => prev.map((r) => (r.id === session.id ? { ...r, name: cleanName || r.name, notes: finalNotes } : r)));
 
+    // ✅ NEW: snapshot + day totals BEFORE finishing
+    await snapshotSessionHistory();    // capture long-term history
+    await upsertDayTotalsFor(dateISO); // push today's numbers so Big Wins includes them immediately
+
+    // Finish UI + streak
     markLocalFinished();
     await ensureWinForSession();
     setConfirmCompleteOpen(false);
@@ -829,7 +938,7 @@ function openRecentSession(s: Session) {
 
     const withoutOldSession = base.replace(/^\s*Session:\s*.*$(\r?\n)?/m, "").trim();
 
-    const withSession = name?.trim() ? `Session: ${name.trim()}\n${withoutOldSession}`.trim() : withoutOldSession || "";
+    const withSession = name?.trim ? `Session: ${name.trim()}\n${withoutOldSession}`.trim() : withoutOldSession || "";
 
     const hasDuration = /(^|\n)\s*Duration:\s*/m.test(withSession);
     const finalNotes = hasDuration
@@ -925,9 +1034,42 @@ function openRecentSession(s: Session) {
   }
 
   /* ----- History (per exercise title) ----- */
-  async function loadPrevForItem(it: Item, limit = 3) {
+  async function loadPrevForItem(it: Item, limit = 8) {
     if (!userId) return;
     setLoadingPrevFor((prev) => ({ ...prev, [it.id]: true }));
+    try {
+      // Try snapshot table first
+      const { data: snaps, error: snapErr } = await supabase
+        .from("workout_history_snapshots")
+        .select("session_date, set_index, weight_kg, reps, duration_sec")
+        .eq("user_id", userId)
+        .ilike("exercise_title", it.title || "")
+        .order("session_date", { ascending: false })
+        .limit(limit * 30);
+
+      if (!snapErr && snaps && snaps.length) {
+        // group by date
+        const map = new Map<string, PrevEntry>();
+        for (const r of snaps as any[]) {
+          const key = r.session_date;
+          if (!map.has(key)) map.set(key, { date: key, sets: [] });
+          map.get(key)!.sets.push({
+            weight_kg: r.weight_kg ?? null,
+            reps: r.reps ?? null,
+            duration_sec: r.duration_sec ?? null,
+          });
+        }
+        const entries = Array.from(map.values())
+          .sort((a, b) => b.date.localeCompare(a.date))
+          .slice(0, limit);
+        setPrevByItem((prev) => ({ ...prev, [it.id]: entries }));
+        return;
+      }
+    } catch {
+      // fall through to legacy path
+    }
+
+    // Fallback to legacy 3-table join
     try {
       const { data: itemsRows, error: iErr } = await supabase
         .from("workout_items")
@@ -937,7 +1079,8 @@ function openRecentSession(s: Session) {
         .ilike("title", it.title)
         .neq("id", it.id)
         .order("id", { ascending: false })
-        .limit(limit * 4);
+        .limit(limit * 6);
+
       if (iErr) throw iErr;
 
       const prevItems = (itemsRows as Array<{ id: number; session_id: number }>) || [];
@@ -963,10 +1106,7 @@ function openRecentSession(s: Session) {
       (sessRows || []).forEach((s: any) => {
         idToDate[s.id] = s.session_date;
       });
-      const idToSets: Record<
-        number,
-        Array<{ weight_kg: number | null; reps: number | null; duration_sec: number | null }>
-      > = {};
+      const idToSets: Record<number, PrevEntry["sets"]> = {};
       ((setsRows as any[]) || []).forEach((s) => {
         (idToSets[s.item_id] ||= []).push({
           weight_kg: s.weight_kg ?? null,
@@ -992,7 +1132,7 @@ function openRecentSession(s: Session) {
   function toggleHistory(it: Item) {
     setOpenHistoryFor((prev) => {
       const nextOpen = !prev[it.id];
-      if (nextOpen && !prevByItem[it.id]) loadPrevForItem(it, 3);
+      if (nextOpen && !prevByItem[it.id]) loadPrevForItem(it, 8);
       return { ...prev, [it.id]: nextOpen };
     });
   }
@@ -1216,13 +1356,41 @@ function openRecentSession(s: Session) {
   const [modalEntries, setModalEntries] = useState<PrevEntry[]>([]);
   const [modalLoading, setModalLoading] = useState(false);
 
-  async function openHistoryModal(it: Item, limit = 10) {
+  async function openHistoryModal(it: Item, limit = 30) {
     if (!userId) return;
     setModalOpen(true);
     setModalTitle(it.title);
     setModalForItemId(it.id);
     setModalLoading(true);
     try {
+      // Prefer snapshots (fast, deeper history)
+      const { data: snaps, error: snapErr } = await supabase
+        .from("workout_history_snapshots")
+        .select("session_date, set_index, weight_kg, reps, duration_sec")
+        .eq("user_id", userId)
+        .ilike("exercise_title", it.title || "")
+        .order("session_date", { ascending: false })
+        .limit(limit * 30);
+
+      if (!snapErr && snaps && snaps.length) {
+        const map = new Map<string, PrevEntry>();
+        for (const r of snaps as any[]) {
+          const key = r.session_date;
+          if (!map.has(key)) map.set(key, { date: key, sets: [] });
+          map.get(key)!.sets.push({
+            weight_kg: r.weight_kg ?? null,
+            reps: r.reps ?? null,
+            duration_sec: r.duration_sec ?? null,
+          });
+        }
+        const entries = Array.from(map.values())
+          .sort((a, b) => b.date.localeCompare(a.date))
+          .slice(0, limit);
+        setModalEntries(entries);
+        return;
+      }
+
+      // Fallback to legacy
       const { data: itemsRows, error: iErr } = await supabase
         .from("workout_items")
         .select("id, session_id")
@@ -1231,7 +1399,7 @@ function openRecentSession(s: Session) {
         .ilike("title", it.title)
         .neq("id", it.id)
         .order("id", { ascending: false })
-        .limit(limit * 4);
+        .limit(limit * 6);
       if (iErr) throw iErr;
 
       const prevItems = (itemsRows as Array<{ id: number; session_id: number }>) || [];
@@ -1257,10 +1425,7 @@ function openRecentSession(s: Session) {
       (sessRows || []).forEach((s: any) => {
         idToDate[s.id] = s.session_date;
       });
-      const idToSets: Record<
-        number,
-        Array<{ weight_kg: number | null; reps: number | null; duration_sec: number | null }>
-      > = {};
+      const idToSets: Record<number, PrevEntry["sets"]> = {};
       ((setsRows as any[]) || []).forEach((s) => {
         (idToSets[s.item_id] ||= []).push({
           weight_kg: s.weight_kg ?? null,
@@ -1310,7 +1475,7 @@ function openRecentSession(s: Session) {
             <b>Template inserted.</b> You can undo if this was accidental.
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn-soft" onClick={undoLastTemplateInsert}>
+            <button className="btn-soft" onClick={undoBanner ? undoLastTemplateInsert : undefined}>
               Undo
             </button>
             <button className="btn-soft" onClick={() => setUndoBanner(null)}>
@@ -1861,7 +2026,7 @@ function WeightsEditor({
   flush: (id?: number) => void;
   onAddExercise: (name: string) => void;
 }) {
-  // ✅ per-exercise totals live inside the editor
+  // per-exercise totals inside the editor
   const totals = totalsFromSets(sets);
 
   return (
