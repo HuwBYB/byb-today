@@ -105,8 +105,7 @@ type BalanceStats = {
 };
 
 function computeBalance(goals: Goal[]): BalanceStats {
-  // Treat both archived and cancelled as inactive
-  const active = goals.filter(g => !["archived"].includes((g.status || "active")));
+  const active = goals.filter(g => (g.status || "active") !== "archived");
   const total = active.length;
   const counts: Record<CatKey, number> = {
     business: 0, financial: 0, health: 0, personal: 0, relationships: 0
@@ -170,6 +169,10 @@ export default function GoalsScreen() {
   const [confirmFuture, setConfirmFuture] = useState(false);
   const [confirmAll, setConfirmAll] = useState(false);
 
+  // Brand notice modal (replaces window.alert)
+  const [notice, setNotice] = useState<string | null>(null);
+  const notify = (message: string) => setNotice(message);
+
   /* ----- auth ----- */
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
@@ -187,6 +190,7 @@ export default function GoalsScreen() {
       .from("goals")
       .select("id,user_id,title,category,category_color,start_date,target_date,status,halfway_date,halfway_note")
       .eq("user_id", userId)
+      .neq("status", "archived")
       .order("created_at", { ascending: false });
     if (error) { setErr(error.message); setGoals([]); return; }
     setGoals(data as Goal[]);
@@ -359,9 +363,9 @@ export default function GoalsScreen() {
       const { error: rerr } = await supabase.rpc("reseed_big_goal_steps", { p_goal_id: selected.id });
       if (rerr) {
         const n = await clientReseedTasksForGoal(selected.id, isoToday());
-        alert(`Steps saved. ${n ?? 0} task(s) reseeded for this goal.`);
+        notify(`Steps saved. ${n ?? 0} task(s) reseeded for this goal.`);
       } else {
-        alert("Steps saved and future tasks updated.");
+        notify("Steps saved and future tasks updated.");
       }
     } catch (e:any) {
       setErr(e.message || String(e));
@@ -438,7 +442,7 @@ export default function GoalsScreen() {
     if (!selected || !userId) return;
     setCancelBusy(true); setErr(null);
     try {
-      // Mark as cancelled (use 'archived' if you prefer)
+      // Mark as archived (schema-safe)
       const { error: ge } = await supabase
         .from("goals")
         .update({ status: "archived" })
@@ -458,7 +462,7 @@ export default function GoalsScreen() {
       setSelected(null);
       setConfirmFuture(false); setConfirmAll(false);
       await loadGoals();
-      alert(`Goal cancelled and ${scope === "all" ? "all" : "future"} tasks removed.`);
+      notify(`Goal cancelled and ${scope === "all" ? "all" : "future"} tasks removed.`);
     } catch (e:any) {
       setErr(e.message || String(e));
     } finally {
@@ -533,20 +537,18 @@ export default function GoalsScreen() {
           {goals.length === 0 && <li className="muted">No goals yet.</li>}
           {goals.map(g => {
             const k = normalizeCat(g.category);
-            const isCancelled = (g.status || "active") === "archived";
             return (
               <li key={g.id} className="item">
                 <button style={{ width: "100%", textAlign: "left", display: "flex", gap: 8, alignItems: "center" }} onClick={() => openGoal(g)}>
                   <span
                     title={labelOf(k)}
-                    style={{ width: 10, height: 10, borderRadius: 999, background: g.category_color || colorOf(k), border: "1px solid #d1d5db", flex: "0 0 auto", opacity: isCancelled ? 0.45 : 1 }}
+                    style={{ width: 10, height: 10, borderRadius: 999, background: g.category_color || colorOf(k), border: "1px solid #d1d5db", flex: "0 0 auto" }}
                   />
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, opacity: isCancelled ? 0.6 : 1 }}>{g.title}</div>
+                    <div style={{ fontWeight: 600 }}>{g.title}</div>
                     <div className="muted">
                       {labelOf(k)}
                       {g.target_date ? ` • target ${g.target_date}` : ""}
-                      {isCancelled && <span style={{ marginLeft: 8, padding: "1px 6px", borderRadius: 999, background: "#fee2e2", color: "#991b1b", fontSize: 12 }}>Cancelled</span>}
                     </div>
                   </div>
                 </button>
@@ -610,7 +612,6 @@ export default function GoalsScreen() {
                 <div className="muted">
                   {selected.start_date || "-"} → {selected.target_date || "-"}
                   {" • "}{labelOf(normalizeCat(selected.category))}
-                  {(selected.status||"active")==="archived" && <span style={{ marginLeft: 8, padding: "1px 6px", borderRadius: 999, background: "#fee2e2", color: "#991b1b", fontSize: 12 }}>Cancelled</span>}
                 </div>
               </div>
             </div>
@@ -628,7 +629,7 @@ export default function GoalsScreen() {
                     <span style={{ width: 16, height: 16, borderRadius: 999, background: colorOf(editCat), border: "1px solid #ccc" }} />
                   </div>
                 </label>
-                <button className="btn-primary" onClick={saveGoalDetails} disabled={busy || (selected.status||"active")==="archived"} style={{ borderRadius: 8, marginLeft: "auto" }}>
+                <button className="btn-primary" onClick={saveGoalDetails} disabled={busy} style={{ borderRadius: 8, marginLeft: "auto" }}>
                   {busy ? "Saving…" : "Save details"}
                 </button>
               </div>
@@ -652,7 +653,7 @@ export default function GoalsScreen() {
                       t.setDate(t.getDate() + 1);
                       const from = toISO(t);
                       const n = await clientReseedTasksForGoal(selected!.id, from);
-                      alert(`Extended ${n ?? 0} task(s) from halfway to target.`);
+                      notify(`Extended ${n ?? 0} task(s) from halfway to target.`);
                     } catch (e:any) {
                       setErr(e.message || String(e));
                     } finally {
@@ -704,7 +705,7 @@ export default function GoalsScreen() {
 
               {err && <div style={{ color: "red", marginTop: 8 }}>{err}</div>}
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button onClick={saveSteps} disabled={busy || (selected.status||"active")==="archived"} className="btn-primary" style={{ borderRadius: 8 }}>
+                <button onClick={saveSteps} disabled={busy} className="btn-primary" style={{ borderRadius: 8 }}>
                   {busy ? "Saving…" : "Save steps & reseed"}
                 </button>
               </div>
@@ -750,7 +751,7 @@ export default function GoalsScreen() {
       <Modal open={showCancel} onClose={() => !cancelBusy && setShowCancel(false)} title="Cancel this goal?">
         <div style={{ display: "grid", gap: 12 }}>
           <p>
-            This will mark <strong>{selected?.title}</strong> as <em>cancelled</em> and remove its tasks. Choose how aggressively to clean up.
+            This will mark <strong>{selected?.title}</strong> as <em>archived</em> and remove its tasks. Choose how aggressively to clean up.
           </p>
 
           {/* Option A */}
@@ -817,6 +818,21 @@ export default function GoalsScreen() {
             <button onClick={() => setShowCancel(false)} disabled={cancelBusy} style={{ borderRadius: 8 }}>
               Close
             </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Brand Notice modal (replaces window.alert) */}
+      <Modal open={!!notice} onClose={() => setNotice(null)} title="Best You Blueprint">
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {/* If you have an asset, swap src to your logo path */}
+            {/* <img src="/byb-logo.svg" alt="BYB" width={28} height={28} /> */}
+            <strong>BYB</strong>
+          </div>
+          <p style={{ margin: 0 }}>{notice}</p>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button onClick={() => setNotice(null)} className="btn-primary" style={{ borderRadius: 8 }}>OK</button>
           </div>
         </div>
       </Modal>
