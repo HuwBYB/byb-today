@@ -231,7 +231,7 @@ function parseWeightsFromMetrics(metricsIn: Record<string, unknown> | string | n
   let totalReps = 0;
   let totalWeightKg = 0;
 
-  // 0) direct precomputed fields
+  // direct precomputed fields
   const tReps = Number((metrics as any).total_reps ?? (metrics as any).reps_total ?? 0);
   const tW = Number(
     (metrics as any).total_weight_kg ??
@@ -242,12 +242,11 @@ function parseWeightsFromMetrics(metricsIn: Record<string, unknown> | string | n
   if (tReps) totalReps += tReps;
   if (tW) totalWeightKg += tW;
 
-  // 1) sets: [{ reps, weight_kg|weight|kg|load|load_kg }]
+  // sets: [{ reps, weight_kg|weight|kg|load|load_kg }] or tuples
   const sets = (metrics as any).sets as Array<any> | undefined;
   if (Array.isArray(sets)) {
     for (const s of sets) {
       if (Array.isArray(s)) {
-        // Allow tuple-like [reps, weight]
         const r = Number(s[0]) || 0;
         const w = Number(s[1]) || 0;
         totalReps += r;
@@ -255,37 +254,20 @@ function parseWeightsFromMetrics(metricsIn: Record<string, unknown> | string | n
         continue;
       }
       const r = Number(s?.reps ?? s?.r ?? 0) || 0;
-      const w =
-        Number(
-          s?.weight_kg ??
-          s?.weight ??
-          s?.kg ??
-          s?.load_kg ??
-          s?.load ??
-          s?.w ??
-          0
-        ) || 0;
+      const w = Number(s?.weight_kg ?? s?.weight ?? s?.kg ?? s?.load_kg ?? s?.load ?? s?.w ?? 0) || 0;
       totalReps += r;
       totalWeightKg += r * w;
     }
   }
 
-  // 2) single lift summary: reps|r, weight variants
+  // single lift summary
   const reps = Number((metrics as any).reps ?? (metrics as any).r ?? 0) || 0;
-  const wkg = Number(
-    (metrics as any).weight_kg ??
-    (metrics as any).weight ??
-    (metrics as any).kg ??
-    (metrics as any).load_kg ??
-    (metrics as any).load ??
-    0
-  ) || 0;
+  const wkg = Number((metrics as any).weight_kg ?? (metrics as any).weight ?? (metrics as any).kg ?? (metrics as any).load_kg ?? (metrics as any).load ?? 0) || 0;
   if (reps && wkg) {
     totalReps += reps;
     totalWeightKg += reps * wkg;
   }
 
-  // avoid negatives / NaN
   totalReps = Math.max(0, Math.round(totalReps));
   totalWeightKg = Math.max(0, totalWeightKg);
 
@@ -324,7 +306,7 @@ export default function WinsScreen() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const [period, setPeriod] = useState<PeriodKey>("today");
+  const [period, setPeriod] = useState<PeriodKey>("today");  // ✅ single definition
   const [active, setActive] = useState<BucketKey>("all");
 
   const [coach, setCoach] = useState<Coach>("hype");
@@ -340,7 +322,7 @@ export default function WinsScreen() {
   /* Load data */
   useEffect(() => { if (userId) loadAll(); }, [userId]);
 
-  // Refresh when user comes back to this tab/window (after logging a workout elsewhere)
+  // Refresh when returning to tab/window
   useEffect(() => {
     if (!userId) return;
     const onFocus = () => loadAll();
@@ -357,7 +339,7 @@ export default function WinsScreen() {
     if (!userId) return;
     setLoading(true); setErr(null);
     try {
-      // Coach voice from profiles (fallback to localStorage)
+      // Coach voice
       try {
         const { data: prof, error: pErr } = await supabase.from("profiles").select("coach").eq("id", userId).maybeSingle();
         if (!pErr && prof && (prof as any).coach) {
@@ -372,7 +354,7 @@ export default function WinsScreen() {
         setCoach(local);
       }
 
-      // 1) done tasks — exclude the auto exercise-session task (exercise is shown via sessions)
+      // 1) done tasks — exclude auto exercise-session task
       const { data: tdata, error: terror } = await supabase
         .from("tasks")
         .select("id,user_id,title,status,completed_at,due_date,priority,source,category,category_color")
@@ -392,7 +374,7 @@ export default function WinsScreen() {
       const sess = (sData as WorkoutSession[]) || [];
       setSessions(sess);
 
-      // items per session (coerce metrics to objects)
+      // items per session (coerce metrics)
       let itemsBySession: Record<number, WorkoutItemRow[]> = {};
       if (sess.length) {
         const sessionIds = sess.map(s => s.id);
@@ -441,8 +423,6 @@ export default function WinsScreen() {
   }
 
   /* Filtered by period */
-  const [period, setPeriodState] = useState<PeriodKey>("today");
-  const setPeriod = (p: PeriodKey) => setPeriodState(p);
   const filtered = useMemo(() => {
     const tasksInPeriod = doneTasks.filter(t => {
       const d = dateOnlyLocal(t.completed_at);
@@ -466,7 +446,7 @@ export default function WinsScreen() {
   const counts = {
     general: generalTasks.length,
     big: bigGoalTasks.length,
-    exercise: filtered.sessionsInPeriod.length,   // sessions
+    exercise: filtered.sessionsInPeriod.length,
     gratitude: filtered.gratsInPeriod.length,
     all:
       generalTasks.length +
@@ -551,9 +531,8 @@ export default function WinsScreen() {
     Object.values(dailyAgg).forEach(row => { m[row.dateISO] = scoreForDay(row); });
     return m;
   }, [dailyAgg]);
-  const todayScore = dailyScores[toISO(new Date())] || 0;
+
   const DAILY_TARGET = DAILY_TARGET_DEFAULT;
-  const streak = useMemo(() => calcStreak(dailyScores, DAILY_TARGET), [dailyScores]);
 
   /* -------------------- Weekly Summary + Weights -------------------- */
   const weekRange = useMemo(() => {
@@ -593,7 +572,7 @@ export default function WinsScreen() {
       workoutsLogged: workouts.length,
       gratitudes: gratCount,
       totalReps,
-      totalWeightKg: Math.round(totalWeightKg), // integer kg for clean display
+      totalWeightKg: Math.round(totalWeightKg),
     };
   }, [doneTasks, sessions, sessionItems, grats, weekRange.startISO, weekRange.endISO]);
 
