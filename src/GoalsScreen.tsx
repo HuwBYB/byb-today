@@ -1,4 +1,3 @@
-// src/GoalsScreen.tsx
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./lib/supabaseClient";
 import BigGoalWizard from "./BigGoalWizard";
@@ -106,7 +105,8 @@ type BalanceStats = {
 };
 
 function computeBalance(goals: Goal[]): BalanceStats {
-  const active = goals.filter(g => (g.status || "active") !== "archived");
+  // Treat both archived and cancelled as inactive
+  const active = goals.filter(g => !["archived","cancelled"].includes((g.status || "active")));
   const total = active.length;
   const counts: Record<CatKey, number> = {
     business: 0, financial: 0, health: 0, personal: 0, relationships: 0
@@ -163,6 +163,12 @@ export default function GoalsScreen() {
 
   // Help modal
   const [showHelp, setShowHelp] = useState(false);
+
+  // Cancel modal + safety confirmations
+  const [showCancel, setShowCancel] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [confirmFuture, setConfirmFuture] = useState(false);
+  const [confirmAll, setConfirmAll] = useState(false);
 
   /* ----- auth ----- */
   useEffect(() => {
@@ -299,6 +305,7 @@ export default function GoalsScreen() {
   /* ----- open selected goal (load steps + auto-extend if needed) ----- */
   async function openGoal(g: Goal) {
     setSelected(g);
+    setConfirmFuture(false); setConfirmAll(false); // reset confirmations
     const { data, error } = await supabase
       .from("big_goal_steps")
       .select("*")
@@ -412,6 +419,53 @@ export default function GoalsScreen() {
     }
   }
 
+  /* ----- cancel helpers ----- */
+  async function deleteTasksForGoal(goalId: number, scope: "all" | "future") {
+    if (!userId) return;
+    let query = supabase
+      .from("tasks")
+      .delete()
+      .eq("user_id", userId)
+      .eq("goal_id", goalId);
+    if (scope === "future") {
+      query = query.gte("due_date", isoToday());
+    }
+    const { error } = await query;
+    if (error) throw error;
+  }
+
+  async function cancelGoal(scope: "all" | "future") {
+    if (!selected || !userId) return;
+    setCancelBusy(true); setErr(null);
+    try {
+      // Mark as cancelled (use 'archived' if you prefer)
+      const { error: ge } = await supabase
+        .from("goals")
+        .update({ status: "cancelled" })
+        .eq("id", selected.id);
+      if (ge) throw ge;
+
+      // Remove tasks tied to this goal
+      await deleteTasksForGoal(selected.id, scope);
+
+      // Deactivate steps so reseeding cannot occur
+      await supabase
+        .from("big_goal_steps")
+        .update({ active: false })
+        .eq("goal_id", selected.id);
+
+      setShowCancel(false);
+      setSelected(null);
+      setConfirmFuture(false); setConfirmAll(false);
+      await loadGoals();
+      alert(`Goal cancelled and ${scope === "all" ? "all" : "future"} tasks removed.`);
+    } catch (e:any) {
+      setErr(e.message || String(e));
+    } finally {
+      setCancelBusy(false);
+    }
+  }
+
   // compute balance directly (no useMemo)
   const balance = computeBalance(goals);
 
@@ -479,18 +533,20 @@ export default function GoalsScreen() {
           {goals.length === 0 && <li className="muted">No goals yet.</li>}
           {goals.map(g => {
             const k = normalizeCat(g.category);
+            const isCancelled = (g.status || "active") === "cancelled";
             return (
               <li key={g.id} className="item">
                 <button style={{ width: "100%", textAlign: "left", display: "flex", gap: 8, alignItems: "center" }} onClick={() => openGoal(g)}>
                   <span
                     title={labelOf(k)}
-                    style={{ width: 10, height: 10, borderRadius: 999, background: g.category_color || colorOf(k), border: "1px solid #d1d5db", flex: "0 0 auto" }}
+                    style={{ width: 10, height: 10, borderRadius: 999, background: g.category_color || colorOf(k), border: "1px solid #d1d5db", flex: "0 0 auto", opacity: isCancelled ? 0.45 : 1 }}
                   />
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600 }}>{g.title}</div>
+                    <div style={{ fontWeight: 600, opacity: isCancelled ? 0.6 : 1 }}>{g.title}</div>
                     <div className="muted">
                       {labelOf(k)}
                       {g.target_date ? ` • target ${g.target_date}` : ""}
+                      {isCancelled && <span style={{ marginLeft: 8, padding: "1px 6px", borderRadius: 999, background: "#fee2e2", color: "#991b1b", fontSize: 12 }}>Cancelled</span>}
                     </div>
                   </div>
                 </button>
@@ -554,6 +610,7 @@ export default function GoalsScreen() {
                 <div className="muted">
                   {selected.start_date || "-"} → {selected.target_date || "-"}
                   {" • "}{labelOf(normalizeCat(selected.category))}
+                  {(selected.status||"active")==="cancelled" && <span style={{ marginLeft: 8, padding: "1px 6px", borderRadius: 999, background: "#fee2e2", color: "#991b1b", fontSize: 12 }}>Cancelled</span>}
                 </div>
               </div>
             </div>
@@ -571,7 +628,7 @@ export default function GoalsScreen() {
                     <span style={{ width: 16, height: 16, borderRadius: 999, background: colorOf(editCat), border: "1px solid #ccc" }} />
                   </div>
                 </label>
-                <button className="btn-primary" onClick={saveGoalDetails} disabled={busy} style={{ borderRadius: 8, marginLeft: "auto" }}>
+                <button className="btn-primary" onClick={saveGoalDetails} disabled={busy || (selected.status||"active")==="cancelled"} style={{ borderRadius: 8, marginLeft: "auto" }}>
                   {busy ? "Saving…" : "Save details"}
                 </button>
               </div>
@@ -647,8 +704,25 @@ export default function GoalsScreen() {
 
               {err && <div style={{ color: "red", marginTop: 8 }}>{err}</div>}
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button onClick={saveSteps} disabled={busy} className="btn-primary" style={{ borderRadius: 8 }}>
+                <button onClick={saveSteps} disabled={busy || (selected.status||"active")==="cancelled"} className="btn-primary" style={{ borderRadius: 8 }}>
                   {busy ? "Saving…" : "Save steps & reseed"}
+                </button>
+              </div>
+            </div>
+
+            {/* Danger zone — Cancel goal */}
+            <div style={{ border: "1px solid #fee2e2", background: "#fff1f2", borderRadius: 10, padding: 12 }}>
+              <div className="section-title" style={{ color: "#991b1b" }}>Danger zone</div>
+              <p className="muted" style={{ marginTop: 6 }}>
+                Cancel this goal and remove its tasks. You can remove only future tasks, or everything.
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => { setShowCancel(true); setConfirmFuture(false); setConfirmAll(false); }}
+                  style={{ borderRadius: 8, background: "#ef4444", color: "#fff", padding: "6px 10px" }}
+                  aria-haspopup="dialog"
+                >
+                  Cancel goal…
                 </button>
               </div>
             </div>
@@ -669,6 +743,81 @@ export default function GoalsScreen() {
             <li>Turn it into monthly / weekly / daily commitments</li>
             <li>Work on it every day</li>
           </ol>
+        </div>
+      </Modal>
+
+      {/* Cancel modal with two-step "Are you sure?" */}
+      <Modal open={showCancel} onClose={() => !cancelBusy && setShowCancel(false)} title="Cancel this goal?">
+        <div style={{ display: "grid", gap: 12 }}>
+          <p>
+            This will mark <strong>{selected?.title}</strong> as <em>cancelled</em> and remove its tasks. Choose how aggressively to clean up.
+          </p>
+
+          {/* Option A */}
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10 }}>
+            <div style={{ fontWeight: 600 }}>Option A — Remove <em>future</em> tasks only</div>
+            <div className="muted">Keeps past tasks for your history, removes anything due from today onward.</div>
+            {!confirmFuture ? (
+              <button
+                onClick={() => setConfirmFuture(true)}
+                disabled={cancelBusy}
+                className="btn-primary"
+                style={{ borderRadius: 8, marginTop: 8 }}
+              >
+                Cancel goal & remove future tasks
+              </button>
+            ) : (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+                <span className="muted">Are you sure?</span>
+                <button
+                  onClick={() => cancelGoal("future")}
+                  disabled={cancelBusy}
+                  className="btn-primary"
+                  style={{ borderRadius: 8 }}
+                >
+                  Yes, do it
+                </button>
+                <button onClick={() => setConfirmFuture(false)} disabled={cancelBusy} style={{ borderRadius: 8 }}>
+                  No, go back
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Option B */}
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10 }}>
+            <div style={{ fontWeight: 600 }}>Option B — Remove <em>all</em> tasks</div>
+            <div className="muted">Deletes every task linked to this goal (past and future).</div>
+            {!confirmAll ? (
+              <button
+                onClick={() => setConfirmAll(true)}
+                disabled={cancelBusy}
+                style={{ borderRadius: 8, background: "#ef4444", color: "#fff", padding: "6px 10px", marginTop: 8 }}
+              >
+                Cancel goal & delete all tasks
+              </button>
+            ) : (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+                <span className="muted">Are you absolutely sure?</span>
+                <button
+                  onClick={() => cancelGoal("all")}
+                  disabled={cancelBusy}
+                  style={{ borderRadius: 8, background: "#ef4444", color: "#fff", padding: "6px 10px" }}
+                >
+                  Yes, delete everything
+                </button>
+                <button onClick={() => setConfirmAll(false)} disabled={cancelBusy} style={{ borderRadius: 8 }}>
+                  No, go back
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <button onClick={() => setShowCancel(false)} disabled={cancelBusy} style={{ borderRadius: 8 }}>
+              Close
+            </button>
+          </div>
         </div>
       </Modal>
     </div>
