@@ -20,8 +20,8 @@ type TaskRow = {
 type GratRow = {
   id: number;
   user_id: string;
-  entry_date: string;   // 'YYYY-MM-DD'
-  item_index: number;   // 1..8
+  entry_date: string; // 'YYYY-MM-DD'
+  item_index: number; // 1..8
   content: string;
 };
 
@@ -36,7 +36,7 @@ type WorkoutItemRow = {
   id: number;
   user_id: string;
   session_id: number;
-  kind: string;         // 'weights' | 'run' | ...
+  kind: string; // 'weights' | 'run' | ...
   title: string;
   metrics: Record<string, unknown>;
   session_date: string; // joined from workout_sessions
@@ -45,7 +45,12 @@ type WorkoutItemRow = {
 type BucketKey = "all" | "general" | "big" | "exercise" | "gratitude";
 type PeriodKey = "today" | "week" | "month" | "year" | "all";
 
-type Detail = { id: string; label: string; date: string; kind?: string };
+type Detail = {
+  id: string;
+  label: string;
+  date: string;
+  kind?: string;
+};
 
 /* ---------- Helpers (dates) ---------- */
 function toISO(d: Date) {
@@ -107,10 +112,10 @@ function isBigGoal(t: TaskRow) {
 /* ---------- Periods ---------- */
 const PERIODS: Array<{ key: PeriodKey; label: string }> = [
   { key: "today", label: "Today" },
-  { key: "week",  label: "This week" },
+  { key: "week", label: "This week" },
   { key: "month", label: "This month" },
-  { key: "year",  label: "This year" },
-  { key: "all",   label: "All time" },
+  { key: "year", label: "This year" },
+  { key: "all", label: "All time" },
 ];
 
 function inPeriodISO(dateISO: string, period: PeriodKey) {
@@ -215,61 +220,31 @@ function calcStreak(dailyScores: Record<string, number>, target: number) {
   return { current, best };
 }
 
-/* ---------- Metrics coercion + Weights parsing ---------- */
-function coerceMetrics(m: unknown): Record<string, unknown> {
-  if (!m) return {};
-  if (typeof m === "object") return m as Record<string, unknown>;
-  if (typeof m === "string") {
-    try { return JSON.parse(m) as Record<string, unknown>; } catch { return {}; }
-  }
-  return {};
-}
-
+/* ---------- Weights parsing (still used for labels) ---------- */
 type WeightsTotals = { totalReps: number; totalWeightKg: number };
-function parseWeightsFromMetrics(metricsIn: Record<string, unknown> | string | null | undefined): WeightsTotals {
-  const metrics = coerceMetrics(metricsIn as any);
+function parseWeightsFromMetrics(metrics: Record<string, unknown> | null | undefined): WeightsTotals {
+  if (!metrics) return { totalReps: 0, totalWeightKg: 0 };
   let totalReps = 0;
   let totalWeightKg = 0;
-
-  // direct precomputed fields
-  const tReps = Number((metrics as any).total_reps ?? (metrics as any).reps_total ?? 0);
-  const tW = Number(
-    (metrics as any).total_weight_kg ??
-    (metrics as any).total_weight ??
-    (metrics as any).total_tonnage_kg ??
-    0
-  );
-  if (tReps) totalReps += tReps;
-  if (tW) totalWeightKg += tW;
-
-  // sets: [{ reps, weight_kg|weight|kg|load|load_kg }] or tuples
   const sets = (metrics as any).sets as Array<any> | undefined;
   if (Array.isArray(sets)) {
     for (const s of sets) {
-      if (Array.isArray(s)) {
-        const r = Number(s[0]) || 0;
-        const w = Number(s[1]) || 0;
-        totalReps += r;
-        totalWeightKg += r * w;
-        continue;
-      }
-      const r = Number(s?.reps ?? s?.r ?? 0) || 0;
-      const w = Number(s?.weight_kg ?? s?.weight ?? s?.kg ?? s?.load_kg ?? s?.load ?? s?.w ?? 0) || 0;
+      const r = Number(s?.reps) || 0;
+      const w = Number(s?.weight_kg ?? s?.weight) || 0;
       totalReps += r;
       totalWeightKg += r * w;
     }
   }
-
-  // single lift summary
-  const reps = Number((metrics as any).reps ?? (metrics as any).r ?? 0) || 0;
-  const wkg = Number((metrics as any).weight_kg ?? (metrics as any).weight ?? (metrics as any).kg ?? (metrics as any).load_kg ?? (metrics as any).load ?? 0) || 0;
+  const reps = Number((metrics as any).reps) || 0;
+  const wkg = Number((metrics as any).weight_kg ?? (metrics as any).weight) || 0;
   if (reps && wkg) {
     totalReps += reps;
     totalWeightKg += reps * wkg;
   }
-
-  totalReps = Math.max(0, Math.round(totalReps));
-  totalWeightKg = Math.max(0, totalWeightKg);
+  const tReps = Number((metrics as any).total_reps) || 0;
+  const tW = Number((metrics as any).total_weight_kg ?? (metrics as any).total_weight) || 0;
+  if (tReps) totalReps += tReps;
+  if (tW) totalWeightKg += tW;
 
   return { totalReps, totalWeightKg };
 }
@@ -303,10 +278,13 @@ export default function WinsScreen() {
   const [sessionItems, setSessionItems] = useState<Record<number, WorkoutItemRow[]>>({});
   const [grats, setGrats] = useState<GratRow[]>([]);
 
+  // NEW: weights totals computed from workout_sets per session id
+  const [weightsBySession, setWeightsBySession] = useState<Record<number, { reps: number; kg: number }>>({});
+
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const [period, setPeriod] = useState<PeriodKey>("today");  // ✅ single definition
+  const [period, setPeriod] = useState<PeriodKey>("today");
   const [active, setActive] = useState<BucketKey>("all");
 
   const [coach, setCoach] = useState<Coach>("hype");
@@ -321,19 +299,6 @@ export default function WinsScreen() {
 
   /* Load data */
   useEffect(() => { if (userId) loadAll(); }, [userId]);
-
-  // Refresh when returning to tab/window
-  useEffect(() => {
-    if (!userId) return;
-    const onFocus = () => loadAll();
-    const onVis = () => { if (document.visibilityState === "visible") loadAll(); };
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVis);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVis);
-    };
-  }, [userId]);
 
   async function loadAll() {
     if (!userId) return;
@@ -354,7 +319,7 @@ export default function WinsScreen() {
         setCoach(local);
       }
 
-      // 1) done tasks — exclude auto exercise-session task
+      // 1) done tasks — exclude the auto exercise-session task (exercise shown via sessions)
       const { data: tdata, error: terror } = await supabase
         .from("tasks")
         .select("id,user_id,title,status,completed_at,due_date,priority,source,category,category_color")
@@ -374,8 +339,9 @@ export default function WinsScreen() {
       const sess = (sData as WorkoutSession[]) || [];
       setSessions(sess);
 
-      // items per session (coerce metrics)
+      // items per session (for labels + later totals)
       let itemsBySession: Record<number, WorkoutItemRow[]> = {};
+      let weightItemIds: number[] = [];
       if (sess.length) {
         const sessionIds = sess.map(s => s.id);
         const { data: iData, error: iErr } = await supabase
@@ -390,18 +356,51 @@ export default function WinsScreen() {
 
         ((iData as any[]) || []).forEach(i => {
           const row: WorkoutItemRow = {
-            id: i.id,
-            user_id: i.user_id,
-            session_id: i.session_id,
-            kind: i.kind,
-            title: i.title,
-            metrics: coerceMetrics(i.metrics),
-            session_date: idToDate[i.session_id] || ""
+            id: i.id, user_id: i.user_id, session_id: i.session_id,
+            kind: i.kind, title: i.title, metrics: i.metrics || {}, session_date: idToDate[i.session_id] || ""
           };
           (itemsBySession[row.session_id] ||= []).push(row);
+          if (row.kind === "weights") weightItemIds.push(row.id);
         });
       }
       setSessionItems(itemsBySession);
+
+      // ✅ NEW: fetch workout_sets and aggregate reps/kg per session
+      async function loadWeightsTotals() {
+        if (weightItemIds.length === 0) { setWeightsBySession({}); return; }
+        // Supabase's .in has a param size limit; chunk if needed
+        const chunk = <T,>(arr: T[], size: number) => Array.from({ length: Math.ceil(arr.length / size) }, (_, i) => arr.slice(i * size, i * size + size));
+        const chunks = chunk(weightItemIds, 1000);
+        let allRows: Array<{ item_id: number; reps: number | null; weight_kg: number | null }> = [];
+        for (const ids of chunks) {
+          const { data, error } = await supabase
+            .from("workout_sets")
+            .select("item_id,reps,weight_kg")
+            .in("item_id", ids);
+          if (error) throw error;
+          allRows = allRows.concat((data as any[]) || []);
+        }
+
+        // map item_id -> session_id
+        const itemToSession: Record<number, number> = {};
+        Object.values(itemsBySession).flat().forEach(it => { itemToSession[it.id] = it.session_id; });
+
+        const bySession: Record<number, { reps: number; kg: number }> = {};
+        allRows.forEach(r => {
+          const sid = itemToSession[r.item_id];
+          if (!sid) return;
+          const rr = Number(r.reps || 0);
+          const ww = Number(r.weight_kg || 0);
+          const incKg = rr > 0 && ww > 0 ? rr * ww : 0;
+          const acc = (bySession[sid] ||= { reps: 0, kg: 0 });
+          if (rr > 0) acc.reps += rr;
+          if (incKg > 0) acc.kg += incKg;
+        });
+
+        Object.values(bySession).forEach(t => t.kg = Math.round(t.kg));
+        setWeightsBySession(bySession);
+      }
+      await loadWeightsTotals();
 
       // 3) gratitudes
       const { data: gdata, error: gerror } = await supabase
@@ -416,7 +415,7 @@ export default function WinsScreen() {
       setGrats((gdata as GratRow[]) || []);
     } catch (e: any) {
       setErr(e.message || String(e));
-      setDoneTasks([]); setSessions([]); setSessionItems({}); setGrats([]);
+      setDoneTasks([]); setSessions([]); setSessionItems({}); setGrats([]); setWeightsBySession({});
     } finally {
       setLoading(false);
     }
@@ -446,7 +445,7 @@ export default function WinsScreen() {
   const counts = {
     general: generalTasks.length,
     big: bigGoalTasks.length,
-    exercise: filtered.sessionsInPeriod.length,
+    exercise: filtered.sessionsInPeriod.length,   // sessions
     gratitude: filtered.gratsInPeriod.length,
     all:
       generalTasks.length +
@@ -479,9 +478,8 @@ export default function WinsScreen() {
 
   /* Labels & details */
   function labelWorkoutItem(i: WorkoutItemRow) {
-    const m = coerceMetrics(i.metrics);
-    const d = Number((m as any).distance_km) || undefined;
-    const sec = Number((m as any).duration_sec) || undefined;
+    const d = i.metrics?.["distance_km"] as number | undefined;
+    const sec = i.metrics?.["duration_sec"] as number | undefined;
     const bits: string[] = [];
     bits.push(i.title || i.kind);
     if (d) bits.push(`${d} km`);
@@ -501,21 +499,47 @@ export default function WinsScreen() {
 
   function listFor(k: BucketKey): Detail[] {
     if (k === "general") {
-      return generalTasks.map(t => ({ id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "" }));
+      return generalTasks.map(t => ({
+        id: `task-${t.id}`,
+        label: t.title,
+        date: dateOnlyLocal(t.completed_at) || ""
+      }));
     }
     if (k === "big") {
-      return bigGoalTasks.map(t => ({ id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "" }));
+      return bigGoalTasks.map(t => ({
+        id: `task-${t.id}`,
+        label: t.title,
+        date: dateOnlyLocal(t.completed_at) || ""
+      }));
     }
     if (k === "exercise") {
-      return filtered.sessionsInPeriod.map(s => ({ id: `sess-${s.id}`, label: labelSession(s), date: s.session_date, kind: "Session" }));
+      return filtered.sessionsInPeriod.map(s => ({
+        id: `sess-${s.id}`,
+        label: labelSession(s),
+        date: s.session_date,
+        kind: "Session"
+      }));
     }
     if (k === "gratitude") {
-      return filtered.gratsInPeriod.map(g => ({ id: `grat-${g.id}`, label: g.content || "(empty)", date: g.entry_date }));
+      return filtered.gratsInPeriod.map(g => ({
+        id: `grat-${g.id}`,
+        label: g.content || "(empty)",
+        date: g.entry_date
+      }));
     }
-    const a = generalTasks.map(t => ({ id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "General" }));
-    const b = bigGoalTasks.map(t => ({ id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "Big goal" }));
-    const c = filtered.sessionsInPeriod.map(s => ({ id: `sess-${s.id}`, label: labelSession(s), date: s.session_date, kind: "Exercise" }));
-    const d = filtered.gratsInPeriod.map(g => ({ id: `grat-${g.id}`, label: g.content || "(empty)", date: g.entry_date, kind: "Gratitude" }));
+    // all
+    const a = generalTasks.map(t => ({
+      id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "General"
+    }));
+    const b = bigGoalTasks.map(t => ({
+      id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "Big goal"
+    }));
+    const c = filtered.sessionsInPeriod.map(s => ({
+      id: `sess-${s.id}`, label: labelSession(s), date: s.session_date, kind: "Exercise"
+    }));
+    const d = filtered.gratsInPeriod.map(g => ({
+      id: `grat-${g.id}`, label: g.content || "(empty)", date: g.entry_date, kind: "Gratitude"
+    }));
     return [...a, ...b, ...c, ...d].sort((x, y) => y.date.localeCompare(x.date));
   }
 
@@ -531,8 +555,9 @@ export default function WinsScreen() {
     Object.values(dailyAgg).forEach(row => { m[row.dateISO] = scoreForDay(row); });
     return m;
   }, [dailyAgg]);
-
+  const todayScore = dailyScores[toISO(new Date())] || 0;
   const DAILY_TARGET = DAILY_TARGET_DEFAULT;
+  const streak = useMemo(() => calcStreak(dailyScores, DAILY_TARGET), [dailyScores]);
 
   /* -------------------- Weekly Summary + Weights -------------------- */
   const weekRange = useMemo(() => {
@@ -552,18 +577,12 @@ export default function WinsScreen() {
     const workouts = sessions.filter(s => inISOInclusive(s.session_date, weekRange.startISO, weekRange.endISO));
     const gratCount = grats.filter(g => inISOInclusive(g.entry_date, weekRange.startISO, weekRange.endISO)).length;
 
-    // Weights totals (robust parsing)
+    // ✅ Weights totals from workout_sets (via weightsBySession)
     let totalReps = 0;
     let totalWeightKg = 0;
     for (const sess of workouts) {
-      const items = sessionItems[sess.id] || [];
-      for (const it of items) {
-        if (it.kind === "weights") {
-          const { totalReps: r, totalWeightKg: w } = parseWeightsFromMetrics(it.metrics);
-          totalReps += r;
-          totalWeightKg += w;
-        }
-      }
+      const t = weightsBySession[sess.id];
+      if (t) { totalReps += t.reps; totalWeightKg += t.kg; }
     }
 
     return {
@@ -574,22 +593,18 @@ export default function WinsScreen() {
       totalReps,
       totalWeightKg: Math.round(totalWeightKg),
     };
-  }, [doneTasks, sessions, sessionItems, grats, weekRange.startISO, weekRange.endISO]);
+  }, [doneTasks, sessions, grats, weekRange.startISO, weekRange.endISO, weightsBySession]);
 
   // Historical best (any previous week)
   const weeklyPB = useMemo(() => {
     if (!sessions.length) return { isPB: false, prevBestKg: 0 };
+    // Build totals per weekKey across all time from weightsBySession
     const perWeek: Record<string, number> = {};
-    for (const sess of sessions) {
-      const wk = weekKeyOf(sess.session_date);
-      const items = sessionItems[sess.id] || [];
-      let sum = 0;
-      for (const it of items) {
-        if (it.kind === "weights") {
-          sum += parseWeightsFromMetrics(it.metrics).totalWeightKg;
-        }
-      }
-      perWeek[wk] = (perWeek[wk] || 0) + sum;
+    for (const s of sessions) {
+      const wk = weekKeyOf(s.session_date);
+      const t = weightsBySession[s.id];
+      const add = t?.kg ?? 0;
+      perWeek[wk] = (perWeek[wk] || 0) + add;
     }
     const thisKey = weekKeyOf(weekRange.startISO);
     const thisWeek = Math.round(perWeek[thisKey] || 0);
@@ -599,7 +614,7 @@ export default function WinsScreen() {
         .reduce((m, [, v]) => (v > m ? v : m), 0)
     );
     return { isPB: thisWeek > prevBest && thisWeek > 0, prevBestKg: prevBest };
-  }, [sessions, sessionItems, weekRange.startISO]);
+  }, [sessions, weightsBySession, weekRange.startISO]);
 
   const praise = useMemo(() => praiseLine(coach, weeklyPB.isPB), [coach, weeklyPB.isPB]);
 
@@ -620,14 +635,26 @@ export default function WinsScreen() {
             <Row label="Tasks completed" value={weekly.tasksCompleted} />
             <Row label="Workouts logged" value={weekly.workoutsLogged} />
             <Row label="Gratitudes" value={weekly.gratitudes} />
-            <Row label="Total weight lifted this week" value={`${weekly.totalWeightKg} kg`} tag={weeklyPB.isPB ? "Personal Best" : undefined} />
+            <Row
+              label="Total weight lifted this week"
+              value={`${weekly.totalWeightKg} kg`}
+              tag={weeklyPB.isPB ? "Personal Best" : undefined}
+            />
             <Row label="Total reps completed this week" value={weekly.totalReps} />
           </div>
           <div style={{ marginTop: 6, fontWeight: 700 }}>{praise}</div>
         </div>
 
         {/* Daily Score + Streak + Heatmap */}
-        <ScoreAndHeat dailyScores={dailyScores} dailyTarget={DAILY_TARGET} />
+        <div className="card" style={{ display:"grid", gridTemplateColumns:"auto 1fr", gap:12, alignItems:"center" }}>
+          <ProgressRing value={Math.round(todayScore)} target={DAILY_TARGET} />
+          <div style={{ display:"grid", gap:8 }}>
+            <div className="section-title">Today’s Score</div>
+            <StreakChip current={streak.current} best={streak.best} />
+            <Heatmap28 dailyScores={dailyScores} target={DAILY_TARGET} />
+            <div className="muted" style={{ fontSize:12 }}>Hit {DAILY_TARGET} points to keep your streak alive.</div>
+          </div>
+        </div>
 
         {/* At a glance */}
         <div className="card" style={{ display: "grid", gap: 10 }}>
@@ -671,7 +698,36 @@ export default function WinsScreen() {
         </div>
 
         {/* Details */}
-        <DetailsCard titleKey={active} periodLabel={PERIODS.find(p => p.key === period)?.label || ""} details={details} />
+        <div className="card" style={{ display: "grid", gap: 10 }}>
+          <h2 style={{ margin: 0 }}>
+            {(active === "all" ? "All wins" :
+              active === "general" ? "General tasks" :
+              active === "big" ? "Big goal tasks" :
+              active === "exercise" ? "Exercise sessions" :
+              "Gratitudes")
+            } · {PERIODS.find(p => p.key === period)?.label || ""}
+          </h2>
+
+          {details.length === 0 ? (
+            <div className="muted">Nothing here yet.</div>
+          ) : (
+            <ul className="list">
+              {details.slice(0, 120).map(item => (
+                <li key={item.id} className="item" style={{ alignItems: "center" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {item.kind ? `[${item.kind}] ` : ""}{item.label}
+                    </div>
+                    <div className="muted" style={{ marginTop: 4 }}>{item.date}</div>
+                  </div>
+                </li>
+              ))}
+              {details.length > 120 && (
+                <li className="muted">…and {details.length - 120} more</li>
+              )}
+            </ul>
+          )}
+        </div>
 
         {/* Actions */}
         <div className="card" style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
@@ -687,7 +743,9 @@ export default function WinsScreen() {
 }
 
 /* ---------- Tiny components ---------- */
-function KpiCard({ title, count, onClick, active }:{ title: string; count: number; onClick: ()=>void; active: boolean; }) {
+function KpiCard({ title, count, onClick, active }:{
+  title: string; count: number; onClick: ()=>void; active: boolean;
+}) {
   return (
     <button
       onClick={onClick}
@@ -717,7 +775,8 @@ function ProgressRing({ value, target }: { value: number; target: number }) {
   const dash = c * pct;
 
   return (
-    <div aria-label={`Daily progress ${Math.round(pct * 100)}%`} role="img" style={{ width: size, height: size, position: "relative" }}>
+    <div aria-label={`Daily progress ${Math.round(pct * 100)}%`} role="img"
+         style={{ width: size, height: size, position: "relative" }}>
       <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
         <circle cx={size/2} cy={size/2} r={r} stroke="var(--muted)" strokeWidth={stroke} fill="none" opacity={0.25}/>
         <circle cx={size/2} cy={size/2} r={r} stroke="currentColor" strokeWidth={stroke} fill="none"
@@ -769,60 +828,16 @@ function Row({ label, value, tag }:{ label:string; value:string|number; tag?:str
       <div className="muted">{label}</div>
       <div style={{ fontVariantNumeric: "tabular-nums", fontWeight: 800 }}>{value}</div>
       {tag ? (
-        <div style={{ border: "1px solid var(--border)", borderRadius: 999, padding: "2px 8px", fontSize: 12, fontWeight: 700 }}>
+        <div style={{
+          border: "1px solid var(--border)",
+          borderRadius: 999,
+          padding: "2px 8px",
+          fontSize: 12,
+          fontWeight: 700
+        }}>
           {tag}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-/* Small composition to keep main component tidy */
-function ScoreAndHeat({ dailyScores, dailyTarget }:{ dailyScores:Record<string,number>; dailyTarget:number }) {
-  const todayScore = Math.round(dailyScores[toISO(new Date())] || 0);
-  const streak = useMemo(() => calcStreak(dailyScores, dailyTarget), [dailyScores, dailyTarget]);
-  return (
-    <div className="card" style={{ display:"grid", gridTemplateColumns:"auto 1fr", gap:12, alignItems:"center" }}>
-      <ProgressRing value={todayScore} target={dailyTarget} />
-      <div style={{ display:"grid", gap:8 }}>
-        <div className="section-title">Today’s Score</div>
-        <StreakChip current={streak.current} best={streak.best} />
-        <Heatmap28 dailyScores={dailyScores} target={dailyTarget} />
-        <div className="muted" style={{ fontSize:12 }}>Hit {dailyTarget} points to keep your streak alive.</div>
-      </div>
-    </div>
-  );
-}
-
-function DetailsCard({ titleKey, periodLabel, details }:{ titleKey:BucketKey; periodLabel:string; details:Detail[] }) {
-  return (
-    <div className="card" style={{ display: "grid", gap: 10 }}>
-      <h2 style={{ margin: 0 }}>
-        {(titleKey === "all" ? "All wins" :
-          titleKey === "general" ? "General tasks" :
-          titleKey === "big" ? "Big goal tasks" :
-          titleKey === "exercise" ? "Exercise sessions" :
-          "Gratitudes"
-        )} · {periodLabel}
-      </h2>
-
-      {details.length === 0 ? (
-        <div className="muted">Nothing here yet.</div>
-      ) : (
-        <ul className="list">
-          {details.slice(0, 120).map(item => (
-            <li key={item.id} className="item" style={{ alignItems: "center" }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {item.kind ? `[${item.kind}] ` : ""}{item.label}
-                </div>
-                <div className="muted" style={{ marginTop: 4 }}>{item.date}</div>
-              </div>
-            </li>
-          ))}
-          {details.length > 120 && <li className="muted">…and {details.length - 120} more</li>}
-        </ul>
-      )}
     </div>
   );
 }
