@@ -249,8 +249,11 @@ export default function WinsScreen() {
   const [sessionItems, setSessionItems] = useState<Record<number, WorkoutItemRow[]>>({});
   const [grats, setGrats] = useState<GratRow[]>([]);
 
-  // NEW: weights totals computed from workout_sets per session id
+  // per-session totals derived from workout_sets (fallback path)
   const [weightsBySession, setWeightsBySession] = useState<Record<number, { reps: number; kg: number }>>({});
+
+  // ✅ NEW: authoritative day totals for the current week
+  const [weekTotals, setWeekTotals] = useState<{ reps: number; kg: number } | null>(null);
 
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -336,7 +339,7 @@ export default function WinsScreen() {
       }
       setSessionItems(itemsBySession);
 
-      // ✅ NEW: fetch workout_sets and aggregate reps/kg per session
+      // Fallback path: parse workout_sets to compute totals-per-session
       async function loadWeightsTotals() {
         if (weightItemIds.length === 0) { setWeightsBySession({}); return; }
         const chunk = <T,>(arr: T[], size: number) =>
@@ -372,7 +375,26 @@ export default function WinsScreen() {
       }
       await loadWeightsTotals();
 
-      // 3) gratitudes
+      // ✅ 3) authoritative weekly totals from workout_day_totals
+      try {
+        const today = new Date();
+        const startISO = toISO(startOfWeekMonday(today));
+        const endISO = toISO(endOfWeekMonday(today));
+        const { data: wrows, error: werr } = await supabase
+          .from("workout_day_totals")
+          .select("day,reps,kg")
+          .eq("user_id", userId)
+          .gte("day", startISO)
+          .lte("day", endISO);
+        if (werr) throw werr;
+        const reps = (wrows || []).reduce((n: number, r: any) => n + (Number(r.reps) || 0), 0);
+        const kg = (wrows || []).reduce((n: number, r: any) => n + (Number(r.kg) || 0), 0);
+        setWeekTotals({ reps, kg: Math.round(kg) });
+      } catch {
+        setWeekTotals(null); // table may not exist yet; fallback will be used
+      }
+
+      // 4) gratitudes
       const { data: gdata, error: gerror } = await supabase
         .from("gratitude_entries")
         .select("id,user_id,entry_date,item_index,content")
@@ -385,7 +407,7 @@ export default function WinsScreen() {
       setGrats((gdata as GratRow[]) || []);
     } catch (e: any) {
       setErr(e.message || String(e));
-      setDoneTasks([]); setSessions([]); setSessionItems({}); setGrats([]); setWeightsBySession({});
+      setDoneTasks([]); setSessions([]); setSessionItems({}); setGrats([]); setWeightsBySession({}); setWeekTotals(null);
     } finally {
       setLoading(false);
     }
@@ -545,11 +567,19 @@ export default function WinsScreen() {
     const workouts = sessions.filter(s => inISOInclusive(s.session_date, weekRange.startISO, weekRange.endISO));
     const gratCount = grats.filter(g => inISOInclusive(g.entry_date, weekRange.startISO, weekRange.endISO)).length;
 
+    // Prefer authoritative day totals if available, otherwise fall back to computed session totals
     let totalReps = 0;
     let totalWeightKg = 0;
-    for (const sess of workouts) {
-      const t = weightsBySession[sess.id];
-      if (t) { totalReps += t.reps; totalWeightKg += t.kg; }
+
+    if (weekTotals) {
+      totalReps = weekTotals.reps;
+      totalWeightKg = weekTotals.kg;
+    } else {
+      for (const sess of workouts) {
+        const t = weightsBySession[sess.id];
+        if (t) { totalReps += t.reps; totalWeightKg += t.kg; }
+      }
+      totalWeightKg = Math.round(totalWeightKg);
     }
 
     return {
@@ -558,9 +588,9 @@ export default function WinsScreen() {
       workoutsLogged: workouts.length,
       gratitudes: gratCount,
       totalReps,
-      totalWeightKg: Math.round(totalWeightKg),
+      totalWeightKg,
     };
-  }, [doneTasks, sessions, grats, weekRange.startISO, weekRange.endISO, weightsBySession]);
+  }, [doneTasks, sessions, grats, weekRange.startISO, weekRange.endISO, weightsBySession, weekTotals]);
 
   const weeklyPB = useMemo(() => {
     if (!sessions.length) return { isPB: false, prevBestKg: 0 };
