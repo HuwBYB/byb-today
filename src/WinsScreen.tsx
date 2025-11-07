@@ -220,35 +220,6 @@ function calcStreak(dailyScores: Record<string, number>, target: number) {
   return { current, best };
 }
 
-/* ---------- Weights parsing (still used for labels) ---------- */
-type WeightsTotals = { totalReps: number; totalWeightKg: number };
-function parseWeightsFromMetrics(metrics: Record<string, unknown> | null | undefined): WeightsTotals {
-  if (!metrics) return { totalReps: 0, totalWeightKg: 0 };
-  let totalReps = 0;
-  let totalWeightKg = 0;
-  const sets = (metrics as any).sets as Array<any> | undefined;
-  if (Array.isArray(sets)) {
-    for (const s of sets) {
-      const r = Number(s?.reps) || 0;
-      const w = Number(s?.weight_kg ?? s?.weight) || 0;
-      totalReps += r;
-      totalWeightKg += r * w;
-    }
-  }
-  const reps = Number((metrics as any).reps) || 0;
-  const wkg = Number((metrics as any).weight_kg ?? (metrics as any).weight) || 0;
-  if (reps && wkg) {
-    totalReps += reps;
-    totalWeightKg += reps * wkg;
-  }
-  const tReps = Number((metrics as any).total_reps) || 0;
-  const tW = Number((metrics as any).total_weight_kg ?? (metrics as any).total_weight) || 0;
-  if (tReps) totalReps += tReps;
-  if (tW) totalWeightKg += tW;
-
-  return { totalReps, totalWeightKg };
-}
-
 /* ---------- Coach voice helpers ---------- */
 type Coach = "hype" | "warm" | "calm";
 const LS_COACH = "byb:coach";
@@ -319,7 +290,7 @@ export default function WinsScreen() {
         setCoach(local);
       }
 
-      // 1) done tasks — exclude the auto exercise-session task (exercise shown via sessions)
+      // 1) done tasks — exclude auto exercise-session task
       const { data: tdata, error: terror } = await supabase
         .from("tasks")
         .select("id,user_id,title,status,completed_at,due_date,priority,source,category,category_color")
@@ -339,7 +310,7 @@ export default function WinsScreen() {
       const sess = (sData as WorkoutSession[]) || [];
       setSessions(sess);
 
-      // items per session (for labels + later totals)
+      // items per session
       let itemsBySession: Record<number, WorkoutItemRow[]> = {};
       let weightItemIds: number[] = [];
       if (sess.length) {
@@ -368,8 +339,8 @@ export default function WinsScreen() {
       // ✅ NEW: fetch workout_sets and aggregate reps/kg per session
       async function loadWeightsTotals() {
         if (weightItemIds.length === 0) { setWeightsBySession({}); return; }
-        // Supabase's .in has a param size limit; chunk if needed
-        const chunk = <T,>(arr: T[], size: number) => Array.from({ length: Math.ceil(arr.length / size) }, (_, i) => arr.slice(i * size, i * size + size));
+        const chunk = <T,>(arr: T[], size: number) =>
+          Array.from({ length: Math.ceil(arr.length / size) }, (_, i) => arr.slice(i * size, i * size + size));
         const chunks = chunk(weightItemIds, 1000);
         let allRows: Array<{ item_id: number; reps: number | null; weight_kg: number | null }> = [];
         for (const ids of chunks) {
@@ -381,7 +352,6 @@ export default function WinsScreen() {
           allRows = allRows.concat((data as any[]) || []);
         }
 
-        // map item_id -> session_id
         const itemToSession: Record<number, number> = {};
         Object.values(itemsBySession).flat().forEach(it => { itemToSession[it.id] = it.session_id; });
 
@@ -397,7 +367,7 @@ export default function WinsScreen() {
           if (incKg > 0) acc.kg += incKg;
         });
 
-        Object.values(bySession).forEach(t => t.kg = Math.round(t.kg));
+        Object.values(bySession).forEach(t => (t.kg = Math.round(t.kg)));
         setWeightsBySession(bySession);
       }
       await loadWeightsTotals();
@@ -445,7 +415,7 @@ export default function WinsScreen() {
   const counts = {
     general: generalTasks.length,
     big: bigGoalTasks.length,
-    exercise: filtered.sessionsInPeriod.length,   // sessions
+    exercise: filtered.sessionsInPeriod.length,
     gratitude: filtered.gratsInPeriod.length,
     all:
       generalTasks.length +
@@ -527,7 +497,6 @@ export default function WinsScreen() {
         date: g.entry_date
       }));
     }
-    // all
     const a = generalTasks.map(t => ({
       id: `task-${t.id}`, label: t.title, date: dateOnlyLocal(t.completed_at) || "", kind: "General"
     }));
@@ -567,7 +536,6 @@ export default function WinsScreen() {
   }, []);
 
   const weekly = useMemo(() => {
-    // Counts
     const weekTasks = doneTasks.filter(t => {
       const d = dateOnlyLocal(t.completed_at);
       return d && inISOInclusive(d, weekRange.startISO, weekRange.endISO);
@@ -577,7 +545,6 @@ export default function WinsScreen() {
     const workouts = sessions.filter(s => inISOInclusive(s.session_date, weekRange.startISO, weekRange.endISO));
     const gratCount = grats.filter(g => inISOInclusive(g.entry_date, weekRange.startISO, weekRange.endISO)).length;
 
-    // ✅ Weights totals from workout_sets (via weightsBySession)
     let totalReps = 0;
     let totalWeightKg = 0;
     for (const sess of workouts) {
@@ -595,10 +562,8 @@ export default function WinsScreen() {
     };
   }, [doneTasks, sessions, grats, weekRange.startISO, weekRange.endISO, weightsBySession]);
 
-  // Historical best (any previous week)
   const weeklyPB = useMemo(() => {
     if (!sessions.length) return { isPB: false, prevBestKg: 0 };
-    // Build totals per weekKey across all time from weightsBySession
     const perWeek: Record<string, number> = {};
     for (const s of sessions) {
       const wk = weekKeyOf(s.session_date);
@@ -622,12 +587,10 @@ export default function WinsScreen() {
   return (
     <div className="page-wins" style={{ maxWidth: "100%", overflowX: "hidden" }}>
       <div className="container" style={{ display: "grid", gap: 12 }}>
-        {/* Header */}
         <div className="card">
           <h1 style={{ margin: 0 }}>Your Wins</h1>
         </div>
 
-        {/* Weekly Summary */}
         <div className="card" style={{ display: "grid", gap: 10 }}>
           <div className="section-title">Weekly Summary</div>
           <div style={{ display: "grid", gap: 6, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" }}>
@@ -645,7 +608,6 @@ export default function WinsScreen() {
           <div style={{ marginTop: 6, fontWeight: 700 }}>{praise}</div>
         </div>
 
-        {/* Daily Score + Streak + Heatmap */}
         <div className="card" style={{ display:"grid", gridTemplateColumns:"auto 1fr", gap:12, alignItems:"center" }}>
           <ProgressRing value={Math.round(todayScore)} target={DAILY_TARGET} />
           <div style={{ display:"grid", gap:8 }}>
@@ -656,7 +618,6 @@ export default function WinsScreen() {
           </div>
         </div>
 
-        {/* At a glance */}
         <div className="card" style={{ display: "grid", gap: 10 }}>
           <div className="section-title">At a glance</div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))", gap:8 }}>
@@ -688,7 +649,6 @@ export default function WinsScreen() {
           </div>
         </div>
 
-        {/* KPI cards */}
         <div className="wins-kpis" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10 }}>
           <KpiCard title="Everything"     count={counts.all}       active={active === "all"}       onClick={() => setActive("all")} />
           <KpiCard title="General tasks"  count={counts.general}   active={active === "general"}   onClick={() => setActive("general")} />
@@ -697,7 +657,6 @@ export default function WinsScreen() {
           <KpiCard title="Gratitudes"     count={counts.gratitude} active={active === "gratitude"} onClick={() => setActive("gratitude")} />
         </div>
 
-        {/* Details */}
         <div className="card" style={{ display: "grid", gap: 10 }}>
           <h2 style={{ margin: 0 }}>
             {(active === "all" ? "All wins" :
@@ -729,7 +688,6 @@ export default function WinsScreen() {
           )}
         </div>
 
-        {/* Actions */}
         <div className="card" style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button onClick={loadAll} disabled={loading} className="btn-primary" style={{ borderRadius: 8 }}>
             {loading ? "Refreshing…" : "Refresh data"}
