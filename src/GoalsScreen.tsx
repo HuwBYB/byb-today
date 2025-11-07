@@ -106,7 +106,7 @@ type BalanceStats = {
 
 function computeBalance(goals: Goal[]): BalanceStats {
   // Treat both archived and cancelled as inactive
-  const active = goals.filter(g => !["archived","cancelled"].includes((g.status || "active")));
+  const active = goals.filter(g => !["archived"].includes((g.status || "active")));
   const total = active.length;
   const counts: Record<CatKey, number> = {
     business: 0, financial: 0, health: 0, personal: 0, relationships: 0
@@ -441,7 +441,7 @@ export default function GoalsScreen() {
       // Mark as cancelled (use 'archived' if you prefer)
       const { error: ge } = await supabase
         .from("goals")
-        .update({ status: "cancelled" })
+        .update({ status: "archived" })
         .eq("id", selected.id);
       if (ge) throw ge;
 
@@ -533,7 +533,7 @@ export default function GoalsScreen() {
           {goals.length === 0 && <li className="muted">No goals yet.</li>}
           {goals.map(g => {
             const k = normalizeCat(g.category);
-            const isCancelled = (g.status || "active") === "cancelled";
+            const isCancelled = (g.status || "active") === "archived";
             return (
               <li key={g.id} className="item">
                 <button style={{ width: "100%", textAlign: "left", display: "flex", gap: 8, alignItems: "center" }} onClick={() => openGoal(g)}>
@@ -610,7 +610,7 @@ export default function GoalsScreen() {
                 <div className="muted">
                   {selected.start_date || "-"} → {selected.target_date || "-"}
                   {" • "}{labelOf(normalizeCat(selected.category))}
-                  {(selected.status||"active")==="cancelled" && <span style={{ marginLeft: 8, padding: "1px 6px", borderRadius: 999, background: "#fee2e2", color: "#991b1b", fontSize: 12 }}>Cancelled</span>}
+                  {(selected.status||"active")==="archived" && <span style={{ marginLeft: 8, padding: "1px 6px", borderRadius: 999, background: "#fee2e2", color: "#991b1b", fontSize: 12 }}>Cancelled</span>}
                 </div>
               </div>
             </div>
@@ -628,7 +628,7 @@ export default function GoalsScreen() {
                     <span style={{ width: 16, height: 16, borderRadius: 999, background: colorOf(editCat), border: "1px solid #ccc" }} />
                   </div>
                 </label>
-                <button className="btn-primary" onClick={saveGoalDetails} disabled={busy || (selected.status||"active")==="cancelled"} style={{ borderRadius: 8, marginLeft: "auto" }}>
+                <button className="btn-primary" onClick={saveGoalDetails} disabled={busy || (selected.status||"active")==="archived"} style={{ borderRadius: 8, marginLeft: "auto" }}>
                   {busy ? "Saving…" : "Save details"}
                 </button>
               </div>
@@ -704,7 +704,7 @@ export default function GoalsScreen() {
 
               {err && <div style={{ color: "red", marginTop: 8 }}>{err}</div>}
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button onClick={saveSteps} disabled={busy || (selected.status||"active")==="cancelled"} className="btn-primary" style={{ borderRadius: 8 }}>
+                <button onClick={saveSteps} disabled={busy || (selected.status||"active")==="archived"} className="btn-primary" style={{ borderRadius: 8 }}>
                   {busy ? "Saving…" : "Save steps & reseed"}
                 </button>
               </div>
