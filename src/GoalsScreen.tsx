@@ -3,7 +3,6 @@ import { supabase } from "./lib/supabaseClient";
 import BigGoalWizard from "./BigGoalWizard";
 
 // ✅ Use the central category module (TS) + keep CSS as side-effect.
-//    If GoalsScreen.tsx is not directly under src/, adjust the relative path.
 import {
   CATS,
   colorOf,
@@ -40,12 +39,12 @@ type Step = {
 
 /* ---------- Date helpers ---------- */
 function toISO(d: Date) {
-  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,"0"), dd = String(d.getDate()).padStart(2,"0");
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
-function fromISO(s: string) { const [y,m,d] = s.split("-").map(Number); return new Date(y,(m??1)-1,(d??1)); }
+function fromISO(s: string) { const [y, m, d] = s.split("-").map(Number); return new Date(y, (m ?? 1) - 1, (d ?? 1)); }
 function clampDay(d: Date) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
-function lastDayOfMonth(y:number,m0:number){ return new Date(y,m0+1,0).getDate(); }
+function lastDayOfMonth(y: number, m0: number) { return new Date(y, m0 + 1, 0).getDate(); }
 function addMonthsClamped(base: Date, months: number, anchorDay?: number) {
   const anchor = anchorDay ?? base.getDate();
   const y = base.getFullYear(), m = base.getMonth() + months;
@@ -59,9 +58,7 @@ function isoToday() {
 }
 
 /* ---------- Modal ---------- */
-function Modal({
-  open, onClose, title, children,
-}: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+function Modal({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -72,11 +69,9 @@ function Modal({
   if (!open) return null;
   return (
     <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 2000,
-               display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 720, width: "100%", background: "#fff", borderRadius: 12,
-                 boxShadow: "0 10px 30px rgba(0,0,0,0.2)", padding: 20 }}>
+        style={{ maxWidth: 720, width: "100%", background: "#fff", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,0.2)", padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
           <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
           <button ref={closeRef} onClick={onClose} aria-label="Close" title="Close" style={{ borderRadius: 8 }}>✕</button>
@@ -88,39 +83,21 @@ function Modal({
 }
 
 /* ---------- Balance helpers ---------- */
-const PROMPTS_BY_CAT: Record<CatKey, string[]> = {
-  business:      ["Ship a portfolio case study", "Book 5 sales calls/week", "Launch a new offering"],
-  financial:     ["Build a 3-month emergency fund", "Automate saving 10%", "Reduce one recurring cost"],
-  health:        ["Walk 30 min, 5×/week", "Strength train 2×/week", "Lights out by 10:30pm"],
-  personal:      ["Plan a weekend with family", "Start a creative hobby", "Declutter one room"],
-  relationships: ["Schedule a weekly catch-up", "Plan a date night", "Send a thoughtful message daily"],
-};
 
 type BalanceStats = {
   total: number;
   counts: Record<CatKey, number>;
   percents: Record<CatKey, number>;
-  represented: CatKey[];
-  dominant?: { key: CatKey; share: number } | null;
 };
 
 function computeBalance(goals: Goal[]): BalanceStats {
   const active = goals.filter(g => (g.status || "active") !== "archived");
   const total = active.length;
-  const counts: Record<CatKey, number> = {
-    business: 0, financial: 0, health: 0, personal: 0, relationships: 0
-  };
+  const counts: Record<CatKey, number> = { business: 0, financial: 0, health: 0, personal: 0, relationships: 0 };
   for (const g of active) counts[normalizeCat(g.category)]++;
   const percents = { ...counts } as Record<CatKey, number>;
   (Object.keys(counts) as CatKey[]).forEach(k => { percents[k] = total ? counts[k] / total : 0; });
-  const represented = (Object.keys(counts) as CatKey[]).filter(k => counts[k] > 0);
-  let dominant: BalanceStats["dominant"] = null;
-  if (total > 0) {
-    const entries = (Object.keys(counts) as CatKey[]).map(k => ({ key:k, share: percents[k] }));
-    entries.sort((a,b)=>b.share - a.share);
-    dominant = entries[0];
-  }
-  return { total, counts, percents, represented, dominant };
+  return { total, counts, percents };
 }
 
 /* --------- Auto-loop helpers (halfway → target) --------- */
@@ -209,9 +186,9 @@ export default function GoalsScreen() {
     const goal = g as Goal;
 
     const startISO = goal.start_date || toISO(new Date());
-    const endISO   = goal.target_date || startISO;
+    const endISO = goal.target_date || startISO;
     const start = fromISO(startISO);
-    const end   = fromISO(endISO);
+    const end = fromISO(endISO);
     if (end < start) throw new Error("Target date is before start date.");
 
     const todayISO = isoToday();
@@ -247,12 +224,7 @@ export default function GoalsScreen() {
       while (cursor <= end) {
         const due = toISO(cursor);
         for (const s of monthSteps) {
-          queue.push({
-            user_id: userId, goal_id: goalId,
-            title: `BIG GOAL — Monthly: ${s.description}`,
-            due_date: due, source: "big_goal_monthly", priority: 2,
-            category: cat, category_color: col,
-          });
+          queue.push({ user_id: userId, goal_id: goalId, title: `BIG GOAL — Monthly: ${s.description}`, due_date: due, source: "big_goal_monthly", priority: 2, category: cat, category_color: col });
         }
         cursor = addMonthsClamped(cursor, 1, start.getDate());
       }
@@ -262,17 +234,12 @@ export default function GoalsScreen() {
     const weekSteps = (steps as Step[]).filter(s => s.cadence === "weekly");
     if (weekSteps.length) {
       let cursor = new Date(start);
-      cursor.setDate(cursor.getDate() + 7); // first weekly
+      cursor.setDate(cursor.getDate() + 7);
       while (cursor < fromDate) cursor.setDate(cursor.getDate() + 7);
       while (cursor <= end) {
         const due = toISO(cursor);
         for (const s of weekSteps) {
-          queue.push({
-            user_id: userId, goal_id: goalId,
-            title: `BIG GOAL — Weekly: ${s.description}`,
-            due_date: due, source: "big_goal_weekly", priority: 2,
-            category: cat, category_color: col,
-          });
+          queue.push({ user_id: userId, goal_id: goalId, title: `BIG GOAL — Weekly: ${s.description}`, due_date: due, source: "big_goal_weekly", priority: 2, category: cat, category_color: col });
         }
         cursor.setDate(cursor.getDate() + 7);
       }
@@ -286,12 +253,7 @@ export default function GoalsScreen() {
       while (cursor <= end) {
         const due = toISO(cursor);
         for (const s of daySteps) {
-          queue.push({
-            user_id: userId, goal_id: goalId,
-            title: `BIG GOAL — Daily: ${s.description}`,
-            due_date: due, source: "big_goal_daily", priority: 2,
-            category: cat, category_color: col,
-          });
+          queue.push({ user_id: userId, goal_id: goalId, title: `BIG GOAL — Daily: ${s.description}`, due_date: due, source: "big_goal_daily", priority: 2, category: cat, category_color: col });
         }
         cursor.setDate(cursor.getDate() + 1);
       }
@@ -309,7 +271,7 @@ export default function GoalsScreen() {
   /* ----- open selected goal (load steps + auto-extend if needed) ----- */
   async function openGoal(g: Goal) {
     setSelected(g);
-    setConfirmFuture(false); setConfirmAll(false); // reset confirmations
+    setConfirmFuture(false); setConfirmAll(false);
     const { data, error } = await supabase
       .from("big_goal_steps")
       .select("*")
@@ -326,7 +288,6 @@ export default function GoalsScreen() {
     setDaily(d.length ? d : [""]);
     setEditCat(normalizeCat(g.category));
 
-    // —— Auto-loop after halfway: if we're past halfway and no upcoming tasks, reseed from today
     try {
       const today = isoToday();
       const half = (g.halfway_date || "") as string;
@@ -352,9 +313,9 @@ export default function GoalsScreen() {
       if (de) throw de;
 
       const rows: any[] = [];
-      for (const s of monthly.map(x=>x.trim()).filter(Boolean)) rows.push({ user_id:userId, goal_id:selected.id, cadence:"monthly", description:s, active:true });
-      for (const s of weekly.map(x=>x.trim()).filter(Boolean))  rows.push({ user_id:userId, goal_id:selected.id, cadence:"weekly",  description:s, active:true });
-      for (const s of daily.map(x=>x.trim()).filter(Boolean))   rows.push({ user_id:userId, goal_id:selected.id, cadence:"daily",   description:s, active:true });
+      for (const s of monthly.map(x => x.trim()).filter(Boolean)) rows.push({ user_id: userId, goal_id: selected.id, cadence: "monthly", description: s, active: true });
+      for (const s of weekly.map(x => x.trim()).filter(Boolean)) rows.push({ user_id: userId, goal_id: selected.id, cadence: "weekly", description: s, active: true });
+      for (const s of daily.map(x => x.trim()).filter(Boolean)) rows.push({ user_id: userId, goal_id: selected.id, cadence: "daily", description: s, active: true });
       if (rows.length) {
         const { error: ie } = await supabase.from("big_goal_steps").insert(rows);
         if (ie) throw ie;
@@ -367,7 +328,7 @@ export default function GoalsScreen() {
       } else {
         notify("Steps saved and future tasks updated.");
       }
-    } catch (e:any) {
+    } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
       setBusy(false);
@@ -383,19 +344,11 @@ export default function GoalsScreen() {
     try {
       const { error } = await supabase
         .from("goals")
-        .insert({
-          user_id: userId,
-          title,
-          goal_type: "simple",
-          target_date: sgTarget || null,
-          category: sgCat,
-          category_color: colorOf(sgCat),
-          status: "active",
-        });
+        .insert({ user_id: userId, title, goal_type: "simple", target_date: sgTarget || null, category: sgCat, category_color: colorOf(sgCat), status: "active" });
       if (error) throw error;
       setSgTitle(""); setSgTarget("");
       await loadGoals();
-    } catch (e:any) {
+    } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
       setCreatingSimple(false);
@@ -416,7 +369,7 @@ export default function GoalsScreen() {
       if (error) throw error;
       setSelected({ ...selected, category: cat, category_color: catColor });
       await loadGoals();
-    } catch (e:any) {
+    } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
       setBusy(false);
@@ -426,14 +379,8 @@ export default function GoalsScreen() {
   /* ----- cancel helpers ----- */
   async function deleteTasksForGoal(goalId: number, scope: "all" | "future") {
     if (!userId) return;
-    let query = supabase
-      .from("tasks")
-      .delete()
-      .eq("user_id", userId)
-      .eq("goal_id", goalId);
-    if (scope === "future") {
-      query = query.gte("due_date", isoToday());
-    }
+    let query = supabase.from("tasks").delete().eq("user_id", userId).eq("goal_id", goalId);
+    if (scope === "future") query = query.gte("due_date", isoToday());
     const { error } = await query;
     if (error) throw error;
   }
@@ -442,28 +389,16 @@ export default function GoalsScreen() {
     if (!selected || !userId) return;
     setCancelBusy(true); setErr(null);
     try {
-      // Mark as archived (schema-safe)
-      const { error: ge } = await supabase
-        .from("goals")
-        .update({ status: "archived" })
-        .eq("id", selected.id);
+      const { error: ge } = await supabase.from("goals").update({ status: "archived" }).eq("id", selected.id);
       if (ge) throw ge;
-
-      // Remove tasks tied to this goal
       await deleteTasksForGoal(selected.id, scope);
-
-      // Deactivate steps so reseeding cannot occur
-      await supabase
-        .from("big_goal_steps")
-        .update({ active: false })
-        .eq("goal_id", selected.id);
-
+      await supabase.from("big_goal_steps").update({ active: false }).eq("goal_id", selected.id);
       setShowCancel(false);
       setSelected(null);
       setConfirmFuture(false); setConfirmAll(false);
       await loadGoals();
       notify(`Goal cancelled and ${scope === "all" ? "all" : "future"} tasks removed.`);
-    } catch (e:any) {
+    } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
       setCancelBusy(false);
@@ -489,15 +424,11 @@ export default function GoalsScreen() {
           {/* date + category row */}
           <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "flex-end" }}>
             <label style={{ flex: 1 }}>
-              <div className="muted" style={{ minHeight: 32, display: "flex", alignItems: "flex-end", lineHeight: 1.2 }}>
-                Target date (optional)
-              </div>
+              <div className="muted" style={{ minHeight: 32, display: "flex", alignItems: "flex-end", lineHeight: 1.2 }}>Target date (optional)</div>
               <input type="date" value={sgTarget} onChange={e => setSgTarget(e.target.value)} />
             </label>
             <label style={{ flex: 1 }}>
-              <div className="muted" style={{ minHeight: 32, display: "flex", alignItems: "flex-end", lineHeight: 1.2 }}>
-                Category
-              </div>
+              <div className="muted" style={{ minHeight: 32, display: "flex", alignItems: "flex-end", lineHeight: 1.2 }}>Category</div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <select value={sgCat} onChange={e => setSgCat(e.target.value as CatKey)}>
                   {CATS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
@@ -514,21 +445,12 @@ export default function GoalsScreen() {
         </div>
 
         {/* Big Goal wizard trigger */}
-        <button
-          className="btn-primary"
-          onClick={() => setShowWizard(true)}
-          style={{ borderRadius: 8 }}
-        >
-          + Create Big Goal
-        </button>
+        <button className="btn-primary" onClick={() => setShowWizard(true)} style={{ borderRadius: 8 }}>+ Create Big Goal</button>
 
         {/* Wizard content */}
         {showWizard && (
           <div style={{ marginTop: 8 }}>
-            <BigGoalWizard
-              onClose={() => setShowWizard(false)}
-              onCreated={() => { setShowWizard(false); loadGoals(); }}
-            />
+            <BigGoalWizard onClose={() => setShowWizard(false)} onCreated={() => { setShowWizard(false); loadGoals(); }} />
           </div>
         )}
 
@@ -540,16 +462,10 @@ export default function GoalsScreen() {
             return (
               <li key={g.id} className="item">
                 <button style={{ width: "100%", textAlign: "left", display: "flex", gap: 8, alignItems: "center" }} onClick={() => openGoal(g)}>
-                  <span
-                    title={labelOf(k)}
-                    style={{ width: 10, height: 10, borderRadius: 999, background: g.category_color || colorOf(k), border: "1px solid #d1d5db", flex: "0 0 auto" }}
-                  />
+                  <span title={labelOf(k)} style={{ width: 10, height: 10, borderRadius: 999, background: g.category_color || colorOf(k), border: "1px solid #d1d5db", flex: "0 0 auto" }} />
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 600 }}>{g.title}</div>
-                    <div className="muted">
-                      {labelOf(k)}
-                      {g.target_date ? ` • target ${g.target_date}` : ""}
-                    </div>
+                    <div className="muted">{labelOf(k)}{g.target_date ? ` • target ${g.target_date}` : ""}</div>
                   </div>
                 </button>
               </li>
@@ -569,12 +485,10 @@ export default function GoalsScreen() {
 
           {/* Stacked distribution bar */}
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 999, overflow: "hidden", height: 12, display: "flex", marginTop: 6 }}>
-            {(CATS as {key:CatKey; color:string; label:string}[]).map(c => {
+            {(CATS as { key: CatKey; color: string; label: string }[]).map(c => {
               const pct = (balance.percents[c.key] || 0) * 100;
               if (pct <= 0) return null;
-              return (
-                <div key={c.key} style={{ width: `${pct}%`, background: c.color, height: "100%" }} title={`${c.label}: ${Math.round(pct)}%`} />
-              );
+              return <div key={c.key} style={{ width: `${pct}%`, background: c.color, height: "100%" }} title={`${c.label}: ${Math.round(pct)}%`} />;
             })}
           </div>
 
@@ -594,9 +508,6 @@ export default function GoalsScreen() {
               );
             })}
           </div>
-
-          {/* Insight / prompt */}
-          <BalanceInsight balance={balance} />
         </div>
 
         {/* ---- Goal details + steps ---- */}
@@ -609,10 +520,7 @@ export default function GoalsScreen() {
               <span style={{ width: 14, height: 14, borderRadius: 999, background: selected.category_color || colorOf(normalizeCat(selected.category)), border: "1px solid #d1d5db" }} />
               <div>
                 <h2 style={{ margin: 0 }}>{selected.title}</h2>
-                <div className="muted">
-                  {selected.start_date || "-"} → {selected.target_date || "-"}
-                  {" • "}{labelOf(normalizeCat(selected.category))}
-                </div>
+                <div className="muted">{selected.start_date || "-"} → {selected.target_date || "-"}{" • "}{labelOf(normalizeCat(selected.category))}</div>
               </div>
             </div>
 
@@ -639,13 +547,8 @@ export default function GoalsScreen() {
             {selected?.halfway_date && isoToday() >= selected.halfway_date && isoToday() <= (selected.target_date || "9999-12-31") && (
               <div style={{ border: "1px dashed #c084fc", background: "#faf5ff", color: "#4c1d95", borderRadius: 10, padding: 12 }}>
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>You’ve reached the halfway point 🎯</div>
-                <div className="muted" style={{ marginBottom: 8 }}>
-                  Update your steps if needed. We’ll extend your monthly/weekly/daily tasks from here to the target date.
-                </div>
-                <button
-                  className="btn-primary"
-                  style={{ borderRadius: 8 }}
-                  disabled={busy}
+                <div className="muted" style={{ marginBottom: 8 }}>Update your steps if needed. We’ll extend your monthly/weekly/daily tasks from here to the target date.</div>
+                <button className="btn-primary" style={{ borderRadius: 8 }} disabled={busy}
                   onClick={async () => {
                     try {
                       setBusy(true);
@@ -654,13 +557,12 @@ export default function GoalsScreen() {
                       const from = toISO(t);
                       const n = await clientReseedTasksForGoal(selected!.id, from);
                       notify(`Extended ${n ?? 0} task(s) from halfway to target.`);
-                    } catch (e:any) {
+                    } catch (e: any) {
                       setErr(e.message || String(e));
                     } finally {
                       setBusy(false);
                     }
-                  }}
-                >
+                  }}>
                   Extend from halfway
                 </button>
               </div>
@@ -674,57 +576,47 @@ export default function GoalsScreen() {
                 <legend>Monthly</legend>
                 {monthly.map((v, i) => (
                   <div key={`m${i}`} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                    <input value={v} onChange={e => setMonthly(monthly.map((x,idx)=>idx===i?e.target.value:x))} placeholder="Monthly step…" style={{ flex: 1 }} />
-                    {monthly.length > 1 && <button onClick={() => setMonthly(monthly.filter((_,idx)=>idx!==i))}>–</button>}
+                    <input value={v} onChange={e => setMonthly(monthly.map((x, idx) => idx === i ? e.target.value : x))} placeholder="Monthly step…" style={{ flex: 1 }} />
+                    {monthly.length > 1 && <button onClick={() => setMonthly(monthly.filter((_, idx) => idx !== i))}>–</button>}
                   </div>
                 ))}
-                <button onClick={() => setMonthly([...monthly, ""])}>+ Add monthly step</button>
+                <button onClick={() => setMonthly([...monthly, ""]) }>+ Add monthly step</button>
               </fieldset>
 
               <fieldset style={{ border: "1px solid #eee", borderRadius: 8, padding: 10, marginBottom: 10 }}>
                 <legend>Weekly</legend>
                 {weekly.map((v, i) => (
                   <div key={`w${i}`} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                    <input value={v} onChange={e => setWeekly(weekly.map((x,idx)=>idx===i?e.target.value:x))} placeholder="Weekly step…" style={{ flex: 1 }} />
-                    {weekly.length > 1 && <button onClick={() => setWeekly(weekly.filter((_,idx)=>idx!==i))}>–</button>}
+                    <input value={v} onChange={e => setWeekly(weekly.map((x, idx) => idx === i ? e.target.value : x))} placeholder="Weekly step…" style={{ flex: 1 }} />
+                    {weekly.length > 1 && <button onClick={() => setWeekly(weekly.filter((_, idx) => idx !== i))}>–</button>}
                   </div>
                 ))}
-                <button onClick={() => setWeekly([...weekly, ""])}>+ Add weekly step</button>
+                <button onClick={() => setWeekly([...weekly, ""]) }>+ Add weekly step</button>
               </fieldset>
 
               <fieldset style={{ border: "1px solid #eee", borderRadius: 8, padding: 10 }}>
                 <legend>Daily</legend>
                 {daily.map((v, i) => (
                   <div key={`d${i}`} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                    <input value={v} onChange={e => setDaily(daily.map((x,idx)=>idx===i?e.target.value:x))} placeholder="Daily step…" style={{ flex: 1 }} />
-                    {daily.length > 1 && <button onClick={() => setDaily(daily.filter((_,idx)=>idx!==i))}>–</button>}
+                    <input value={v} onChange={e => setDaily(daily.map((x, idx) => idx === i ? e.target.value : x))} placeholder="Daily step…" style={{ flex: 1 }} />
+                    {daily.length > 1 && <button onClick={() => setDaily(daily.filter((_, idx) => idx !== i))}>–</button>}
                   </div>
                 ))}
-                <button onClick={() => setDaily([...daily, ""])}>+ Add daily step</button>
+                <button onClick={() => setDaily([...daily, ""]) }>+ Add daily step</button>
               </fieldset>
 
               {err && <div style={{ color: "red", marginTop: 8 }}>{err}</div>}
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button onClick={saveSteps} disabled={busy} className="btn-primary" style={{ borderRadius: 8 }}>
-                  {busy ? "Saving…" : "Save steps & reseed"}
-                </button>
+                <button onClick={saveSteps} disabled={busy} className="btn-primary" style={{ borderRadius: 8 }}>{busy ? "Saving…" : "Save steps & reseed"}</button>
               </div>
             </div>
 
             {/* Danger zone — Cancel goal */}
             <div style={{ border: "1px solid #fee2e2", background: "#fff1f2", borderRadius: 10, padding: 12 }}>
               <div className="section-title" style={{ color: "#991b1b" }}>Danger zone</div>
-              <p className="muted" style={{ marginTop: 6 }}>
-                Cancel this goal and remove its tasks. You can remove only future tasks, or everything.
-              </p>
+              <p className="muted" style={{ marginTop: 6 }}>Cancel this goal and remove its tasks. You can remove only future tasks, or everything.</p>
               <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  onClick={() => { setShowCancel(true); setConfirmFuture(false); setConfirmAll(false); }}
-                  style={{ borderRadius: 8, background: "#ef4444", color: "#fff", padding: "6px 10px" }}
-                  aria-haspopup="dialog"
-                >
-                  Cancel goal…
-                </button>
+                <button onClick={() => { setShowCancel(true); setConfirmFuture(false); setConfirmAll(false); }} style={{ borderRadius: 8, background: "#ef4444", color: "#fff", padding: "6px 10px" }} aria-haspopup="dialog">Cancel goal…</button>
               </div>
             </div>
           </div>
@@ -750,37 +642,19 @@ export default function GoalsScreen() {
       {/* Cancel modal with two-step "Are you sure?" */}
       <Modal open={showCancel} onClose={() => !cancelBusy && setShowCancel(false)} title="Cancel this goal?">
         <div style={{ display: "grid", gap: 12 }}>
-          <p>
-            This will mark <strong>{selected?.title}</strong> as <em>archived</em> and remove its tasks. Choose how aggressively to clean up.
-          </p>
+          <p>This will mark <strong>{selected?.title}</strong> as <em>archived</em> and remove its tasks. Choose how aggressively to clean up.</p>
 
           {/* Option A */}
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10 }}>
             <div style={{ fontWeight: 600 }}>Option A — Remove <em>future</em> tasks only</div>
             <div className="muted">Keeps past tasks for your history, removes anything due from today onward.</div>
             {!confirmFuture ? (
-              <button
-                onClick={() => setConfirmFuture(true)}
-                disabled={cancelBusy}
-                className="btn-primary"
-                style={{ borderRadius: 8, marginTop: 8 }}
-              >
-                Cancel goal & remove future tasks
-              </button>
+              <button onClick={() => setConfirmFuture(true)} disabled={cancelBusy} className="btn-primary" style={{ borderRadius: 8, marginTop: 8 }}>Cancel goal & remove future tasks</button>
             ) : (
               <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
                 <span className="muted">Are you sure?</span>
-                <button
-                  onClick={() => cancelGoal("future")}
-                  disabled={cancelBusy}
-                  className="btn-primary"
-                  style={{ borderRadius: 8 }}
-                >
-                  Yes, do it
-                </button>
-                <button onClick={() => setConfirmFuture(false)} disabled={cancelBusy} style={{ borderRadius: 8 }}>
-                  No, go back
-                </button>
+                <button onClick={() => cancelGoal("future")} disabled={cancelBusy} className="btn-primary" style={{ borderRadius: 8 }}>Yes, do it</button>
+                <button onClick={() => setConfirmFuture(false)} disabled={cancelBusy} style={{ borderRadius: 8 }}>No, go back</button>
               </div>
             )}
           </div>
@@ -790,34 +664,18 @@ export default function GoalsScreen() {
             <div style={{ fontWeight: 600 }}>Option B — Remove <em>all</em> tasks</div>
             <div className="muted">Deletes every task linked to this goal (past and future).</div>
             {!confirmAll ? (
-              <button
-                onClick={() => setConfirmAll(true)}
-                disabled={cancelBusy}
-                style={{ borderRadius: 8, background: "#ef4444", color: "#fff", padding: "6px 10px", marginTop: 8 }}
-              >
-                Cancel goal & delete all tasks
-              </button>
+              <button onClick={() => setConfirmAll(true)} disabled={cancelBusy} style={{ borderRadius: 8, background: "#ef4444", color: "#fff", padding: "6px 10px", marginTop: 8 }}>Cancel goal & delete all tasks</button>
             ) : (
               <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
                 <span className="muted">Are you absolutely sure?</span>
-                <button
-                  onClick={() => cancelGoal("all")}
-                  disabled={cancelBusy}
-                  style={{ borderRadius: 8, background: "#ef4444", color: "#fff", padding: "6px 10px" }}
-                >
-                  Yes, delete everything
-                </button>
-                <button onClick={() => setConfirmAll(false)} disabled={cancelBusy} style={{ borderRadius: 8 }}>
-                  No, go back
-                </button>
+                <button onClick={() => cancelGoal("all")} disabled={cancelBusy} style={{ borderRadius: 8, background: "#ef4444", color: "#fff", padding: "6px 10px" }}>Yes, delete everything</button>
+                <button onClick={() => setConfirmAll(false)} disabled={cancelBusy} style={{ borderRadius: 8 }}>No, go back</button>
               </div>
             )}
           </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <button onClick={() => setShowCancel(false)} disabled={cancelBusy} style={{ borderRadius: 8 }}>
-              Close
-            </button>
+            <button onClick={() => setShowCancel(false)} disabled={cancelBusy} style={{ borderRadius: 8 }}>Close</button>
           </div>
         </div>
       </Modal>
@@ -826,7 +684,7 @@ export default function GoalsScreen() {
       <Modal open={!!notice} onClose={() => setNotice(null)} title="Best You Blueprint">
         <div style={{ display: "grid", gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {/* If you have an asset, swap src to your logo path */}
+            {/* Optional: swap to your logo asset */}
             {/* <img src="/byb-logo.svg" alt="BYB" width={28} height={28} /> */}
             <strong>BYB</strong>
           </div>
@@ -836,47 +694,6 @@ export default function GoalsScreen() {
           </div>
         </div>
       </Modal>
-    </div>
-  );
-}
-
-/* ---------- Balance insight component ---------- */
-function BalanceInsight({ balance }: { balance: BalanceStats }) {
-  if (balance.total === 0) {
-    return <div className="muted" style={{ marginTop: 8 }}>No goals yet. Add a couple to see balance.</div>;
-  }
-
-  const represented = balance.represented.length;
-  const dom = balance.dominant;
-  const missing = (CATS.map(c=>c.key) as CatKey[]).filter(k => balance.counts[k] === 0);
-
-  let message = "";
-  if (represented >= 4 && (!dom || dom.share <= 0.5)) {
-    message = "Nice variety — your goals look well balanced.";
-  } else if (represented <= 2) {
-    message = "Heavy focus detected. Consider adding a couple of goals in other areas for balance.";
-  } else if (dom && dom.share >= 0.6) {
-    const label = CATS.find(c=>c.key===dom.key)?.label || dom.key;
-    message = `Most goals are ${label}. Is that intentional? A small goal in another area can help balance.`;
-  } else {
-    message = "Decent spread. If this matches your season of life, you’re good!";
-  }
-
-  return (
-    <div style={{ marginTop: 10 }}>
-      <div className="muted">{message}</div>
-      {missing.length > 0 && (
-        <div style={{ marginTop: 8 }}>
-          <div className="muted" style={{ marginBottom: 6 }}>Ideas to round things out:</div>
-          <ul className="list">
-            {missing.slice(0, 2).map(k => {
-              const label = CATS.find(c=>c.key===k)?.label || k;
-              const prompt = (PROMPTS_BY_CAT[k] && PROMPTS_BY_CAT[k][0]) || "";
-              return <li key={k} className="item"><span style={{ fontWeight: 600 }}>{label}:</span> {prompt}</li>;
-            })}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }
