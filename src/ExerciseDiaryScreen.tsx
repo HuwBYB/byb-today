@@ -86,7 +86,11 @@ function totalsFromSets(sets: WSet[]) {
 }
 
 function calcSessionTotals(items: Item[], setsByItem: Record<number, WSet[]>): DayTotals {
-  let sets = 0, reps = 0, kg = 0, cardio_sec = 0, cardio_km = 0;
+  let sets = 0,
+    reps = 0,
+    kg = 0,
+    cardio_sec = 0,
+    cardio_km = 0;
   for (const it of items) {
     if (it.kind === "weights") {
       const list = setsByItem[it.id] || [];
@@ -455,11 +459,12 @@ export default function ExerciseDiaryScreen() {
     setSessionsToday(list);
 
     const desired = desiredSessionIdRef.current;
-    const active = desired
-      ? list.find((x) => x.id === desired) || (list.length ? list[list.length - 1] : null)
-      : list.length
-      ? list[list.length - 1]
-      : null;
+    const active =
+      desired
+        ? list.find((x) => x.id === desired) || (list.length ? list[list.length - 1] : null)
+        : list.length
+        ? list[list.length - 1]
+        : null;
     desiredSessionIdRef.current = null;
 
     setSession(active);
@@ -498,7 +503,7 @@ export default function ExerciseDiaryScreen() {
         return;
       }
       const grouped: Record<number, WSet[]> = {};
-      for (const s of (sets as WSet[])) (grouped[s.item_id] ||= []).push(s);
+      for (const s of sets as WSet[]) (grouped[s.item_id] ||= []).push(s);
       setSetsByItem(grouped);
     } else setSetsByItem({});
   }
@@ -871,10 +876,12 @@ export default function ExerciseDiaryScreen() {
 
     // Update local state
     setSession((prev) => (prev ? { ...prev, name: cleanName || prev.name, notes: finalNotes } : prev));
-    setRecent((prev) => prev.map((r) => (r.id === session.id ? { ...r, name: cleanName || r.name, notes: finalNotes } : r)));
+    setRecent((prev) =>
+      prev.map((r) => (r.id === session.id ? { ...r, name: cleanName || r.name, notes: finalNotes } : r))
+    );
 
     // ✅ NEW: snapshot + day totals BEFORE finishing
-    await snapshotSessionHistory();    // capture long-term history
+    await snapshotSessionHistory(); // capture long-term history
     await upsertDayTotalsFor(dateISO); // push today's numbers so Big Wins includes them immediately
 
     // Finish UI + streak
@@ -932,7 +939,11 @@ export default function ExerciseDiaryScreen() {
     await loadItems(session.id);
   }
 
-  function normalizeNotesWithNameAndDuration(opts: { existingNotes?: string | null; name?: string; durationHHMMSS: string }) {
+  function normalizeNotesWithNameAndDuration(opts: {
+    existingNotes?: string | null;
+    name?: string;
+    durationHHMMSS: string;
+  }) {
     const { existingNotes, name, durationHHMMSS } = opts;
     const base = existingNotes ?? "";
 
@@ -1034,7 +1045,6 @@ export default function ExerciseDiaryScreen() {
   }
 
   /* ----- History (per exercise title) ----- */
-   /* ----- History (per exercise title) ----- */
   async function loadPrevForItem(it: Item, limit = 5) {
     if (!userId) return;
     setLoadingPrevFor((prev) => ({ ...prev, [it.id]: true }));
@@ -1137,15 +1147,6 @@ export default function ExerciseDiaryScreen() {
       setLoadingPrevFor((prev) => ({ ...prev, [it.id]: false }));
     }
   }
-
-
-  } catch (e: any) {
-    setErr(e.message || String(e));
-  } finally {
-    // ✅ covers legacy path
-    setLoadingPrevFor((prev) => ({ ...prev, [it.id]: false }));
-  }
-}
 
   function toggleHistory(it: Item) {
     setOpenHistoryFor((prev) => {
@@ -1290,7 +1291,11 @@ export default function ExerciseDiaryScreen() {
         const itemId = (newItem as Item).id;
         createdItemIds.push(itemId);
 
-        const count = Math.max(it.sets || 0, opts.weights && it.weights ? it.weights.length : 0, opts.reps && it.reps ? it.reps.length : 0);
+        const count = Math.max(
+          it.sets || 0,
+          opts.weights && it.weights ? it.weights.length : 0,
+          opts.reps && it.reps ? it.reps.length : 0
+        );
 
         if (count > 0) {
           const rows = Array.from({ length: count }, (_, idx) => ({
@@ -1436,7 +1441,10 @@ export default function ExerciseDiaryScreen() {
         .order("set_number", { ascending: true });
       if (sErr) throw sErr;
 
-      const { data: sessRows, error: dErr } = await supabase.from("workout_sessions").select("id, session_date").in("id", sessionIds);
+      const { data: sessRows, error: dErr } = await supabase
+        .from("workout_sessions")
+        .select("id, session_date")
+        .in("id", sessionIds);
       if (dErr) throw dErr;
 
       const idToDate: Record<number, string> = {};
@@ -1547,7 +1555,13 @@ export default function ExerciseDiaryScreen() {
 
             {/* Top controls — New/Cancel/Switch */}
             <div
-              style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "space-between" }}
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                flexWrap: "wrap",
+                justifyContent: "space-between",
+              }}
             >
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 {!session ? (
@@ -1557,7 +1571,11 @@ export default function ExerciseDiaryScreen() {
                 ) : (
                   <>
                     {sessionsToday.length > 1 ? (
-                      <select value={session.id} onChange={(e) => switchSessionById(Number(e.target.value))} title="Switch session">
+                      <select
+                        value={session.id}
+                        onChange={(e) => switchSessionById(Number(e.target.value))}
+                        title="Switch session"
+                      >
                         {sessionsToday.map((s) => (
                           <option key={s.id} value={s.id}>
                             Session #{s.id}
@@ -1573,7 +1591,9 @@ export default function ExerciseDiaryScreen() {
                         className="btn-soft"
                         onClick={cancelCurrentSession}
                         title={
-                          justReopened ? "Delete this reopened session (including its items)" : "Delete this empty session"
+                          justReopened
+                            ? "Delete this reopened session (including its items)"
+                            : "Delete this empty session"
                         }
                       >
                         Cancel session
@@ -1774,7 +1794,10 @@ export default function ExerciseDiaryScreen() {
           </div>
 
           {/* Right: recent + backup */}
-          <aside className="card" style={{ display: "grid", gridTemplateRows: "auto 1fr auto", minWidth: 0, gap: 10 }}>
+          <aside
+            className="card"
+            style={{ display: "grid", gridTemplateRows: "auto 1fr auto", minWidth: 0, gap: 10 }}
+          >
             <h2 style={{ margin: 0 }}>Recent</h2>
             <ul className="list" style={{ overflow: "auto", maxHeight: "60vh" }}>
               {recent.length === 0 && <li className="muted">No recent sessions.</li>}
@@ -1813,7 +1836,12 @@ export default function ExerciseDiaryScreen() {
                       {s.notes && (
                         <div
                           className="muted"
-                          style={{ marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                          style={{
+                            marginTop: 4,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
                         >
                           {s.notes}
                         </div>
@@ -1850,14 +1878,24 @@ export default function ExerciseDiaryScreen() {
           }}
           onClick={closeModal}
         >
-          <div className="card" style={{ width: "min(720px, 92vw)", maxHeight: "80vh", overflow: "auto" }} onClick={(e) => e.stopPropagation()}>
+          <div
+            className="card"
+            style={{ width: "min(720px, 92vw)", maxHeight: "80vh", overflow: "auto" }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
               <h2 style={{ margin: 0 }}>History · {modalTitle}</h2>
               <button onClick={closeModal}>Close</button>
             </div>
-            {modalLoading && <div className="muted" style={{ marginTop: 8 }}>Loading…</div>}
+            {modalLoading && (
+              <div className="muted" style={{ marginTop: 8 }}>
+                Loading…
+              </div>
+            )}
             {!modalLoading && modalEntries.length === 0 && (
-              <div className="muted" style={{ marginTop: 8 }}>No previous entries found for this title.</div>
+              <div className="muted" style={{ marginTop: 8 }}>
+                No previous entries found for this title.
+              </div>
             )}
             {!modalLoading && modalEntries.length > 0 && (
               <ul className="list" style={{ marginTop: 8 }}>
@@ -1868,7 +1906,12 @@ export default function ExerciseDiaryScreen() {
                       {p.sets.map((s, j) => {
                         const w = s.weight_kg != null ? `${s.weight_kg}kg` : "";
                         const r = s.reps != null ? `${s.reps}` : "";
-                        return <span key={j}>{j > 0 ? " · " : ""}{w && r ? `${w}×${r}` : (w || r || "")}</span>;
+                        return (
+                          <span key={j}>
+                            {j > 0 ? " · " : ""}
+                            {w && r ? `${w}×${r}` : w || r || ""}
+                          </span>
+                        );
                       })}
                     </div>
                     {modalForItemId && (
@@ -1896,13 +1939,21 @@ export default function ExerciseDiaryScreen() {
           </label>
           <div style={{ display: "grid", gap: 6 }}>
             <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input type="checkbox" checked={tplIncludeWeights} onChange={(e) => setTplIncludeWeights(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={tplIncludeWeights}
+                onChange={(e) => setTplIncludeWeights(e.target.checked)}
+              />
               <span>
                 Also save <b>weights</b>
               </span>
             </label>
             <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input type="checkbox" checked={tplIncludeReps} onChange={(e) => setTplIncludeReps(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={tplIncludeReps}
+                onChange={(e) => setTplIncludeReps(e.target.checked)}
+              />
               <span>
                 Also save <b>reps</b>
               </span>
@@ -1931,7 +1982,11 @@ export default function ExerciseDiaryScreen() {
 
           <div style={{ display: "grid", gap: 6 }}>
             <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input type="checkbox" checked={useTplWeights} onChange={(e) => setUseTplWeights(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={useTplWeights}
+                onChange={(e) => setUseTplWeights(e.target.checked)}
+              />
               <span>
                 Apply saved <b>weights</b> (kg)
               </span>
@@ -2061,7 +2116,12 @@ function WeightsEditor({
         {sets.map((s) => (
           <div
             key={s.id}
-            style={{ display: "grid", gridTemplateColumns: "68px minmax(0,1fr) minmax(0,1fr) 32px", gap: 6, alignItems: "center" }}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "68px minmax(0,1fr) minmax(0,1fr) 32px",
+              gap: 6,
+              alignItems: "center",
+            }}
           >
             <div className="muted">Set {s.set_number}</div>
             <input
@@ -2070,7 +2130,11 @@ function WeightsEditor({
               step="0.5"
               placeholder="kg"
               value={s.weight_kg ?? ""}
-              onChange={(e) => onChange(s, { weight_kg: e.currentTarget.value === "" ? null : Number(e.currentTarget.value) })}
+              onChange={(e) =>
+                onChange(s, {
+                  weight_kg: e.currentTarget.value === "" ? null : Number(e.currentTarget.value),
+                })
+              }
               onBlur={() => flush(s.id)}
             />
             <input
@@ -2078,7 +2142,11 @@ function WeightsEditor({
               inputMode="numeric"
               placeholder="reps"
               value={s.reps ?? ""}
-              onChange={(e) => onChange(s, { reps: e.currentTarget.value === "" ? null : Number(e.currentTarget.value) })}
+              onChange={(e) =>
+                onChange(s, {
+                  reps: e.currentTarget.value === "" ? null : Number(e.currentTarget.value),
+                })
+              }
               onBlur={() => flush(s.id)}
             />
             <button onClick={() => onDelete(s)} title="Delete set">
