@@ -1034,100 +1034,53 @@ export default function ExerciseDiaryScreen() {
   }
 
   /* ----- History (per exercise title) ----- */
-  async function loadPrevForItem(it: Item, limit = 8) {
-    if (!userId) return;
-    setLoadingPrevFor((prev) => ({ ...prev, [it.id]: true }));
-    try {
-      // Try snapshot table first
-      const { data: snaps, error: snapErr } = await supabase
-        .from("workout_history_snapshots")
-        .select("session_date, set_index, weight_kg, reps, duration_sec")
-        .eq("user_id", userId)
-        .ilike("exercise_title", it.title || "")
-        .order("session_date", { ascending: false })
-        .limit(limit * 30);
+async function loadPrevForItem(it: Item, limit = 5) { // also changed default here, see next section
+  if (!userId) return;
+  setLoadingPrevFor((prev) => ({ ...prev, [it.id]: true }));
+  try {
+    // Try snapshot table first
+    const { data: snaps, error: snapErr } = await supabase
+      .from("workout_history_snapshots")
+      .select("session_date, set_index, weight_kg, reps, duration_sec")
+      .eq("user_id", userId)
+      .ilike("exercise_title", it.title || "")
+      .order("session_date", { ascending: false })
+      .limit(limit * 30);
 
-      if (!snapErr && snaps && snaps.length) {
-        // group by date
-        const map = new Map<string, PrevEntry>();
-        for (const r of snaps as any[]) {
-          const key = r.session_date;
-          if (!map.has(key)) map.set(key, { date: key, sets: [] });
-          map.get(key)!.sets.push({
-            weight_kg: r.weight_kg ?? null,
-            reps: r.reps ?? null,
-            duration_sec: r.duration_sec ?? null,
-          });
-        }
-        const entries = Array.from(map.values())
-          .sort((a, b) => b.date.localeCompare(a.date))
-          .slice(0, limit);
-        setPrevByItem((prev) => ({ ...prev, [it.id]: entries }));
-        return;
-      }
-    } catch {
-      // fall through to legacy path
-    }
-
-    // Fallback to legacy 3-table join
-    try {
-      const { data: itemsRows, error: iErr } = await supabase
-        .from("workout_items")
-        .select("id, session_id")
-        .eq("user_id", userId)
-        .eq("kind", "weights")
-        .ilike("title", it.title)
-        .neq("id", it.id)
-        .order("id", { ascending: false })
-        .limit(limit * 6);
-
-      if (iErr) throw iErr;
-
-      const prevItems = (itemsRows as Array<{ id: number; session_id: number }>) || [];
-      if (prevItems.length === 0) {
-        setPrevByItem((prev) => ({ ...prev, [it.id]: [] }));
-        return;
-      }
-
-      const itemIds = [...new Set(prevItems.map((r) => r.id))];
-      const sessionIds = [...new Set(prevItems.map((r) => r.session_id))];
-
-      const { data: setsRows, error: sErr } = await supabase
-        .from("workout_sets")
-        .select("item_id, set_number, weight_kg, reps, duration_sec")
-        .in("item_id", itemIds)
-        .order("set_number", { ascending: true });
-      if (sErr) throw sErr;
-
-      const { data: sessRows, error: dErr } = await supabase.from("workout_sessions").select("id, session_date").in("id", sessionIds);
-      if (dErr) throw dErr;
-
-      const idToDate: Record<number, string> = {};
-      (sessRows || []).forEach((s: any) => {
-        idToDate[s.id] = s.session_date;
-      });
-      const idToSets: Record<number, PrevEntry["sets"]> = {};
-      ((setsRows as any[]) || []).forEach((s) => {
-        (idToSets[s.item_id] ||= []).push({
-          weight_kg: s.weight_kg ?? null,
-          reps: s.reps ?? null,
-          duration_sec: s.duration_sec ?? null,
+    if (!snapErr && snaps && snaps.length) {
+      const map = new Map<string, PrevEntry>();
+      for (const r of snaps as any[]) {
+        const key = r.session_date;
+        if (!map.has(key)) map.set(key, { date: key, sets: [] });
+        map.get(key)!.sets.push({
+          weight_kg: r.weight_kg ?? null,
+          reps: r.reps ?? null,
+          duration_sec: r.duration_sec ?? null,
         });
-      });
-
-      const entries: PrevEntry[] = prevItems
-        .map((pi) => ({ date: idToDate[pi.session_id] || "", sets: idToSets[pi.id] || [] }))
-        .filter((e) => !!e.date && e.sets.length > 0)
+      }
+      const entries = Array.from(map.values())
         .sort((a, b) => b.date.localeCompare(a.date))
         .slice(0, limit);
 
       setPrevByItem((prev) => ({ ...prev, [it.id]: entries }));
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
+      // ✅ make sure we stop showing the spinner
       setLoadingPrevFor((prev) => ({ ...prev, [it.id]: false }));
+      return;
     }
+  } catch {
+    // fall through to legacy path
   }
+
+  // Fallback to legacy 3-table join
+  try {
+    ...
+  } catch (e: any) {
+    setErr(e.message || String(e));
+  } finally {
+    // ✅ covers legacy path
+    setLoadingPrevFor((prev) => ({ ...prev, [it.id]: false }));
+  }
+}
 
   function toggleHistory(it: Item) {
     setOpenHistoryFor((prev) => {
