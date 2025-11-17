@@ -1034,7 +1034,7 @@ export default function ExerciseDiaryScreen() {
   }
 
   /* ----- History (per exercise title) ----- */
-  /* ----- History (per exercise title) ----- */
+   /* ----- History (per exercise title) ----- */
   async function loadPrevForItem(it: Item, limit = 5) {
     if (!userId) return;
     setLoadingPrevFor((prev) => ({ ...prev, [it.id]: true }));
@@ -1064,7 +1064,6 @@ export default function ExerciseDiaryScreen() {
           .slice(0, limit);
 
         setPrevByItem((prev) => ({ ...prev, [it.id]: entries }));
-        // ✅ stop showing spinner for snapshot path
         setLoadingPrevFor((prev) => ({ ...prev, [it.id]: false }));
         return;
       }
@@ -1135,10 +1134,10 @@ export default function ExerciseDiaryScreen() {
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
-      // ✅ covers legacy path
       setLoadingPrevFor((prev) => ({ ...prev, [it.id]: false }));
     }
   }
+
 
   } catch (e: any) {
     setErr(e.message || String(e));
